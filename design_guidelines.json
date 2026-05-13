@@ -1,0 +1,214 @@
+{
+  "theme": "LIGHT",
+  "archetype": "Corporate-Tech Premium",
+  "typography": {
+    "primary_font": "Satoshi",
+    "fallback_font": "Plus Jakarta Sans",
+    "font_weights": {
+      "light": "300",
+      "regular": "400",
+      "medium": "500",
+      "bold": "700",
+      "black": "900"
+    },
+    "scale": {
+      "h1": "text-4xl md:text-5xl tracking-tight font-bold",
+      "h2": "text-2xl md:text-3xl tracking-tight font-bold",
+      "h3": "text-xl font-bold",
+      "h4": "text-lg font-medium",
+      "body": "text-base leading-relaxed text-[#071B34]/80",
+      "small": "text-sm text-[#071B34]/60",
+      "overline": "text-xs uppercase tracking-[0.2em] font-medium"
+    }
+  },
+  "colors": {
+    "brand": {
+      "primary": "#3BA4FF",
+      "primary_hover": "#2A8DE0",
+      "primary_active": "#1D70B8",
+      "primary_focus_ring": "rgba(59, 164, 255, 0.3)",
+      "midnight": "#071B34",
+      "midnight_hover": "#0B2545",
+      "midnight_active": "#0A1B2E"
+    },
+    "background": {
+      "app": "#F4F7FA",
+      "card_solid": "#FFFFFF",
+      "card_glass": "rgba(255, 255, 255, 0.85)",
+      "sidebar": "#071B34"
+    },
+    "text": {
+      "main": "#071B34",
+      "muted": "#475569",
+      "inverse": "#FFFFFF"
+    },
+    "status": {
+      "en_service": { "color": "#10B981", "bg": "#D1FAE5" },
+      "pause": { "color": "#F59E0B", "bg": "#FEF3C7" },
+      "hors_site": { "color": "#64748B", "bg": "#F1F5F9" },
+      "fin_service": { "color": "#3BA4FF", "bg": "#E0F2FE" },
+      "error": { "color": "#EF4444", "bg": "#FEE2E2" },
+      "warning": { "color": "#F59E0B", "bg": "#FEF3C7" }
+    },
+    "borders": {
+      "light": "rgba(7, 27, 52, 0.06)",
+      "glass": "rgba(255, 255, 255, 0.6)"
+    }
+  },
+  "visual_enhancers": {
+    "glassmorphism": {
+      "blur": "backdrop-blur-xl",
+      "background": "bg-white/85",
+      "border": "border border-white/60",
+      "shadow": "shadow-[0_8px_30px_rgb(7,27,52,0.04)]"
+    },
+    "cards": {
+      "radius": "rounded-2xl",
+      "padding": "p-6",
+      "shadow_hover": "hover:shadow-[0_12px_40px_rgb(7,27,52,0.08)]",
+      "transition": "transition-all duration-300 ease-out"
+    }
+  },
+  "motion": {
+    "durations": {
+      "fast": "150ms",
+      "normal": "300ms",
+      "slow": "500ms"
+    },
+    "easing": {
+      "out": "cubic-bezier(0.16, 1, 0.3, 1)",
+      "in_out": "cubic-bezier(0.65, 0, 0.35, 1)"
+    },
+    "interactions": {
+      "hover_lift": "-translate-y-1",
+      "active_scale": "active:scale-95",
+      "slide_in": "animate-in slide-in-from-right duration-300"
+    }
+  },
+  "layout": {
+    "sidebar": {
+      "width": "w-64",
+      "state": "fixed left-0 top-0 h-screen",
+      "mobile": "collapsible via hamburger menu",
+      "bg": "bg-[#071B34]"
+    },
+    "header": {
+      "height": "h-20",
+      "state": "sticky top-0 z-40",
+      "glass": "backdrop-blur-md bg-[#F4F7FA]/80"
+    },
+    "main_content": {
+      "padding": "p-6 md:p-8 lg:p-10",
+      "margin_left": "ml-0 md:ml-64"
+    },
+    "grid": {
+      "bento": "grid grid-cols-1 md:grid-cols-4 lg:grid-cols-12 gap-6"
+    }
+  },
+  "component_rules": {
+    "icons": "lucide-react",
+    "buttons": "rounded-xl font-medium px-6 py-2.5 transition-all duration-300 active:scale-95",
+    "inputs": "rounded-xl border border-[#071B34]/10 bg-white px-4 py-2.5 focus:ring-2 focus:ring-[#3BA4FF]/30 focus:border-[#3BA4FF] outline-none transition-all",
+    "badges": "rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-wider"
+  },
+  "media": {
+    "image_urls": {
+      "karting_events": [
+        {
+          "url": "https://images.unsplash.com/photo-1630160868522-6ff30d6fe7d6?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2OTV8MHwxfHNlYXJjaHwyfHxrYXJ0aW5nJTIwcmFjZSUyMHRyYWNrfGVufDB8fHx8MTc3ODY2NjUyMnww&ixlib=rb-4.1.0&q=85",
+          "description": "Yellow and black go kart on track",
+          "category": "carrousel_actualites"
+        },
+        {
+          "url": "https://images.unsplash.com/photo-1630160868535-eb6062798533?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2OTV8MHwxfHNlYXJjaHwxfHxrYXJ0aW5nJTIwcmFjZSUyMHRyYWNrfGVufDB8fHx8MTc3ODY2NjUyMnww&ixlib=rb-4.1.0&q=85",
+          "description": "Black and blue go kart on track",
+          "category": "carrousel_actualites"
+        }
+      ],
+      "food_menu": [
+        {
+          "url": "https://images.unsplash.com/photo-1659896974800-6311021d2447?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDk1Nzh8MHwxfHNlYXJjaHwxfHxnb3VybWV0JTIwYnVyZ2VyJTIwZG9udXQlMjBjcmVwZXxlbnwwfHx8fDE3Nzg2NjY1MjJ8MA&ixlib=rb-4.1.0&q=85",
+          "description": "Premium Burger",
+          "category": "restauration_menu"
+        },
+        {
+          "url": "https://images.unsplash.com/photo-1776763019191-cce9518aea68?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDk1Nzh8MHwxfHNlYXJjaHwyfHxnb3VybWV0JTIwYnVyZ2VyJTIwZG9udXQlMjBjcmVwZXxlbnwwfHx8fDE3Nzg2NjY1MjJ8MA&ixlib=rb-4.1.0&q=85",
+          "description": "Premium Pancakes/Crepes",
+          "category": "restauration_menu"
+        }
+      ],
+      "avatars": [
+        {
+          "url": "https://images.unsplash.com/photo-1666867540898-aaa1993ffabc?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDk1ODB8MHwxfHNlYXJjaHwzfHxwcm9mZXNzaW9uYWwlMjBkaXZlcnNlJTIwZW1wbG95ZWUlMjBwb3J0cmFpdHxlbnwwfHx8fDE3Nzg2NjY1MjJ8MA&ixlib=rb-4.1.0&q=85",
+          "description": "Employee avatar 1",
+          "category": "employee_avatar"
+        },
+        {
+          "url": "https://images.pexels.com/photos/7658241/pexels-photo-7658241.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+          "description": "Diverse employee group",
+          "category": "hr_documents"
+        }
+      ]
+    }
+  },
+  "pages": {
+    "Dashboard": {
+      "layout": "bento grid",
+      "elements": [
+        "Welcome message + Photo (col-span-full md:col-span-8)",
+        "Weather Widget + Status Live (col-span-full md:col-span-4)",
+        "Premium News Carousel (col-span-full md:col-span-8 row-span-2)",
+        "KPI Widgets (Hours, Presence) (col-span-4)",
+        "Quick Access Links (col-span-4)"
+      ]
+    },
+    "Points_Repas": {
+      "elements": [
+        "Animated circular progress bars for points (20/30/35 depending on role)",
+        "Purchase history list",
+        "Badge status message: 'Badgeage uniquement sur site' (No button)"
+      ]
+    },
+    "Restauration": {
+      "elements": [
+        "Digital menu food-app style (Donut House, Soccer Bar)",
+        "Product cards: image top, title, price, points. (rounded-2xl, glassmorphism)",
+        "Cart drawer",
+        "Pickup time selector & QR code generator"
+      ]
+    },
+    "Mon_Coin_RH": {
+      "sections": [
+        "Planning: Monthly calendar, clickable days (Hours, 45m break, Manager)",
+        "Badgeage: History list, anomalies highlighted in red",
+        "Demandes: Forms with date picker, approval workflow timeline"
+      ]
+    },
+    "Actualites_Entreprise": {
+      "elements": "LinkedIn/Workplace style feed. Author, timestamp, image, like/comment actions. Max width 3xl centered."
+    },
+    "Documents_RH": {
+      "elements": "Grid of folders/files. Mocked PDF preview modal."
+    },
+    "Notifications": {
+      "elements": "Slide-in panel from right. Real-time feel. Unread indicators."
+    },
+    "Avantages": {
+      "elements": "Partner discount cards with QR codes. Masonry or Grid layout."
+    },
+    "Contacts": {
+      "elements": "Directory grid with avatars, role, phone. Search bar on top."
+    },
+    "Messagerie": {
+      "elements": "Slack-like interface. Left sidebar for channels (Accueil, Karting), main area for chat."
+    }
+  },
+  "instructions_to_main_agent": [
+    "Use pure HTML + Tailwind for layouts. Avoid heavy Shadcn wrapper components for structural layouts to maintain the bento-grid and asymmetrical design.",
+    "For interactive elements (Dropdowns, Modals, Calendars), use Shadcn UI but heavily customize the classes to match the rounded-2xl glassmorphism style.",
+    "Enforce data-testid on ALL interactive elements (buttons, links, forms).",
+    "Use Lucide-react for all icons.",
+    "Implement the specific Sidebar (midnight blue) and content area (light gray bg + glass white cards) aesthetic.",
+    "Use the exact hex codes provided in the colors section for states."
+  ]
+}
