@@ -110,8 +110,9 @@ export default function Documents() {
       </div>
 
       {preview && (
-        <button
-          aria-label="Fermer"
+        <div
+          role="dialog"
+          aria-modal="true"
           onClick={() => setPreview(null)}
           className="fixed inset-0 z-50 bg-black/50 backdrop-blur-md flex items-center justify-center p-4"
         >
@@ -128,7 +129,7 @@ export default function Documents() {
             </div>
             <iframe title="preview" src={preview.url} className="w-full h-[calc(80vh-3.5rem)]" />
           </div>
-        </button>
+        </div>
       )}
     </div>
   );

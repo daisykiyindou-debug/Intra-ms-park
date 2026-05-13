@@ -347,9 +347,10 @@ export default function Restaurant() {
 
       {/* Order confirmation modal */}
       {order && (
-        <button
+        <div
+          role="dialog"
+          aria-modal="true"
           onClick={() => setOrder(null)}
-          aria-label="Fermer"
           className="fixed inset-0 z-50 bg-black/40 backdrop-blur-md flex items-center justify-center p-6"
         >
           <div
@@ -388,7 +389,7 @@ export default function Restaurant() {
               Compris
             </button>
           </div>
-        </button>
+        </div>
       )}
     </div>
   );

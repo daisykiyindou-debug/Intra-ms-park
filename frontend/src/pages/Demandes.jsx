@@ -136,8 +136,9 @@ export default function Demandes() {
 
       {/* Modal */}
       {open && (
-        <button
-          aria-label="Fermer"
+        <div
+          role="dialog"
+          aria-modal="true"
           onClick={() => setOpen(false)}
           className="fixed inset-0 z-50 bg-black/40 backdrop-blur-md flex items-center justify-center p-4"
         >
@@ -234,7 +235,7 @@ export default function Demandes() {
               Envoyer la demande
             </button>
           </form>
-        </button>
+        </div>
       )}
     </div>
   );

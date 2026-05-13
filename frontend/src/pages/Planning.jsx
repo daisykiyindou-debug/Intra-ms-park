@@ -239,9 +239,10 @@ export default function Planning() {
 
       {/* Detail modal */}
       {selected && (
-        <button
+        <div
+          role="dialog"
+          aria-modal="true"
           onClick={() => setSelected(null)}
-          aria-label="Fermer"
           className="fixed inset-0 z-50 bg-black/40 backdrop-blur-md flex items-center justify-center p-6"
         >
           <div
@@ -273,7 +274,7 @@ export default function Planning() {
               <p className="mt-4 text-sm text-[#475569]">{selected.note || "—"}</p>
             )}
           </div>
-        </button>
+        </div>
       )}
     </div>
   );
