@@ -1,53 +1,85 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import "@/App.css";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
-import axios from "axios";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { Toaster } from "@/components/ui/sonner";
+import Layout from "@/components/Layout";
+import { AppContext } from "@/contexts/AppContext";
+import { api } from "@/lib/api";
 
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
-const API = `${BACKEND_URL}/api`;
+import Dashboard from "@/pages/Dashboard";
+import PointsRepas from "@/pages/PointsRepas";
+import Restaurant from "@/pages/Restaurant";
+import Planning from "@/pages/Planning";
+import Badgeage from "@/pages/Badgeage";
+import Demandes from "@/pages/Demandes";
+import Actualites from "@/pages/Actualites";
+import Messagerie from "@/pages/Messagerie";
+import Documents from "@/pages/Documents";
+import Agenda from "@/pages/Agenda";
+import Avantages from "@/pages/Avantages";
+import Contacts from "@/pages/Contacts";
+import Profil from "@/pages/Profil";
 
-const Home = () => {
-  const helloWorldApi = async () => {
-    try {
-      const response = await axios.get(`${API}/`);
-      console.log(response.data.message);
-    } catch (e) {
-      console.error(e, `errored out requesting / api`);
-    }
+function App() {
+  const [me, setMe] = useState(null);
+  const [employees, setEmployees] = useState([]);
+  const [notifications, setNotifications] = useState([]);
+
+  const refreshMe = async () => {
+    const { data } = await api.get("/me");
+    setMe(data);
+  };
+  const refreshEmployees = async () => {
+    const { data } = await api.get("/employees");
+    setEmployees(data);
+  };
+  const refreshNotifications = async () => {
+    const { data } = await api.get("/notifications");
+    setNotifications(data);
   };
 
   useEffect(() => {
-    helloWorldApi();
+    refreshMe();
+    refreshEmployees();
+    refreshNotifications();
   }, []);
 
-  return (
-    <div>
-      <header className="App-header">
-        <a
-          className="App-link"
-          href="https://emergent.sh"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <img src="https://avatars.githubusercontent.com/in/1201222?s=120&u=2686cf91179bbafbc7a71bfbc43004cf9ae1acea&v=4" />
-        </a>
-        <p className="mt-5">Building something incredible ~!</p>
-      </header>
-    </div>
-  );
-};
+  const findEmployee = (id) => employees.find((e) => e.id === id);
 
-function App() {
   return (
-    <div className="App">
-      <BrowserRouter>
-        <Routes>
-          <Route path="/" element={<Home />}>
-            <Route index element={<Home />} />
-          </Route>
-        </Routes>
-      </BrowserRouter>
-    </div>
+    <AppContext.Provider
+      value={{
+        me,
+        employees,
+        notifications,
+        refreshNotifications,
+        findEmployee,
+      }}
+    >
+      <div className="App">
+        <BrowserRouter>
+          <Routes>
+            <Route element={<Layout />}>
+              <Route path="/" element={<Navigate to="/dashboard" replace />} />
+              <Route path="/dashboard" element={<Dashboard />} />
+              <Route path="/points-repas" element={<PointsRepas />} />
+              <Route path="/restaurant" element={<Restaurant />} />
+              <Route path="/rh/planning" element={<Planning />} />
+              <Route path="/rh/badgeage" element={<Badgeage />} />
+              <Route path="/rh/demandes" element={<Demandes />} />
+              <Route path="/actualites" element={<Actualites />} />
+              <Route path="/messagerie" element={<Messagerie />} />
+              <Route path="/documents" element={<Documents />} />
+              <Route path="/agenda" element={<Agenda />} />
+              <Route path="/avantages" element={<Avantages />} />
+              <Route path="/contacts" element={<Contacts />} />
+              <Route path="/profil" element={<Profil />} />
+            </Route>
+          </Routes>
+        </BrowserRouter>
+        <Toaster position="top-right" richColors />
+      </div>
+    </AppContext.Provider>
   );
 }
 

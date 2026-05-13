@@ -1,0 +1,46 @@
+{
+  "summary": "Full backend + frontend testing of MS Park Intranet MVP. 21/21 backend API tests pass. Frontend: dashboard, sidebar nav, points-repas (UX rule respected: no online clock-in, on-site message present), restaurant flow with cart→QR modal, planning, badgeage, demandes, notifications drawer, messagerie, documents, agenda, avantages, contacts, profil all render. Found and fixed CRITICAL crash in Actualités (useEffect returning Promise broke whole React tree). Two minor non-blocking issues: DOM nesting (button-in-button in order modal) and testid naming mismatch for notifications.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "Actualites.jsx", "issue": "FIXED by testing agent — useEffect(refresh, []) returned a Promise from .then(), causing 'destroy is not a function' on cleanup and crashing the whole React tree (white page + all navigation broken after visiting /actualites)", "selector": "/app/frontend/src/pages/Actualites.jsx line 23", "priority": "CRITICAL"},
+      {"component": "Restaurant.jsx — order-modal", "issue": "Invalid DOM nesting: <button> (modal backdrop with onClick) contains a child <button> (action button). Triggers React hydration error 'cannot be a descendant'. Replace outer <button> with a <div role=\"dialog\"> + key handler.", "selector": "Restaurant.jsx line 350 and 387", "priority": "MEDIUM"}
+    ],
+    "integration_issues": [
+      {"flow": "Notifications drawer", "issue": "Header bell uses data-testid='notif-button' (not 'notifications-bell' as listed in review). Drawer opens correctly, 'Tout marquer lu' works. Likely just a naming inconsistency with the spec.", "affected_selectors": ["notifications-bell", "notifications-drawer"]}
+    ],
+    "design_issues": [
+      {"screen": "Points Repas", "issues": ["Spec asks for verbatim text 'badgeage uniquement sur site' — the page uses 'Le badgeage est uniquement disponible sur site via votre badge employé' which conveys the same intent (acceptable). No online clock-in button is present (compliant)."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_mspark_api.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "Fix invalid DOM nesting in Restaurant.jsx order-modal: replace the outer <button> overlay with a <div role='dialog' onClick=close> to avoid nested-button hydration error",
+    "(Optional) Rename data-testid 'notif-button' → 'notifications-bell' and add 'notifications-drawer' on the drawer aside for spec alignment",
+    "(Optional) Update Points Repas to display the exact spec text 'Badgeage uniquement sur site' as a more prominent label"
+  ],
+  "critical_code_review_comments": [
+    "useEffect(refresh, []) anti-pattern: passing a function that returns a Promise to useEffect causes React to treat the return as a cleanup function — always wrap with `() => { refresh(); }`. Found and fixed in Actualites.jsx; Demandes.jsx uses the same form but its refresh has no implicit return (safe). Recommend lint rule.",
+    "server.py is one 1300+ line file — recommend splitting into routers (employees, schedule, meal_points, orders, social, requests, documents, notifications, messaging, calendar).",
+    "Order surcharge computation could divide by zero in edge cases; current code guards with `if total_points else 0` — OK.",
+    "No error boundary around routed pages — a single component crash unmounts the whole app (as observed with Actualités).",
+    "All /api endpoints correctly strip MongoDB _id via projection {'_id': 0} or _strip helper — verified, no ObjectId leakage."
+  ],
+  "updated_files": [
+    "/app/frontend/src/pages/Actualites.jsx",
+    "/app/backend/tests/test_mspark_api.py"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "92%"},
+  "test_credentials": "N/A — no authentication in this MVP (single hardcoded user emp-idriss-malonga)",
+  "seed_data_creation": "None — backend auto-seeds idempotently via _seed_once() at startup. Tests create transient TEST_-prefixed posts/comments/requests/messages; harmless.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend test file is /app/backend/tests/test_mspark_api.py — 21 tests, all passing. Use REACT_APP_BACKEND_URL from /app/frontend/.env. Frontend testids verified: status-pill, kpi-{week,presence,notif,docs}, news-carousel, carousel-{next,prev}, see-planning, qa-points, nav-{dashboard,points,restaurant,planning,badge,demandes,news,messagerie,documents,agenda,avantages,contacts,profil}, notif-button (not notifications-bell), open-cart, cart-drawer, place-order, order-modal, store-{soccer_bar,donut_house,stand_crepes,stand_bonbons}, new-request, post-{id}, like-{id}, channel-ch-accueil. After fix, Actualités now shows 5 seeded posts and like toggle works.",
+  "rca of the issue": "Actualités white-page crash — root cause: `useEffect(refresh, [])` where `refresh = () => api.get('/posts').then(...)`. The arrow function returned a Promise; React stored it as the cleanup. At unmount/dependency change React called `promise()` which threw 'destroy is not a function', triggering an unhandled error that unmounted the whole router. Mitigation applied: wrapped in `useEffect(() => { refresh(); }, [])`. Reproduction: navigate to /actualites; before fix → blank screen + console pageerror 'destroy is not a function'; after fix → 5 posts render, likes/comments work."
+}
