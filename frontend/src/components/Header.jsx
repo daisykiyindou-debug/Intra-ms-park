@@ -93,7 +93,7 @@ export default function Header({ onMenuClick, onNotifClick }) {
               >
                 <div className="p-3 border-b border-[#071B34]/5">
                   <div className="text-sm font-semibold text-[#071B34]">{me.first_name} {me.last_name}</div>
-                  <div className="text-[11px] text-[#475569] truncate">{me.email}</div>
+                  <div className="text-[11px] text-[#475569] truncate">{me.role}</div>
                 </div>
                 <Link
                   to="/profil"
