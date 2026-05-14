@@ -1,33 +1,45 @@
-import { useMemo, useState } from "react";
-import { Search, Mail, Phone, MapPin } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Search, Mail, Phone, MessageSquare, Users, Briefcase, UserCog, Utensils, Shield, Wrench, Info } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { toast } from "sonner";
+import { api } from "@/lib/api";
 import { useApp } from "@/contexts/AppContext";
 
-const categoryLabels = {
-  employe: "Employé",
-  restauration: "Restauration",
-  encadrement: "Encadrement",
+const iconMap = {
+  "users-round": Users,
+  "user-cog": UserCog,
+  briefcase: Briefcase,
+  utensils: Utensils,
+  shield: Shield,
+  wrench: Wrench,
 };
 
 export default function Contacts() {
   const { employees } = useApp();
+  const [poles, setPoles] = useState([]);
   const [q, setQ] = useState("");
-  const [dept, setDept] = useState("Tous");
+  const [tab, setTab] = useState("poles");
+  const navigate = useNavigate();
 
-  const departments = useMemo(() => {
-    const set = new Set(employees.map((e) => e.department));
-    return ["Tous", ...Array.from(set)];
-  }, [employees]);
+  useEffect(() => {
+    api.get("/poles").then((r) => setPoles(r.data));
+  }, []);
 
   const filtered = useMemo(() => {
     return employees.filter((e) => {
-      if (dept !== "Tous" && e.department !== dept) return false;
       if (q) {
         const s = `${e.first_name} ${e.last_name} ${e.role} ${e.department}`.toLowerCase();
         if (!s.includes(q.toLowerCase())) return false;
       }
       return true;
     });
-  }, [employees, q, dept]);
+  }, [employees, q]);
+
+  const startDM = async (employeeId) => {
+    const { data } = await api.post("/channels/dm", { employee_id: employeeId });
+    toast.success("Conversation ouverte");
+    navigate(`/messagerie?ch=${data.id}`);
+  };
 
   return (
     <div className="space-y-6 ms-fade-up">
@@ -37,78 +49,153 @@ export default function Contacts() {
           Contacts entreprise
         </h1>
         <p className="text-sm text-[#475569] mt-2">
-          Retrouvez l'équipe MS Park au complet.
+          Retrouvez les pôles MS Park et l'équipe au complet.
         </p>
       </div>
 
-      <div className="ms-card p-4 flex flex-col md:flex-row gap-3">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[#475569]" />
-          <input
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            data-testid="search-contacts"
-            placeholder="Rechercher par nom, rôle, service…"
-            className="ms-input pl-10"
-          />
-        </div>
-        <div className="flex gap-2 overflow-x-auto">
-          {departments.map((d) => (
-            <button
-              key={d}
-              onClick={() => setDept(d)}
-              data-testid={`dept-${d}`}
-              className={`shrink-0 rounded-full px-4 py-1.5 text-xs font-semibold ${
-                dept === d ? "bg-[#071B34] text-white" : "bg-[#F4F7FA] text-[#475569] hover:bg-[#071B34]/5"
-              }`}
-            >
-              {d}
-            </button>
-          ))}
-        </div>
+      {/* Important notice */}
+      <div className="ms-card p-4 flex items-start gap-3 bg-[#3BA4FF]/5 border border-[#3BA4FF]/15">
+        <Info className="h-5 w-5 text-[#3BA4FF] mt-0.5 shrink-0" />
+        <p className="text-sm text-[#475569]">
+          <strong className="text-[#071B34]">Bon usage</strong> : pour toute demande officielle (congés,
+          contrat, paie, déclaration), privilégiez l'<strong>email</strong>. Le chat interne est réservé
+          aux échanges informels et petites demandes du quotidien.
+        </p>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {filtered.map((e) => (
-          <div key={e.id} className="ms-card ms-card-hover p-5 flex flex-col items-center text-center" data-testid={`contact-${e.id}`}>
+      {/* Tabs */}
+      <div className="inline-flex rounded-xl bg-white border border-[#071B34]/8 p-1">
+        <button
+          onClick={() => setTab("poles")}
+          data-testid="tab-poles"
+          className={`px-4 py-2 text-sm font-semibold rounded-lg ${
+            tab === "poles" ? "bg-[#071B34] text-white" : "text-[#475569]"
+          }`}
+        >
+          Pôles
+        </button>
+        <button
+          onClick={() => setTab("employees")}
+          data-testid="tab-employees"
+          className={`px-4 py-2 text-sm font-semibold rounded-lg ${
+            tab === "employees" ? "bg-[#071B34] text-white" : "text-[#475569]"
+          }`}
+        >
+          Tous les employés
+        </button>
+      </div>
+
+      {tab === "poles" ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {poles.map((p) => {
+            const Icon = iconMap[p.icon] || Users;
+            return (
+              <div key={p.id} className="ms-card ms-card-hover p-5" data-testid={`pole-${p.id}`}>
+                <div className="flex items-start gap-3">
+                  <div
+                    className="flex h-12 w-12 items-center justify-center rounded-xl"
+                    style={{ background: `${p.color}1F`, color: p.color }}
+                  >
+                    <Icon className="h-5 w-5" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <h4 className="text-base font-bold text-[#071B34]">{p.name}</h4>
+                    <p className="text-xs text-[#475569] mt-0.5">{p.description}</p>
+                  </div>
+                </div>
+                <div className="mt-4 space-y-2">
+                  <a
+                    href={`mailto:${p.email}`}
+                    className="flex items-center gap-2 rounded-lg bg-[#F4F7FA] hover:bg-[#071B34]/5 px-3 py-2 text-xs transition-colors"
+                  >
+                    <Mail className="h-3.5 w-3.5 text-[#3BA4FF]" />
+                    <span className="truncate text-[#071B34]">{p.email}</span>
+                  </a>
+                  <a
+                    href={`tel:${p.phone}`}
+                    className="flex items-center gap-2 rounded-lg bg-[#F4F7FA] hover:bg-[#071B34]/5 px-3 py-2 text-xs transition-colors"
+                  >
+                    <Phone className="h-3.5 w-3.5 text-[#3BA4FF]" />
+                    <span className="text-[#071B34]">{p.phone}</span>
+                  </a>
+                </div>
+                <button
+                  onClick={() => navigate(`/messagerie?ch=ch-${p.id}`)}
+                  data-testid={`pole-chat-${p.id}`}
+                  className="mt-3 ms-btn-outline w-full text-xs"
+                >
+                  <MessageSquare className="h-3.5 w-3.5" /> Ouvrir un chat
+                </button>
+                <p className="mt-2 text-[10px] text-[#475569] italic text-center">
+                  Mail recommandé pour le formel
+                </p>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <>
+          <div className="ms-card p-4">
             <div className="relative">
-              <img src={e.avatar} alt={e.first_name} className="h-20 w-20 rounded-full object-cover ring-2 ring-white shadow-md" />
-              <span
-                className={`absolute bottom-1 right-1 h-3.5 w-3.5 rounded-full ring-2 ring-white ${
-                  e.available ? "bg-[#10B981]" : "bg-[#94A3B8]"
-                }`}
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[#475569]" />
+              <input
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                data-testid="search-contacts"
+                placeholder="Rechercher par nom, rôle, service…"
+                className="ms-input pl-10"
               />
             </div>
-            <h4 className="mt-3 text-base font-bold text-[#071B34]">
-              {e.first_name} {e.last_name}
-            </h4>
-            <p className="text-xs text-[#475569]">{e.role}</p>
-            <span className="ms-chip mt-2 bg-[#3BA4FF]/15 text-[#1D70B8]">
-              {categoryLabels[e.role_category] || e.department}
-            </span>
-            <div className="mt-4 w-full space-y-2 text-left">
-              <a
-                href={`mailto:${e.email}`}
-                className="flex items-center gap-2 rounded-lg bg-[#F4F7FA] hover:bg-[#071B34]/5 px-3 py-2 text-xs text-[#475569] transition-colors"
-              >
-                <Mail className="h-3.5 w-3.5 text-[#3BA4FF]" />
-                <span className="truncate">{e.email}</span>
-              </a>
-              <a
-                href={`tel:${e.phone}`}
-                className="flex items-center gap-2 rounded-lg bg-[#F4F7FA] hover:bg-[#071B34]/5 px-3 py-2 text-xs text-[#475569] transition-colors"
-              >
-                <Phone className="h-3.5 w-3.5 text-[#3BA4FF]" />
-                <span>{e.phone}</span>
-              </a>
-              <div className="flex items-center gap-2 rounded-lg bg-[#F4F7FA] px-3 py-2 text-xs text-[#475569]">
-                <MapPin className="h-3.5 w-3.5 text-[#3BA4FF]" />
-                <span className="truncate">{e.department}</span>
-              </div>
-            </div>
           </div>
-        ))}
-      </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {filtered.map((e) => (
+              <div
+                key={e.id}
+                className="ms-card ms-card-hover p-5 flex flex-col items-center text-center"
+                data-testid={`contact-${e.id}`}
+              >
+                <div className="relative">
+                  <img
+                    src={e.avatar}
+                    alt={e.first_name}
+                    className="h-20 w-20 rounded-full object-cover ring-2 ring-white shadow-md"
+                  />
+                  <span
+                    className={`absolute bottom-1 right-1 h-3.5 w-3.5 rounded-full ring-2 ring-white ${
+                      e.available ? "bg-[#10B981]" : "bg-[#94A3B8]"
+                    }`}
+                  />
+                </div>
+                <h4 className="mt-3 text-base font-bold text-[#071B34]">
+                  {e.first_name} {e.last_name}
+                </h4>
+                <p className="text-xs text-[#475569]">{e.role}</p>
+                <span className="ms-chip mt-2 bg-[#3BA4FF]/15 text-[#1D70B8]">
+                  {e.department}
+                </span>
+                <div className="mt-4 w-full space-y-2">
+                  <a
+                    href={`mailto:${e.email}`}
+                    className="flex items-center gap-2 rounded-lg bg-[#F4F7FA] hover:bg-[#071B34]/5 px-3 py-2 text-xs"
+                  >
+                    <Mail className="h-3.5 w-3.5 text-[#3BA4FF]" />
+                    <span className="truncate">{e.email}</span>
+                  </a>
+                  {e.id !== "emp-idriss-malonga" && (
+                    <button
+                      onClick={() => startDM(e.id)}
+                      data-testid={`dm-${e.id}`}
+                      className="w-full ms-btn-outline text-xs"
+                    >
+                      <MessageSquare className="h-3.5 w-3.5" /> Envoyer un message
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
     </div>
   );
 }

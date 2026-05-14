@@ -19,11 +19,12 @@ import { useApp } from "@/contexts/AppContext";
 
 const nav = [
   { to: "/dashboard", label: "Tableau de bord", icon: LayoutDashboard, key: "dashboard" },
+  { to: "/profil", label: "Mon profil", icon: User, key: "profil" },
   { to: "/points-repas", label: "Points repas", icon: UtensilsCrossed, key: "points" },
   { to: "/restaurant", label: "Restauration", icon: ShoppingBag, key: "restaurant" },
   { divider: "Mon Coin RH" },
   { to: "/rh/planning", label: "Planning", icon: CalendarDays, key: "planning" },
-  { to: "/rh/badgeage", label: "Badgeage & Présence", icon: Fingerprint, key: "badge" },
+  { to: "/rh/badgeage", label: "Badge", icon: Fingerprint, key: "badge" },
   { to: "/rh/demandes", label: "Demandes RH", icon: FileText, key: "demandes" },
   { divider: "Entreprise" },
   { to: "/actualites", label: "Actualités", icon: Newspaper, key: "news" },
@@ -32,7 +33,6 @@ const nav = [
   { to: "/agenda", label: "Agenda", icon: Calendar, key: "agenda" },
   { to: "/avantages", label: "Avantages", icon: Gift, key: "avantages" },
   { to: "/contacts", label: "Contacts", icon: Users, key: "contacts" },
-  { to: "/profil", label: "Mon profil", icon: User, key: "profil" },
 ];
 
 export default function Sidebar({ open, onClose }) {

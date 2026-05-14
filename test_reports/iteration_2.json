@@ -1,0 +1,43 @@
+{
+  "summary": "Iteration-2 testing of MS Park intranet. Backend: 13/13 new iter2 tests pass after fixing 1 bug. Frontend: sidebar order, dashboard (real-time clock+carousel+agenda), badge page+lost modal, profil edit+logout, contacts 6 pôles, messagerie nouvelle discussion, restaurant balance banner+cart+Mes commandes, actualités (no composer + filters), agenda — all verified working via UI text content and screenshots.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/orders", "issue": "FIXED by testing agent — Order persistence was missing the new pickup_date field (OrderCreate accepts it but server.py create_order did not include it in the saved order dict). Added line `\"pickup_date\": payload.pickup_date` in server.py before pickup_time. Verified by creating an order and asserting response[\"pickup_date\"] == today."},
+      {"endpoint": "iter1 test_create_order_and_meal_points_update", "issue": "Stale iter1 test no longer sends pickup_date and now gets a 422. Not a product bug — the new schema correctly requires pickup_date. Recommend updating iter1 test or removing it (left as-is since it documents the contract change)."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_mspark_iter2.py",
+    "/app/backend/tests/test_mspark_api.py",
+    "/app/test_reports/pytest/pytest_iter2.xml"
+  ],
+  "action_items": [
+    "(Already applied by tester) Persist pickup_date in create_order. Main agent may want to also surface it in the order modal/Mes commandes UI if not already.",
+    "Optional: update legacy /app/backend/tests/test_mspark_api.py::test_create_order_and_meal_points_update to send pickup_date (now mandatory) — otherwise the regression will keep failing on that single case.",
+    "Note: TestBadgeLostZ in test_mspark_iter2 leaves badge_active=False in the seeded DB. Re-run /seed (drop db) before any iteration that asserts badge ACTIF on UI. The 'ACTIF' string was therefore absent on Badge/Points pages at time of frontend check — this is expected post-test state, not a UI bug.",
+    "Optional code-review: server.py is approaching ~1500 lines (still single file). Split into routers."
+  ],
+  "critical_code_review_comments": [
+    "create_order did not save pickup_date even though OrderCreate required it — silently dropped fields are a recurring source of bugs. Recommend using `order = {**order_base, **payload.model_dump(include={'pickup_point','pickup_date','pickup_time'})}` style or .model_dump() pass-through for the full payload.",
+    "/api/me PUT does not validate that updates don't include forbidden keys (currently safe because Pydantic strips unknown fields, but worth a unit test).",
+    "/api/badge/lost has no idempotency guard — calling it twice creates two pending requests. Low impact for the demo but easy to fix.",
+    "Test ordering: TestBadgeLostZ mutates global DB state read by other tests in the same module (TestMe.test_me_extra_fields would fail if re-run alphabetically). Consider an autouse fixture that resets badge_active=True at session end."
+  ],
+  "updated_files": [
+    "/app/backend/server.py",
+    "/app/backend/tests/test_mspark_iter2.py"
+  ],
+  "success_rate": {"backend": "100% (13/13 iter2 after fix; iter1 32/34 with 2 known stale/order-dependent failures)", "frontend": "100% on the flows visually verified"},
+  "test_credentials": "N/A — no auth (single seeded user emp-idriss-malonga)",
+  "seed_data_creation": "None new. DB was re-seeded by main agent before this iteration; iter2 tests then deactivated the badge (POST /badge/lost) at the end of the run.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iter2 added: PUT /me, /meal-points/history, /poles, /channels/dm, /schedule/day, /badge/lost, pickup_date in orders, pause_start/pause_end in schedule, pause_out/pause_in in badging, 6 news items. Backend test file: /app/backend/tests/test_mspark_iter2.py (13 tests). Run iter2 ISOLATED — running with iter1 causes 1 stale-test 422 and 1 order-dependent badge_active failure. Critical fix applied this iter: pickup_date persistence in create_order. Frontend testids confirmed: nav-profil, nav-points, nav-badge (label 'Badge'), paris-clock, news-carousel, logout-btn, open-cart, place-order, lost-form modal opens via 'J'ai perdu mon badge' button. Badge in DB is now DÉSACTIVÉ post-test — re-seed if needed.",
+  "rca of the issue": "Bug: POST /api/orders did not persist pickup_date. Root cause: server.py:1163-1175 manually composed the order dict and omitted the pickup_date key, even though OrderCreate Pydantic model required it. The field was accepted into payload, used for nothing, then discarded. Repro: POST /api/orders with full payload → response keys lacked pickup_date → frontend 'Mes commandes' could not display the chosen date. Fix: added `\"pickup_date\": payload.pickup_date` to the order dict; verified GET /api/orders now exposes pickup_date and TestOrders.test_create_pickup_cancel passes."
+}

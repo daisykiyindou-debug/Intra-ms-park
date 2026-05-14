@@ -1,7 +1,11 @@
 import { useEffect, useState } from "react";
-import { Plus, FileText, Calendar as CalIcon, Banknote, Stethoscope, ArrowLeftRight, Package, X, Clock, CheckCircle2, XCircle } from "lucide-react";
+import {
+  Plus, FileText, Calendar as CalIcon, Banknote, Stethoscope, ArrowLeftRight, Package,
+  X, Clock, CheckCircle2, XCircle, Info, Paperclip, Sun,
+} from "lucide-react";
 import { toast } from "sonner";
 import { api, formatDateFr } from "@/lib/api";
+import { useApp } from "@/contexts/AppContext";
 
 const TYPES = [
   { k: "conge", l: "Congé", icon: CalIcon, color: "#3BA4FF" },
@@ -26,15 +30,18 @@ const statusMeta = {
 };
 
 export default function Demandes() {
+  const { me } = useApp();
   const [items, setItems] = useState([]);
   const [statusFilter, setStatusFilter] = useState("all");
   const [open, setOpen] = useState(false);
+  const [infoOpen, setInfoOpen] = useState(false);
   const [form, setForm] = useState({
     type: "conge",
     start_date: "",
     end_date: "",
     comment: "",
     amount: "",
+    attachment_name: "",
   });
 
   const refresh = () => {
@@ -46,20 +53,25 @@ export default function Demandes() {
 
   const submit = async (e) => {
     e.preventDefault();
-    try {
-      await api.post("/requests", {
-        ...form,
-        end_date: form.end_date || form.start_date,
-        amount: form.amount ? parseFloat(form.amount) : null,
-      });
-      toast.success("Demande envoyée", { description: "Votre manager sera notifié." });
-      setOpen(false);
-      setForm({ type: "conge", start_date: "", end_date: "", comment: "", amount: "" });
-      refresh();
-    } catch (e) {
-      toast.error("Erreur lors de l'envoi");
-    }
+    const comment = form.attachment_name
+      ? `${form.comment} [PJ: ${form.attachment_name}]`
+      : form.comment;
+    await api.post("/requests", {
+      type: form.type,
+      start_date: form.start_date,
+      end_date: form.end_date || form.start_date,
+      comment,
+      amount: form.amount ? parseFloat(form.amount) : null,
+    });
+    toast.success("Demande envoyée", { description: "Votre manager sera notifié." });
+    setOpen(false);
+    setForm({ type: "conge", start_date: "", end_date: "", comment: "", amount: "", attachment_name: "" });
+    refresh();
   };
+
+  const balance = me?.leave_balance || { cp_n_1: 0, cp_n: 0, rtt: 0 };
+  const totalCP = balance.cp_n_1 + balance.cp_n;
+  const todayIso = new Date().toISOString().slice(0, 10);
 
   return (
     <div className="space-y-6 ms-fade-up">
@@ -74,6 +86,37 @@ export default function Demandes() {
         <button onClick={() => setOpen(true)} data-testid="new-request" className="ms-btn-primary">
           <Plus className="h-4 w-4" /> Nouvelle demande
         </button>
+      </div>
+
+      {/* Leave balance card */}
+      <div className="ms-card p-6">
+        <div className="flex items-start justify-between mb-4">
+          <div className="flex items-center gap-3">
+            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-[#3BA4FF]/12 text-[#3BA4FF]">
+              <Sun className="h-5 w-5" />
+            </div>
+            <div>
+              <h3 className="text-lg font-bold text-[#071B34]">Suivi de mes congés</h3>
+              <p className="text-xs text-[#475569]">Soldes accumulés (simulés)</p>
+            </div>
+          </div>
+          <button
+            onClick={() => setInfoOpen(true)}
+            data-testid="leave-info"
+            className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#F4F7FA] hover:bg-[#3BA4FF]/10 transition-colors"
+          >
+            <Info className="h-4 w-4 text-[#3BA4FF]" />
+          </button>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <BalanceCard label="CP N-1" sub="Acquis l'an dernier" value={balance.cp_n_1} color="#A78BFA" />
+          <BalanceCard label="CP N" sub="Année en cours" value={balance.cp_n} color="#3BA4FF" />
+          <BalanceCard label="RTT" sub="Récup. temps de travail" value={balance.rtt} color="#10B981" />
+        </div>
+        <div className="mt-4 rounded-xl bg-[#F4F7FA] p-3 text-xs text-[#475569]">
+          ✨ Total congés payés disponibles :{" "}
+          <strong className="text-[#071B34]">{totalCP} jours</strong> · à utiliser avant le 31 mai 2027.
+        </div>
       </div>
 
       <div className="ms-card p-4 flex flex-wrap gap-2">
@@ -107,15 +150,18 @@ export default function Demandes() {
               <div className="flex items-start justify-between gap-3">
                 <div
                   className="flex h-11 w-11 items-center justify-center rounded-xl"
-                  style={{ background: `${type?.color}1A`, color: type?.color }}
+                  style={{ background: `${type?.color || "#3BA4FF"}1A`, color: type?.color || "#3BA4FF" }}
                 >
                   <Icon className="h-5 w-5" />
                 </div>
-                <span className="ms-chip inline-flex items-center gap-1" style={{ background: sm.bg, color: sm.color }}>
+                <span
+                  className="ms-chip inline-flex items-center gap-1"
+                  style={{ background: sm.bg, color: sm.color }}
+                >
                   <StatusIcon className="h-3 w-3" /> {sm.l}
                 </span>
               </div>
-              <h4 className="mt-3 text-lg font-bold text-[#071B34]">{type?.l}</h4>
+              <h4 className="mt-3 text-lg font-bold text-[#071B34]">{type?.l || r.type}</h4>
               <p className="text-sm text-[#475569] mt-1">
                 {formatDateFr(r.start_date)}
                 {r.end_date && r.end_date !== r.start_date ? ` → ${formatDateFr(r.end_date)}` : ""}
@@ -134,26 +180,32 @@ export default function Demandes() {
         })}
       </div>
 
-      {/* Modal */}
+      {/* New request modal */}
       {open && (
         <div
           role="dialog"
           aria-modal="true"
           onClick={() => setOpen(false)}
-          className="fixed inset-0 z-50 bg-black/40 backdrop-blur-md flex items-center justify-center p-4"
+          className="fixed inset-0 z-50 bg-black/40 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto"
         >
           <form
             onClick={(e) => e.stopPropagation()}
             onSubmit={submit}
             data-testid="request-form"
-            className="ms-card max-w-lg w-full p-6"
+            className="ms-card max-w-lg w-full p-6 my-8"
           >
             <div className="flex items-start justify-between">
               <div>
                 <div className="ms-overline">Nouvelle demande</div>
-                <h3 className="text-2xl font-bold text-[#071B34] mt-1">Que souhaitez-vous demander ?</h3>
+                <h3 className="text-2xl font-bold text-[#071B34] mt-1">
+                  Que souhaitez-vous demander ?
+                </h3>
               </div>
-              <button type="button" onClick={() => setOpen(false)} className="flex h-9 w-9 items-center justify-center rounded-xl hover:bg-[#071B34]/5">
+              <button
+                type="button"
+                onClick={() => setOpen(false)}
+                className="flex h-9 w-9 items-center justify-center rounded-xl hover:bg-[#071B34]/5"
+              >
                 <X className="h-4 w-4" />
               </button>
             </div>
@@ -186,6 +238,7 @@ export default function Demandes() {
                 <input
                   type="date"
                   required
+                  min={todayIso}
                   data-testid="start-date"
                   value={form.start_date}
                   onChange={(e) => setForm({ ...form, start_date: e.target.value })}
@@ -196,6 +249,7 @@ export default function Demandes() {
                 <label className="ms-overline">Date fin</label>
                 <input
                   type="date"
+                  min={form.start_date || todayIso}
                   data-testid="end-date"
                   value={form.end_date}
                   onChange={(e) => setForm({ ...form, end_date: e.target.value })}
@@ -231,12 +285,97 @@ export default function Demandes() {
               />
             </div>
 
+            {/* File upload for arrêt maladie */}
+            {form.type === "maladie" && (
+              <div className="mt-4">
+                <label className="ms-overline">Pièce jointe (certificat médical)</label>
+                <label className="mt-2 flex items-center gap-3 rounded-xl border-2 border-dashed border-[#3BA4FF]/40 bg-[#3BA4FF]/5 p-4 cursor-pointer hover:bg-[#3BA4FF]/10 transition-colors">
+                  <input
+                    type="file"
+                    accept="image/*,.pdf"
+                    data-testid="attachment"
+                    className="hidden"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) setForm({ ...form, attachment_name: f.name });
+                    }}
+                  />
+                  <Paperclip className="h-5 w-5 text-[#3BA4FF]" />
+                  <div className="flex-1 text-sm">
+                    {form.attachment_name ? (
+                      <span className="font-semibold text-[#071B34]">{form.attachment_name}</span>
+                    ) : (
+                      <span className="text-[#475569]">
+                        Cliquez pour joindre votre certificat (PDF ou image)
+                      </span>
+                    )}
+                  </div>
+                </label>
+                <p className="text-[11px] text-[#475569] mt-1.5">
+                  Obligatoire pour tout arrêt maladie de plus de 3 jours.
+                </p>
+              </div>
+            )}
+
             <button type="submit" data-testid="submit-request" className="ms-btn-primary w-full mt-5">
               Envoyer la demande
             </button>
           </form>
         </div>
       )}
+
+      {/* Info modal */}
+      {infoOpen && (
+        <div
+          role="dialog"
+          onClick={() => setInfoOpen(false)}
+          className="fixed inset-0 z-50 bg-black/40 backdrop-blur-md flex items-center justify-center p-4"
+        >
+          <div onClick={(e) => e.stopPropagation()} className="ms-card max-w-md w-full p-6">
+            <div className="flex items-start justify-between mb-3">
+              <h3 className="text-lg font-bold text-[#071B34]">Comprendre les soldes</h3>
+              <button
+                onClick={() => setInfoOpen(false)}
+                className="flex h-9 w-9 items-center justify-center rounded-xl hover:bg-[#071B34]/5"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <ul className="space-y-3 text-sm text-[#475569]">
+              <li>
+                <strong className="text-[#071B34]">CP N-1</strong> : congés payés acquis l'année précédente
+                (du 1er juin N-2 au 31 mai N-1). À consommer en priorité avant le 31 mai prochain.
+              </li>
+              <li>
+                <strong className="text-[#071B34]">CP N</strong> : congés payés acquis cette année
+                (à raison de 2,08 jours par mois travaillé). Utilisables dès leur acquisition.
+              </li>
+              <li>
+                <strong className="text-[#071B34]">RTT</strong> : jours de récupération du temps de travail
+                pour les semaines au-delà de 35h. À utiliser avant le 31 décembre.
+              </li>
+            </ul>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function BalanceCard({ label, sub, value, color }) {
+  return (
+    <div className="rounded-2xl border border-[#071B34]/5 p-4">
+      <div className="flex items-center justify-between">
+        <span className="ms-overline">{label}</span>
+        <span className="h-2 w-2 rounded-full" style={{ background: color }} />
+      </div>
+      <div className="mt-2 flex items-baseline gap-1">
+        <span className="text-3xl font-extrabold tracking-tight" style={{ color }}>
+          {value}
+        </span>
+        <span className="text-sm text-[#475569]">jours</span>
+      </div>
+      <div className="text-[11px] text-[#475569] mt-0.5">{sub}</div>
     </div>
   );
 }

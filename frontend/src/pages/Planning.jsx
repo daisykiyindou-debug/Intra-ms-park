@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { ChevronLeft, ChevronRight, Clock, MapPin, User, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Clock, MapPin, User, X, CalendarClock } from "lucide-react";
 import { api, fr, formatDateFr } from "@/lib/api";
 
 const typeStyles = {
@@ -12,6 +12,7 @@ const typeStyles = {
 
 export default function Planning() {
   const today = new Date();
+  today.setHours(0, 0, 0, 0);
   const [month, setMonth] = useState({ y: today.getFullYear(), m: today.getMonth() });
   const [view, setView] = useState("month");
   const [data, setData] = useState([]);
@@ -25,7 +26,7 @@ export default function Planning() {
   const grid = useMemo(() => {
     const first = new Date(month.y, month.m, 1);
     const last = new Date(month.y, month.m + 1, 0);
-    const offset = (first.getDay() + 6) % 7; // Monday-start
+    const offset = (first.getDay() + 6) % 7;
     const days = [];
     for (let i = 0; i < offset; i++) {
       const d = new Date(month.y, month.m, -offset + i + 1);
@@ -44,8 +45,7 @@ export default function Planning() {
   const byDay = useMemo(() => Object.fromEntries(data.map((s) => [s.day, s])), [data]);
   const iso = (d) => d.toISOString().slice(0, 10);
 
-  const weekHours = useMemo(() => {
-    // Current displayed month — compute total scheduled hours
+  const monthMins = useMemo(() => {
     let mins = 0;
     data.forEach((s) => {
       if (s.type === "shift" && s.start && s.end) {
@@ -57,14 +57,16 @@ export default function Planning() {
     return mins;
   }, [data]);
 
-  const monthLabel = `${fr.months[month.m].charAt(0).toUpperCase() + fr.months[month.m].slice(1)} ${month.y}`;
+  // Find next upcoming shift
+  const todayIso = iso(today);
+  const nextShift = useMemo(() => {
+    return data.find((s) => s.day >= todayIso && s.type === "shift");
+  }, [data, todayIso]);
 
+  const monthLabel = `${fr.months[month.m].charAt(0).toUpperCase() + fr.months[month.m].slice(1)} ${month.y}`;
   const prev = () => setMonth((p) => (p.m === 0 ? { y: p.y - 1, m: 11 } : { y: p.y, m: p.m - 1 }));
   const next = () => setMonth((p) => (p.m === 11 ? { y: p.y + 1, m: 0 } : { y: p.y, m: p.m + 1 }));
 
-  const todayIso = iso(today);
-
-  // Week view: get week containing today
   const weekDays = useMemo(() => {
     const start = new Date(today);
     start.setDate(today.getDate() - ((today.getDay() + 6) % 7));
@@ -76,6 +78,11 @@ export default function Planning() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const formatPause = (s) => {
+    if (!s.start || !s.pause_start) return `${s.start} – ${s.end}`;
+    return `${s.start}–${s.pause_start} / ${s.pause_end}–${s.end}`;
+  };
+
   return (
     <div className="space-y-6 ms-fade-up">
       <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-3">
@@ -83,30 +90,62 @@ export default function Planning() {
           <div className="ms-overline">Mon Coin RH</div>
           <h1 className="text-3xl md:text-4xl font-bold tracking-tight text-[#071B34] mt-1">Mon planning</h1>
           <p className="text-sm text-[#475569] mt-2">
-            Contrat 24h/semaine · 45 minutes de pause par shift · Mercredi → Dimanche
+            Contrat 24h/semaine · 45 min de pause par shift · Mer → Dim
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <div className="inline-flex rounded-xl bg-white border border-[#071B34]/8 p-1">
-            <button
-              onClick={() => setView("month")}
-              data-testid="view-month"
-              className={`px-3 py-1.5 text-xs font-semibold rounded-lg ${
-                view === "month" ? "bg-[#071B34] text-white" : "text-[#475569]"
-              }`}
-            >
-              Mois
-            </button>
-            <button
-              onClick={() => setView("week")}
-              data-testid="view-week"
-              className={`px-3 py-1.5 text-xs font-semibold rounded-lg ${
-                view === "week" ? "bg-[#071B34] text-white" : "text-[#475569]"
-              }`}
-            >
-              Semaine
-            </button>
+      </div>
+
+      {/* Big next shift banner */}
+      {nextShift && (
+        <div
+          className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-[#3BA4FF] to-[#1D70B8] text-white p-6 md:p-8"
+          data-testid="next-shift-banner"
+        >
+          <div className="absolute -right-10 -top-10 h-48 w-48 rounded-full bg-white/10 blur-3xl" />
+          <div className="relative flex items-center gap-5">
+            <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-white/15 backdrop-blur-md">
+              <CalendarClock className="h-7 w-7" />
+            </div>
+            <div className="flex-1">
+              <div className="text-xs uppercase tracking-[0.2em] text-white/70 font-semibold">
+                Votre prochaine journée de travail
+              </div>
+              <h2 className="mt-1 text-2xl md:text-3xl font-bold capitalize">
+                {new Date(nextShift.day).toLocaleDateString("fr-FR", {
+                  weekday: "long",
+                  day: "numeric",
+                  month: "long",
+                })}{" "}
+                · de {nextShift.start} à {nextShift.end}
+              </h2>
+              <p className="mt-1 text-sm text-white/80">
+                Pause {nextShift.pause_start}–{nextShift.pause_end} · {nextShift.location}
+              </p>
+            </div>
           </div>
+        </div>
+      )}
+
+      <div className="flex items-center gap-2 justify-end">
+        <div className="inline-flex rounded-xl bg-white border border-[#071B34]/8 p-1">
+          <button
+            onClick={() => setView("month")}
+            data-testid="view-month"
+            className={`px-3 py-1.5 text-xs font-semibold rounded-lg ${
+              view === "month" ? "bg-[#071B34] text-white" : "text-[#475569]"
+            }`}
+          >
+            Mois
+          </button>
+          <button
+            onClick={() => setView("week")}
+            data-testid="view-week"
+            className={`px-3 py-1.5 text-xs font-semibold rounded-lg ${
+              view === "week" ? "bg-[#071B34] text-white" : "text-[#475569]"
+            }`}
+          >
+            Semaine
+          </button>
         </div>
       </div>
 
@@ -115,12 +154,15 @@ export default function Planning() {
           <h3 className="text-lg font-bold text-[#071B34]">{monthLabel}</h3>
           <div className="flex items-center gap-2">
             <span className="text-xs text-[#475569]">
-              <strong className="text-[#071B34]">{Math.floor(weekHours / 60)}h{String(weekHours % 60).padStart(2, "0")}</strong> ce mois
+              <strong className="text-[#071B34]">
+                {Math.floor(monthMins / 60)}h{String(monthMins % 60).padStart(2, "0")}
+              </strong>{" "}
+              ce mois
             </span>
-            <button onClick={prev} data-testid="prev-month" className="flex h-9 w-9 items-center justify-center rounded-xl hover:bg-[#071B34]/5">
+            <button onClick={prev} className="flex h-9 w-9 items-center justify-center rounded-xl hover:bg-[#071B34]/5">
               <ChevronLeft className="h-4 w-4" />
             </button>
-            <button onClick={next} data-testid="next-month" className="flex h-9 w-9 items-center justify-center rounded-xl hover:bg-[#071B34]/5">
+            <button onClick={next} className="flex h-9 w-9 items-center justify-center rounded-xl hover:bg-[#071B34]/5">
               <ChevronRight className="h-4 w-4" />
             </button>
           </div>
@@ -139,29 +181,31 @@ export default function Planning() {
               {grid.map(({ date, outside }, i) => {
                 const k = iso(date);
                 const entry = byDay[k];
-                const t = entry?.type || "off";
-                const meta = typeStyles[t];
+                const t = entry?.type || null;
+                const meta = t ? typeStyles[t] : null;
                 const isToday = k === todayIso;
+                const isPast = date < today;
                 return (
                   <button
                     key={i}
                     data-testid={`day-${k}`}
                     onClick={() => entry && setSelected(entry)}
                     disabled={!entry}
-                    className={`group relative min-h-[90px] rounded-xl border border-[#071B34]/5 p-2 text-left transition-all ${
-                      outside ? "opacity-30" : "hover:border-[#3BA4FF]/40 hover:shadow-md"
-                    } ${isToday ? "ring-2 ring-[#3BA4FF]" : ""}`}
-                    style={{ background: outside ? "#FAFBFC" : "#FFFFFF" }}
+                    className={`group relative min-h-[100px] rounded-xl border border-[#071B34]/5 p-2 text-left transition-all ${
+                      outside ? "opacity-30" : ""
+                    } ${isToday ? "ring-2 ring-[#3BA4FF]" : ""} ${
+                      isPast && !outside ? "opacity-60 bg-[#F4F7FA]" : "bg-white hover:border-[#3BA4FF]/40 hover:shadow-md"
+                    }`}
                   >
                     <div className="flex items-center justify-between mb-1">
                       <span
                         className={`text-sm font-semibold ${
-                          isToday ? "text-[#3BA4FF]" : "text-[#071B34]"
+                          isToday ? "text-[#3BA4FF]" : isPast ? "text-[#94A3B8]" : "text-[#071B34]"
                         }`}
                       >
                         {date.getDate()}
                       </span>
-                      {entry && (
+                      {entry && meta && (
                         <span
                           className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded"
                           style={{ background: meta.bg, color: meta.color }}
@@ -170,16 +214,20 @@ export default function Planning() {
                         </span>
                       )}
                     </div>
-                    {entry && entry.start && (
-                      <div className="text-[11px] font-semibold text-[#071B34]">
-                        {entry.start} – {entry.end}
+                    {entry && entry.start ? (
+                      <>
+                        <div className="text-[10px] font-semibold text-[#071B34] leading-tight">
+                          {formatPause(entry)}
+                        </div>
+                        <div className="text-[10px] text-[#475569] truncate mt-0.5">
+                          {entry.service || entry.note || ""}
+                        </div>
+                      </>
+                    ) : !entry && !outside ? (
+                      <div className="text-[10px] text-[#94A3B8] italic mt-1">
+                        Planning en attente
                       </div>
-                    )}
-                    {entry && entry.type === "shift" && (
-                      <div className="text-[10px] text-[#475569] truncate mt-0.5">
-                        {entry.service}
-                      </div>
-                    )}
+                    ) : null}
                   </button>
                 );
               })}
@@ -190,15 +238,17 @@ export default function Planning() {
             {weekDays.map((d) => {
               const k = iso(d);
               const entry = byDay[k];
-              const t = entry?.type || "off";
-              const meta = typeStyles[t];
+              const t = entry?.type || null;
+              const meta = t ? typeStyles[t] : null;
               const isToday = k === todayIso;
+              const isPast = d < today;
               return (
                 <button
                   key={k}
                   onClick={() => entry && setSelected(entry)}
-                  data-testid={`week-day-${k}`}
-                  className={`ms-card p-4 text-left h-32 ${isToday ? "ring-2 ring-[#3BA4FF]" : ""}`}
+                  className={`ms-card p-4 text-left h-40 ${isToday ? "ring-2 ring-[#3BA4FF]" : ""} ${
+                    isPast ? "opacity-60" : ""
+                  }`}
                 >
                   <div className="text-[10px] uppercase tracking-wider text-[#475569] font-semibold">
                     {fr.daysShort[(d.getDay() + 6) % 7]} {d.getDate()}
@@ -206,38 +256,45 @@ export default function Planning() {
                   <div className="mt-2">
                     {entry?.start ? (
                       <>
-                        <div className="text-base font-bold text-[#071B34]">
-                          {entry.start} – {entry.end}
+                        <div className="text-sm font-bold text-[#071B34] leading-tight">
+                          {formatPause(entry)}
                         </div>
                         <div className="text-xs text-[#475569] mt-1">{entry.service}</div>
                       </>
-                    ) : (
+                    ) : entry ? (
                       <div className="text-sm text-[#475569]">{meta.label}</div>
+                    ) : (
+                      <div className="text-xs text-[#94A3B8] italic">Planning en attente de délivrance</div>
                     )}
                   </div>
-                  <span
-                    className="ms-chip mt-2 inline-flex"
-                    style={{ background: meta.bg, color: meta.color }}
-                  >
-                    {meta.label}
-                  </span>
+                  {meta && (
+                    <span
+                      className="ms-chip mt-3 inline-flex"
+                      style={{ background: meta.bg, color: meta.color }}
+                    >
+                      {meta.label}
+                    </span>
+                  )}
                 </button>
               );
             })}
           </div>
         )}
 
-        <div className="mt-5 flex flex-wrap gap-3">
+        <div className="mt-5 flex flex-wrap gap-3 text-xs text-[#475569]">
           {Object.entries(typeStyles).map(([k, v]) => (
-            <div key={k} className="flex items-center gap-2 text-xs text-[#475569]">
+            <div key={k} className="flex items-center gap-2">
               <span className="h-2 w-2 rounded-full" style={{ background: v.color }} />
               {v.label}
             </div>
           ))}
+          <div className="flex items-center gap-2">
+            <span className="h-2 w-2 rounded-full bg-[#94A3B8]" />
+            Jour passé
+          </div>
         </div>
       </div>
 
-      {/* Detail modal */}
       {selected && (
         <div
           role="dialog"
@@ -247,24 +304,28 @@ export default function Planning() {
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            data-testid="day-detail"
             className="ms-card max-w-md w-full p-6"
           >
             <div className="flex items-start justify-between">
               <div>
                 <div className="ms-overline">{typeStyles[selected.type]?.label}</div>
-                <h3 className="text-2xl font-bold text-[#071B34] mt-1">
-                  {formatDateFr(selected.day)}
-                </h3>
+                <h3 className="text-2xl font-bold text-[#071B34] mt-1">{formatDateFr(selected.day)}</h3>
               </div>
-              <button onClick={() => setSelected(null)} className="flex h-9 w-9 items-center justify-center rounded-xl hover:bg-[#071B34]/5">
+              <button
+                onClick={() => setSelected(null)}
+                className="flex h-9 w-9 items-center justify-center rounded-xl hover:bg-[#071B34]/5"
+              >
                 <X className="h-4 w-4" />
               </button>
             </div>
             {selected.type === "shift" ? (
               <div className="mt-4 space-y-3">
-                <Detail icon={Clock} label="Horaire">
-                  <strong>{selected.start} – {selected.end}</strong> · Pause {selected.break_minutes}min
+                <Detail icon={Clock} label="Horaires">
+                  <strong>
+                    {selected.start}–{selected.pause_start} / {selected.pause_end}–{selected.end}
+                  </strong>
+                  <br />
+                  Pause {selected.break_minutes}min de {selected.pause_start} à {selected.pause_end}
                 </Detail>
                 <Detail icon={MapPin} label="Lieu de poste">{selected.location}</Detail>
                 <Detail icon={User} label="Manager référent">{selected.manager}</Detail>

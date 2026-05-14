@@ -127,6 +127,7 @@ class CartItem(BaseModel):
 class OrderCreate(BaseModel):
     items: List[CartItem]
     pickup_point: str
+    pickup_date: str  # YYYY-MM-DD
     pickup_time: str  # HH:MM
 
 
@@ -138,10 +139,12 @@ class Order(BaseModel):
     points_used: int
     surcharge_eur: float
     pickup_point: str
+    pickup_date: str
     pickup_time: str
     qr_code: str
-    status: str = "preparing"  # preparing | ready | delivered | cancelled
+    status: str = "preparing"  # preparing | ready | picked_up | cancelled
     created_at: str
+    picked_up_at: Optional[str] = None
 
 
 class PostCreate(BaseModel):
@@ -222,12 +225,19 @@ async def _seed_once() -> None:
             "department": "Opérations Parc",
             "avatar": "https://images.unsplash.com/photo-1542909168-82c3e7fdca5c?w=400&h=400&fit=crop&crop=faces",
             "email": "idriss.malonga@mspark.fr",
+            "personal_email": "idriss.malonga@gmail.com",
             "phone": "+33 6 12 34 56 78",
+            "address": "14 rue des Tilleuls, 92350 Le Plessis-Robinson",
             "available": True,
             "seniority_months": 18,
             "skills": ["Accueil clients", "Karting", "Attractions", "Sécurité"],
             "manager": "Sophie BERNARD",
             "location": "MS Park — Site principal",
+            "badge_number": "MSP-2451",
+            "badge_expiry": "2027-08-15",
+            "badge_active": True,
+            "leave_balance": {"cp_n_1": 4, "cp_n": 12.5, "rtt": 3},
+            "can_post": False,
         },
         {
             "id": "emp-sophie",
@@ -389,12 +399,24 @@ async def _seed_once() -> None:
         d = cur.isoformat()
         if wd in pattern:
             s, e = pattern[wd]
+            # Compute pause window: middle of the shift, 45min long
+            sh, sm = map(int, s.split(":"))
+            eh, em = map(int, e.split(":"))
+            start_m = sh * 60 + sm
+            end_m = eh * 60 + em
+            mid = (start_m + end_m) // 2
+            pause_start_m = mid - 22  # ~22min before mid
+            pause_end_m = pause_start_m + 45
+            ps = f"{pause_start_m // 60:02d}:{pause_start_m % 60:02d}"
+            pe = f"{pause_end_m // 60:02d}:{pause_end_m % 60:02d}"
             schedule.append({
                 "id": _id(),
                 "employee_id": CURRENT_EMPLOYEE_ID,
                 "day": d,
                 "start": s,
                 "end": e,
+                "pause_start": ps,
+                "pause_end": pe,
                 "break_minutes": 45,
                 "type": "shift",
                 "location": "MS Park — Zone Karting & Attractions",
@@ -409,6 +431,8 @@ async def _seed_once() -> None:
                 "day": d,
                 "start": None,
                 "end": None,
+                "pause_start": None,
+                "pause_end": None,
                 "break_minutes": 0,
                 "type": "off",
                 "location": None,
@@ -432,7 +456,7 @@ async def _seed_once() -> None:
                       "break_minutes": 0, "note": "Congé validé"})
     await db.schedules.insert_many(schedule)
 
-    # ─── Badging history for past shifts
+    # ─── Badging history for past shifts (with pause records)
     badging: list[dict] = []
     for s in schedule:
         sd = date.fromisoformat(s["day"])
@@ -458,6 +482,8 @@ async def _seed_once() -> None:
             "day": s["day"],
             "clock_in": clock_in,
             "clock_out": clock_out,
+            "pause_out": s.get("pause_start") if clock_in else None,
+            "pause_in": s.get("pause_end") if clock_in else None,
             "break_minutes": s["break_minutes"],
             "worked_minutes": worked,
             "anomaly": anomaly,
@@ -476,6 +502,8 @@ async def _seed_once() -> None:
             "day": today.isoformat(),
             "clock_in": clock_in,
             "clock_out": None,
+            "pause_out": None,
+            "pause_in": None,
             "break_minutes": 0,
             "worked_minutes": worked,
             "anomaly": None,
@@ -846,22 +874,30 @@ async def _seed_once() -> None:
 
     # ─── News (carrousel)
     news: list[dict] = [
-        {"id": _id(), "title": "Nouvelle saison estivale 2026 lancée",
-         "summary": "Découvrez la programmation événementielle de cet été : tournois karting, roller battles, soirées thématiques.",
-         "image": "https://images.unsplash.com/photo-1530103862676-de8c9debad1d?w=1600&h=900&fit=crop",
-         "date": today.isoformat(), "category": "Communication"},
-        {"id": _id(), "title": "Roller Party White Night samedi",
-         "summary": "Notre soirée mensuelle revient avec un thème 100% blanc. Tenue exigée, ambiance garantie.",
-         "image": "https://images.unsplash.com/photo-1571266028243-d220bc77b97a?w=1600&h=900&fit=crop",
+        {"id": _id(), "title": "Fermeture exceptionnelle du parc le 24 février",
+         "summary": "Le parc sera fermé toute la journée du 24 février pour maintenance technique générale et formation équipes. Réouverture le 25 février à 10h00.",
+         "image": "https://images.unsplash.com/photo-1485827404703-89b55fcc595e?w=1600&h=900&fit=crop",
+         "date": (today + timedelta(days=11)).isoformat(), "category": "Alerte"},
+        {"id": _id(), "title": "Journée des alternants — 4 novembre 2026",
+         "summary": "Inscrivez-vous dès maintenant à la grande journée des alternants ! Ateliers, networking, témoignages et goûter offert au Soccer Bar. Inscription auprès de Pierre MOREAU avant le 20 octobre.",
+         "image": "https://images.unsplash.com/photo-1556761175-b413da4baf72?w=1600&h=900&fit=crop",
+         "date": "2026-11-04", "category": "Événement"},
+        {"id": _id(), "title": "Roller Party White Night — samedi prochain",
+         "summary": "Notre soirée mensuelle revient avec un thème 100% blanc. Tenue exigée, ambiance garantie. Cocktails offerts pour les salariés MS Park.",
+         "image": "https://images.unsplash.com/photo-1492684223066-81342ee5ff30?w=1600&h=900&fit=crop",
          "date": (today + timedelta(days=5)).isoformat(), "category": "Événement"},
-        {"id": _id(), "title": "Bao Dog rejoint la carte du Soccer Bar",
-         "summary": "Une nouvelle référence signature à découvrir dès lundi prochain. À tester absolument.",
-         "image": "https://images.unsplash.com/photo-1626202373052-9b8aa5edfaef?w=1600&h=900&fit=crop",
+        {"id": _id(), "title": "Nouveau Bao Dog au Soccer Bar dès lundi",
+         "summary": "Une nouvelle référence signature à découvrir : pain bao vapeur, saucisse premium et sauce sriracha. Disponible à partir de 12 pts.",
+         "image": "https://images.unsplash.com/photo-1561758033-d89a9ad46330?w=1600&h=900&fit=crop",
          "date": today.isoformat(), "category": "Restauration"},
-        {"id": _id(), "title": "Plan grand froid activé sur le parc",
-         "summary": "Procédures hivernales en vigueur. Consultez les consignes sécurité dans Documents RH.",
-         "image": "https://images.unsplash.com/photo-1418985991508-e47386d96a71?w=1600&h=900&fit=crop",
-         "date": (today - timedelta(days=2)).isoformat(), "category": "Alerte"},
+        {"id": _id(), "title": "Tournoi Karting Inter-équipes — 15 mars",
+         "summary": "Inscrivez votre équipe au grand tournoi annuel karting MS Park. 4 personnes par équipe, lots à gagner. Inscriptions ouvertes sur l'agenda.",
+         "image": "https://images.unsplash.com/photo-1568605114967-8130f3a36994?w=1600&h=900&fit=crop",
+         "date": (today + timedelta(days=30)).isoformat(), "category": "Événement"},
+        {"id": _id(), "title": "Mise à jour règlement intérieur 2026",
+         "summary": "Le nouveau règlement intérieur est disponible dans Documents RH. Merci d'en prendre connaissance avant le 1er mars.",
+         "image": "https://images.unsplash.com/photo-1450101499163-c8848c66ca85?w=1600&h=900&fit=crop",
+         "date": (today - timedelta(days=2)).isoformat(), "category": "Communication"},
     ]
     await db.news.insert_many(news)
 
@@ -1014,6 +1050,15 @@ async def get_schedule(month: Optional[str] = None):
     return items
 
 
+@api.get("/schedule/day")
+async def get_schedule_day(day: str):
+    """Return schedule entry for a specific day (YYYY-MM-DD)."""
+    item = await db.schedules.find_one(
+        {"employee_id": CURRENT_EMPLOYEE_ID, "day": day}, {"_id": 0}
+    )
+    return {"day": day, "entry": item, "is_working_day": bool(item and item.get("type") == "shift")}
+
+
 # ─── Badging
 @api.get("/badging")
 async def get_badging(filter_range: str = "month"):
@@ -1038,16 +1083,15 @@ async def meal_points_today():
     emp = await db.employees.find_one({"id": CURRENT_EMPLOYEE_ID}, {"_id": 0})
     quota = ROLE_QUOTAS.get(emp.get("role_category", "employe"), 20)
 
-    # Check badge status: credited only if scheduled AND clocked in
+    # Points are credited automatically every day (no badge required for MVP demo)
     today_sched = await db.schedules.find_one(
         {"employee_id": CURRENT_EMPLOYEE_ID, "day": today}, {"_id": 0}
     )
     today_badge = await db.badging.find_one(
         {"employee_id": CURRENT_EMPLOYEE_ID, "day": today}, {"_id": 0}
     )
-    credited = bool(today_sched and today_sched.get("type") == "shift"
-                    and today_badge and today_badge.get("clock_in"))
-    credited_points = quota if credited else 0
+    credited = True
+    credited_points = quota
 
     transactions = await db.meal_tx.find(
         {"employee_id": CURRENT_EMPLOYEE_ID, "ts": {"$gte": today + "T00:00:00"}},
@@ -1124,6 +1168,7 @@ async def create_order(payload: OrderCreate):
         "points_used": points_used,
         "surcharge_eur": surcharge_eur,
         "pickup_point": payload.pickup_point,
+        "pickup_date": payload.pickup_date,
         "pickup_time": payload.pickup_time,
         "qr_code": f"MSPARK-ORDER-{order_id[:8].upper()}",
         "status": "preparing",
@@ -1151,6 +1196,32 @@ async def list_orders():
         {"employee_id": CURRENT_EMPLOYEE_ID}, {"_id": 0}
     ).sort("created_at", -1).to_list(50)
     return items
+
+
+@api.post("/orders/{oid}/pickup")
+async def mark_pickup(oid: str):
+    order = await db.orders.find_one({"id": oid})
+    if not order:
+        raise HTTPException(404, "Order not found")
+    await db.orders.update_one(
+        {"id": oid},
+        {"$set": {"status": "picked_up", "picked_up_at": _now()}},
+    )
+    return {"ok": True}
+
+
+@api.post("/orders/{oid}/cancel")
+async def cancel_order(oid: str):
+    order = await db.orders.find_one({"id": oid})
+    if not order:
+        raise HTTPException(404, "Order not found")
+    # Refund points
+    if order.get("points_used", 0) > 0 and order.get("status") != "picked_up":
+        today = date.today().isoformat()
+        # Find related meal_tx and remove it
+        await db.meal_tx.delete_many({"order_id": oid})
+    await db.orders.update_one({"id": oid}, {"$set": {"status": "cancelled"}})
+    return {"ok": True}
 
 
 # ─── Posts
@@ -1308,6 +1379,121 @@ async def list_events():
 @api.get("/news")
 async def list_news():
     return await db.news.find({}, {"_id": 0}).sort("date", -1).to_list(20)
+
+
+# ─── Profile update
+class ProfileUpdate(BaseModel):
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    personal_email: Optional[str] = None
+    address: Optional[str] = None
+
+
+@api.put("/me")
+async def update_me(payload: ProfileUpdate):
+    updates = {k: v for k, v in payload.model_dump().items() if v is not None}
+    if updates:
+        await db.employees.update_one({"id": CURRENT_EMPLOYEE_ID}, {"$set": updates})
+    emp = await db.employees.find_one({"id": CURRENT_EMPLOYEE_ID}, {"_id": 0})
+    emp["daily_quota"] = ROLE_QUOTAS.get(emp.get("role_category", "employe"), 20)
+    return emp
+
+
+# ─── Badge lost / deactivate
+class BadgeLost(BaseModel):
+    reason: str
+    last_seen_location: Optional[str] = None
+    contact_phone: Optional[str] = None
+
+
+@api.post("/badge/lost")
+async def report_lost(payload: BadgeLost):
+    await db.employees.update_one(
+        {"id": CURRENT_EMPLOYEE_ID}, {"$set": {"badge_active": False}}
+    )
+    rid = _id()
+    await db.requests.insert_one({
+        "id": rid,
+        "employee_id": CURRENT_EMPLOYEE_ID,
+        "type": "badge_lost",
+        "start_date": date.today().isoformat(),
+        "end_date": None,
+        "comment": f"Badge perdu — {payload.reason}. Dernier endroit : {payload.last_seen_location or 'inconnu'}.",
+        "amount": None,
+        "status": "pending",
+        "created_at": _now(),
+        "decided_at": None,
+    })
+    return {"ok": True, "request_id": rid}
+
+
+# ─── Daily consumption (7 days)
+@api.get("/meal-points/history")
+async def consumption_history():
+    today_d = date.today()
+    series = []
+    for i in range(6, -1, -1):
+        d = (today_d - timedelta(days=i)).isoformat()
+        txs = await db.meal_tx.find(
+            {"employee_id": CURRENT_EMPLOYEE_ID,
+             "ts": {"$gte": d + "T00:00:00", "$lt": d + "T23:59:59"}},
+            {"_id": 0},
+        ).to_list(100)
+        used = sum(t.get("points_spent", 0) for t in txs)
+        series.append({"date": d, "used": used})
+    return series
+
+
+# ─── Poles (contacts grouped)
+@api.get("/poles")
+async def poles():
+    return [
+        {"id": "managers", "name": "Pôle Managers", "email": "managers@mspark.fr",
+         "phone": "+33 1 23 45 67 80", "description": "Encadrement opérationnel du parc",
+         "icon": "users-round", "color": "#3BA4FF"},
+        {"id": "rh", "name": "Pôle RH", "email": "rh@mspark.fr",
+         "phone": "+33 1 23 45 67 81", "description": "Ressources humaines, paie, contrats, congés",
+         "icon": "user-cog", "color": "#10B981"},
+        {"id": "direction", "name": "Pôle Direction", "email": "direction@mspark.fr",
+         "phone": "+33 1 23 45 67 82", "description": "Direction générale et stratégie",
+         "icon": "briefcase", "color": "#A78BFA"},
+        {"id": "restauration", "name": "Pôle Restauration", "email": "restauration@mspark.fr",
+         "phone": "+33 1 23 45 67 83", "description": "Soccer Bar, Donut House, stands",
+         "icon": "utensils", "color": "#F59E0B"},
+        {"id": "securite", "name": "Pôle Sécurité", "email": "securite@mspark.fr",
+         "phone": "+33 1 23 45 67 84", "description": "Sûreté du parc 24/7",
+         "icon": "shield", "color": "#EF4444"},
+        {"id": "maintenance", "name": "Pôle Maintenance", "email": "maintenance@mspark.fr",
+         "phone": "+33 1 23 45 67 85", "description": "Karting, attractions, infrastructure",
+         "icon": "wrench", "color": "#64748B"},
+    ]
+
+
+# ─── DM channels (create or fetch a direct channel with an employee)
+class DMCreate(BaseModel):
+    employee_id: str
+
+
+@api.post("/channels/dm")
+async def create_dm(payload: DMCreate):
+    other = await db.employees.find_one({"id": payload.employee_id}, {"_id": 0})
+    if not other:
+        raise HTTPException(404, "Employee not found")
+    cid = f"dm-{payload.employee_id}"
+    existing = await db.channels.find_one({"id": cid}, {"_id": 0})
+    if not existing:
+        ch = {
+            "id": cid,
+            "name": f"{other['first_name']} {other['last_name']}",
+            "icon": "user",
+            "members": 2,
+            "unread": 0,
+            "is_dm": True,
+            "avatar": other["avatar"],
+        }
+        await db.channels.insert_one(ch.copy())
+        existing = ch
+    return existing
 
 
 app.include_router(api)

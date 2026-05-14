@@ -2,8 +2,8 @@ export default function MealPointsGauge({ used = 0, total = 20, size = 200 }) {
   const stroke = 14;
   const r = (size - stroke) / 2;
   const c = 2 * Math.PI * r;
-  const remaining = Math.max(0, total - used);
-  const pct = total > 0 ? (used / total) : 0;
+  // Gauge fills based on USAGE (more used = more filled)
+  const pct = total > 0 ? Math.min(1, used / total) : 0;
   const offset = c * (1 - pct);
 
   return (
@@ -37,12 +37,12 @@ export default function MealPointsGauge({ used = 0, total = 20, size = 200 }) {
         />
       </svg>
       <div className="absolute inset-0 flex flex-col items-center justify-center">
-        <div className="text-5xl font-extrabold tracking-tight text-[#071B34]">{remaining}</div>
+        <div className="text-5xl font-extrabold tracking-tight text-[#071B34]">{used}</div>
         <div className="text-xs uppercase tracking-[0.18em] text-[#475569] font-semibold mt-1">
-          pts restants
+          pts utilisés
         </div>
         <div className="text-xs text-[#475569] mt-2">
-          <span className="text-[#3BA4FF] font-semibold">{used}</span> / {total} utilisés
+          <span className="text-[#3BA4FF] font-semibold">{Math.max(0, total - used)}</span> / {total} restants
         </div>
       </div>
     </div>

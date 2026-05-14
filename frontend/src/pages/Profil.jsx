@@ -1,12 +1,37 @@
-import { Mail, Phone, MapPin, Award, Sparkles, Clock, ShieldCheck, BadgeCheck } from "lucide-react";
+import { useState } from "react";
+import { Mail, Phone, MapPin, Award, BadgeCheck, Sparkles, Edit3, Save, X, LogOut, Home, AtSign } from "lucide-react";
+import { toast } from "sonner";
 import { useApp } from "@/contexts/AppContext";
-import { roleQuotaLabel } from "@/lib/api";
+import { api, roleQuotaLabel } from "@/lib/api";
 
 export default function Profil() {
   const { me } = useApp();
-  if (!me) return <div className="ms-card p-8 animate-pulse h-64" />;
+  const [editing, setEditing] = useState(false);
+  const [form, setForm] = useState({});
 
+  if (!me) return <div className="ms-card p-8 animate-pulse h-64" />;
   const years = (me.seniority_months / 12).toFixed(1);
+
+  const startEdit = () => {
+    setForm({
+      email: me.email,
+      personal_email: me.personal_email,
+      phone: me.phone,
+      address: me.address,
+    });
+    setEditing(true);
+  };
+
+  const save = async () => {
+    await api.put("/me", form);
+    toast.success("Profil mis à jour");
+    setEditing(false);
+    window.location.reload();
+  };
+
+  const logout = () => {
+    toast.info("Déconnexion simulée — pas d'authentification dans cette version.");
+  };
 
   return (
     <div className="space-y-6 ms-fade-up">
@@ -26,36 +51,104 @@ export default function Profil() {
             <h1 className="mt-1 text-3xl md:text-4xl font-bold tracking-tight">
               {me.first_name} {me.last_name}
             </h1>
-            <p className="mt-1 text-white/70">{me.role} · {me.department}</p>
+            <p className="mt-1 text-white/70">
+              {me.role} · {me.department}
+            </p>
             <div className="mt-4 flex flex-wrap gap-2">
               <span className="inline-flex items-center gap-1.5 rounded-full bg-white/8 backdrop-blur-md px-3 py-1.5 text-xs font-semibold">
-                <Sparkles className="h-3 w-3 text-[#3BA4FF]" /> {roleQuotaLabel(me.role_category)}
+                <Sparkles className="h-3 w-3 text-[#3BA4FF]" />
+                {roleQuotaLabel(me.role_category)}
               </span>
               <span className="inline-flex items-center gap-1.5 rounded-full bg-white/8 backdrop-blur-md px-3 py-1.5 text-xs font-semibold">
-                <Award className="h-3 w-3 text-[#F59E0B]" /> {years} ans d'ancienneté
+                <Award className="h-3 w-3 text-[#F59E0B]" />
+                {years} ans d'ancienneté
               </span>
               <span className="inline-flex items-center gap-1.5 rounded-full bg-[#10B981]/15 px-3 py-1.5 text-xs font-semibold text-[#10B981]">
-                <BadgeCheck className="h-3 w-3" /> Badge actif
+                <BadgeCheck className="h-3 w-3" />
+                Badge {me.badge_number}
               </span>
             </div>
           </div>
+          <button
+            onClick={logout}
+            data-testid="logout-btn"
+            className="inline-flex items-center gap-2 rounded-xl bg-white/8 backdrop-blur-md hover:bg-white/15 px-4 py-2.5 text-sm font-semibold text-white transition-colors"
+          >
+            <LogOut className="h-4 w-4" /> Se déconnecter
+          </button>
         </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         {/* Coordonnées */}
-        <div className="lg:col-span-5 ms-card p-6">
-          <h3 className="text-lg font-bold text-[#071B34]">Coordonnées</h3>
+        <div className="lg:col-span-7 ms-card p-6">
+          <div className="flex items-center justify-between">
+            <h3 className="text-lg font-bold text-[#071B34]">Coordonnées</h3>
+            {!editing ? (
+              <button
+                onClick={startEdit}
+                data-testid="edit-profile"
+                className="inline-flex items-center gap-1.5 rounded-lg bg-[#3BA4FF]/12 hover:bg-[#3BA4FF]/20 px-3 py-1.5 text-xs font-semibold text-[#1D70B8] transition-colors"
+              >
+                <Edit3 className="h-3 w-3" /> Modifier
+              </button>
+            ) : (
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setEditing(false)}
+                  className="ms-btn-ghost text-xs"
+                >
+                  <X className="h-3 w-3" /> Annuler
+                </button>
+                <button onClick={save} data-testid="save-profile" className="ms-btn-primary text-xs">
+                  <Save className="h-3 w-3" /> Enregistrer
+                </button>
+              </div>
+            )}
+          </div>
+
           <div className="mt-4 space-y-3">
-            <Row icon={Mail} label="Email" value={me.email} />
-            <Row icon={Phone} label="Téléphone" value={me.phone} />
-            <Row icon={MapPin} label="Lieu" value={me.location} />
-            <Row icon={ShieldCheck} label="Manager" value={me.manager} />
+            <Field
+              icon={Mail}
+              label="Email professionnel"
+              editable={false}
+              value={me.email}
+            />
+            <Field
+              icon={AtSign}
+              label="Email personnel"
+              editable={editing}
+              value={editing ? form.personal_email : me.personal_email}
+              onChange={(v) => setForm({ ...form, personal_email: v })}
+              testid="personal-email"
+            />
+            <Field
+              icon={Phone}
+              label="Téléphone"
+              editable={editing}
+              value={editing ? form.phone : me.phone}
+              onChange={(v) => setForm({ ...form, phone: v })}
+              testid="phone"
+            />
+            <Field
+              icon={Home}
+              label="Adresse postale"
+              editable={editing}
+              value={editing ? form.address : me.address}
+              onChange={(v) => setForm({ ...form, address: v })}
+              testid="address"
+            />
+            <Field
+              icon={MapPin}
+              label="Site de rattachement"
+              editable={false}
+              value={me.location}
+            />
           </div>
         </div>
 
-        {/* Skills */}
-        <div className="lg:col-span-7 ms-card p-6">
+        {/* Skills + stats */}
+        <div className="lg:col-span-5 ms-card p-6">
           <h3 className="text-lg font-bold text-[#071B34]">Compétences</h3>
           <div className="mt-4 flex flex-wrap gap-2">
             {me.skills?.map((s) => (
@@ -67,33 +160,11 @@ export default function Profil() {
               </span>
             ))}
           </div>
-
-          <div className="mt-6 grid grid-cols-2 md:grid-cols-3 gap-3">
-            <Stat label="Quota repas" value={`${me.daily_quota} pts`} hint="par jour travaillé" />
-            <Stat label="Contrat" value="24h / semaine" hint="CDI temps partiel" />
-            <Stat label="Catégorie" value={me.role_category?.[0].toUpperCase() + me.role_category?.slice(1)} hint="Grille MS Park" />
-          </div>
-        </div>
-      </div>
-
-      <div className="ms-card p-6">
-        <h3 className="text-lg font-bold text-[#071B34]">Préférences & activité</h3>
-        <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-          <div className="rounded-xl bg-[#F4F7FA] p-4">
-            <div className="text-[10px] uppercase tracking-wider text-[#475569] font-semibold">
-              Notifications
-            </div>
-            <p className="mt-2 text-[#071B34]">
-              Toutes les notifications RH, planning et messages sont activées par défaut.
-            </p>
-          </div>
-          <div className="rounded-xl bg-[#F4F7FA] p-4">
-            <div className="text-[10px] uppercase tracking-wider text-[#475569] font-semibold">
-              Activité récente
-            </div>
-            <p className="mt-2 text-[#071B34]">
-              Dernière connexion · aujourd'hui · 12 commandes ce mois.
-            </p>
+          <div className="mt-5 pt-5 border-t border-[#071B34]/5 grid grid-cols-2 gap-3">
+            <KV label="Manager" value={me.manager} />
+            <KV label="Contrat" value="24h / semaine" />
+            <KV label="Quota repas" value={`${me.daily_quota} pts/jour`} />
+            <KV label="Catégorie" value={me.role_category} />
           </div>
         </div>
       </div>
@@ -101,24 +172,32 @@ export default function Profil() {
   );
 }
 
-function Row({ icon: Icon, label, value }) {
+function Field({ icon: Icon, label, value, editable, onChange, testid }) {
   return (
     <div className="flex items-start gap-3 rounded-xl bg-[#F4F7FA] p-3">
       <Icon className="h-4 w-4 text-[#3BA4FF] mt-0.5" />
-      <div>
+      <div className="flex-1 min-w-0">
         <div className="text-[10px] uppercase tracking-wider text-[#475569] font-semibold">{label}</div>
-        <div className="text-sm text-[#071B34] mt-0.5">{value}</div>
+        {editable ? (
+          <input
+            value={value || ""}
+            onChange={(e) => onChange(e.target.value)}
+            data-testid={testid}
+            className="mt-1 w-full bg-white rounded-lg border border-[#071B34]/10 px-2.5 py-1.5 text-sm focus:ring-2 focus:ring-[#3BA4FF]/30 focus:border-[#3BA4FF] outline-none"
+          />
+        ) : (
+          <div className="text-sm text-[#071B34] mt-0.5">{value}</div>
+        )}
       </div>
     </div>
   );
 }
 
-function Stat({ label, value, hint }) {
+function KV({ label, value }) {
   return (
-    <div className="rounded-xl bg-gradient-to-br from-[#3BA4FF]/8 to-transparent p-4">
+    <div className="rounded-xl bg-gradient-to-br from-[#3BA4FF]/8 to-transparent p-3">
       <div className="text-[10px] uppercase tracking-wider text-[#475569] font-semibold">{label}</div>
-      <div className="text-lg font-bold text-[#071B34] mt-1">{value}</div>
-      <div className="text-xs text-[#475569] mt-0.5">{hint}</div>
+      <div className="text-sm font-bold text-[#071B34] mt-0.5 capitalize">{value}</div>
     </div>
   );
 }
