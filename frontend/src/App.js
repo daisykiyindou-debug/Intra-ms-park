@@ -6,6 +6,7 @@ import Layout from "@/components/Layout";
 import { AppContext } from "@/contexts/AppContext";
 import { api } from "@/lib/api";
 
+import LoginPage from "@/pages/LoginPage";
 import Dashboard from "@/pages/Dashboard";
 import PointsRepas from "@/pages/PointsRepas";
 import Restaurant from "@/pages/Restaurant";
@@ -19,6 +20,12 @@ import Agenda from "@/pages/Agenda";
 import Avantages from "@/pages/Avantages";
 import Contacts from "@/pages/Contacts";
 import Profil from "@/pages/Profil";
+
+function ProtectedShell() {
+  const isOut = typeof window !== "undefined" && localStorage.getItem("ms_logged_out") === "1";
+  if (isOut) return <Navigate to="/login" replace />;
+  return <Layout />;
+}
 
 function App() {
   const [me, setMe] = useState(null);
@@ -59,7 +66,8 @@ function App() {
       <div className="App">
         <BrowserRouter>
           <Routes>
-            <Route element={<Layout />}>
+            <Route path="/login" element={<LoginPage />} />
+            <Route element={<ProtectedShell />}>
               <Route path="/" element={<Navigate to="/dashboard" replace />} />
               <Route path="/dashboard" element={<Dashboard />} />
               <Route path="/points-repas" element={<PointsRepas />} />

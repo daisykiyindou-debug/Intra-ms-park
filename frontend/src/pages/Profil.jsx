@@ -1,11 +1,13 @@
 import { useState } from "react";
-import { Mail, Phone, MapPin, Award, BadgeCheck, Sparkles, Edit3, Save, X, LogOut, Home, AtSign } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { Mail, Phone, Award, BadgeCheck, Sparkles, Edit3, Save, X, LogOut, Home, AtSign } from "lucide-react";
 import { toast } from "sonner";
 import { useApp } from "@/contexts/AppContext";
 import { api, roleQuotaLabel } from "@/lib/api";
 
 export default function Profil() {
   const { me } = useApp();
+  const navigate = useNavigate();
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState({});
 
@@ -27,10 +29,6 @@ export default function Profil() {
     toast.success("Profil mis à jour");
     setEditing(false);
     window.location.reload();
-  };
-
-  const logout = () => {
-    toast.info("Déconnexion simulée — pas d'authentification dans cette version.");
   };
 
   return (
@@ -70,7 +68,7 @@ export default function Profil() {
             </div>
           </div>
           <button
-            onClick={logout}
+            onClick={() => navigate("/login")}
             data-testid="logout-btn"
             className="inline-flex items-center gap-2 rounded-xl bg-white/8 backdrop-blur-md hover:bg-white/15 px-4 py-2.5 text-sm font-semibold text-white transition-colors"
           >
@@ -137,12 +135,6 @@ export default function Profil() {
               value={editing ? form.address : me.address}
               onChange={(v) => setForm({ ...form, address: v })}
               testid="address"
-            />
-            <Field
-              icon={MapPin}
-              label="Site de rattachement"
-              editable={false}
-              value={me.location}
             />
           </div>
         </div>

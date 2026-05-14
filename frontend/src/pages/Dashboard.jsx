@@ -99,20 +99,29 @@ export default function Dashboard() {
             <CalendarDays className="h-5 w-5" />
           </div>
           <div className="flex-1 min-w-0">
-            <div className="ms-overline">Prochaine prise de poste</div>
-            {nextShift ? (
+            <div className="ms-overline">Prise de poste du jour</div>
+            {data.today_schedule && data.today_schedule.type === "shift" ? (
               <div className="mt-1 text-sm text-[#071B34]">
                 <strong className="text-base">
-                  {new Date(nextShift.day).toLocaleDateString("fr-FR", {
-                    weekday: "long",
-                    day: "numeric",
-                    month: "long",
-                  })}
-                </strong>{" "}
-                · {nextShift.start} – {nextShift.end}
+                  {data.today_schedule.start} – {data.today_schedule.end}
+                </strong>
+                <span className="text-[#475569] ml-2 text-xs">
+                  · pause {data.today_schedule.pause_start}–{data.today_schedule.pause_end}
+                </span>
+              </div>
+            ) : data.today_schedule && data.today_schedule.type === "off" ? (
+              <div className="mt-1 inline-flex items-center gap-2 text-base font-bold text-[#475569]">
+                <span className="ms-chip bg-[#F1F5F9] text-[#475569]">OFF</span>
+                Profitez de votre journée ✨
+              </div>
+            ) : data.today_schedule && data.today_schedule.type === "leave" ? (
+              <div className="mt-1 text-base font-bold text-[#7C3AED]">Congé validé</div>
+            ) : data.today_schedule && data.today_schedule.type === "training" ? (
+              <div className="mt-1 text-sm text-[#B45309]">
+                <strong>Formation</strong> · {data.today_schedule.start} – {data.today_schedule.end}
               </div>
             ) : (
-              <div className="mt-1 text-sm text-[#475569]">Aucun shift planifié</div>
+              <div className="mt-1 text-sm text-[#475569]">Aucun planning aujourd'hui</div>
             )}
           </div>
         </div>
@@ -149,18 +158,22 @@ export default function Dashboard() {
                 data-testid={`dash-event-${e.id}`}
                 className="rounded-2xl border border-[#071B34]/5 p-4 hover:border-[#3BA4FF]/40 hover:shadow-md transition-all"
               >
-                <div className="flex items-center gap-2">
+                <div className="flex items-baseline justify-between">
+                  <div className="text-2xl font-extrabold text-[#071B34] capitalize tracking-tight">
+                    {d.toLocaleDateString("fr-FR", { day: "numeric", month: "short" })}
+                  </div>
+                  <span className="text-[10px] uppercase tracking-wider font-semibold text-[#475569]">
+                    {d.toLocaleDateString("fr-FR", { weekday: "short" })} · {e.time}
+                  </span>
+                </div>
+                <div className="mt-2 text-sm font-bold text-[#071B34] line-clamp-2">{e.title}</div>
+                <div className="mt-1 text-[11px] text-[#475569] inline-flex items-center gap-1">
+                  <MapPin className="h-3 w-3" /> {e.location}
+                </div>
+                <div className="mt-2">
                   <span className="ms-chip" style={{ background: m.bg, color: m.color }}>
                     {m.label}
                   </span>
-                </div>
-                <div className="mt-3 text-base font-bold text-[#071B34] line-clamp-2">{e.title}</div>
-                <div className="mt-1 text-xs text-[#475569]">
-                  {d.toLocaleDateString("fr-FR", { weekday: "short", day: "numeric", month: "short" })}{" "}
-                  · {e.time}
-                </div>
-                <div className="mt-1 text-[11px] text-[#475569] inline-flex items-center gap-1">
-                  <MapPin className="h-3 w-3" /> {e.location}
                 </div>
               </Link>
             );

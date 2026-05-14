@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="1" skipped="0" tests="9" time="1.238" timestamp="2026-05-14T16:16:28.504072+00:00" hostname="agent-env-9259795c-c35b-4f99-a109-61c98c6cacdf"><testcase classname="backend.tests.test_mspark_iter3.TestMeAvatar" name="test_avatar_contains_new_unsplash_id" time="0.194" /><testcase classname="backend.tests.test_mspark_iter3.TestEvents" name="test_six_events_with_needs_registration" time="0.064" /><testcase classname="backend.tests.test_mspark_iter3.TestChannels" name="test_ch_ops_present_and_old_removed" time="0.064" /><testcase classname="backend.tests.test_mspark_iter3.TestChannels" name="test_ch_ops_has_five_messages" time="0.075" /><testcase classname="backend.tests.test_mspark_iter3.TestChannelGroup" name="test_create_group" time="0.140" /><testcase classname="backend.tests.test_mspark_iter3.TestSchedulePauses" name="test_fixed_pauses" time="0.083"><failure message="AssertionError: start=15:00 pause_start=17:08 expected 17:00&#10;assert '17:08' == '17:00'&#10;  &#10;  - 17:00&#10;  ?     ^&#10;  + 17:08&#10;  ?     ^">backend/tests/test_mspark_iter3.py:109: in test_fixed_pauses
+    assert sh.get("pause_start") == exp_ps, f"start={st} pause_start={sh.get('pause_start')} expected {exp_ps}"
+E   AssertionError: start=15:00 pause_start=17:08 expected 17:00
+E   assert '17:08' == '17:00'
+E     
+E     - 17:00
+E     ?     ^
+E     + 17:08
+E     ?     ^</failure></testcase><testcase classname="backend.tests.test_mspark_iter3.TestOrders" name="test_pickup_point_forced_and_line_item_store" time="0.192" /><testcase classname="backend.tests.test_mspark_iter3.TestOrders" name="test_pickup_endpoint_sets_picked_up_at" time="0.266" /><testcase classname="backend.tests.test_mspark_iter3.TestOrders" name="test_auto_status_evolution_field_present" time="0.073" /></testsuite></testsuites>

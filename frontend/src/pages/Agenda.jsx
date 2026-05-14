@@ -210,13 +210,19 @@ export default function Agenda() {
             <p className="text-sm text-[#475569] leading-relaxed">{selected.description}</p>
 
             <div className="mt-5 flex flex-col sm:flex-row gap-2">
-              <a
-                href={`mailto:rh@mspark.fr?subject=Inscription : ${encodeURIComponent(selected.title)}`}
-                data-testid="event-register"
-                className="ms-btn-primary flex-1"
-              >
-                <Users className="h-4 w-4" /> S'inscrire à cet événement
-              </a>
+              {selected.needs_registration ? (
+                <a
+                  href={`mailto:rh@mspark.fr?subject=Inscription : ${encodeURIComponent(selected.title)}`}
+                  data-testid="event-register"
+                  className="ms-btn-primary flex-1"
+                >
+                  <Users className="h-4 w-4" /> S'inscrire à cet événement
+                </a>
+              ) : (
+                <div className="flex-1 rounded-xl bg-[#F4F7FA] px-4 py-2.5 text-xs text-[#475569] text-center">
+                  Aucune inscription requise
+                </div>
+              )}
               <button
                 onClick={() => setSelected(null)}
                 className="ms-btn-outline"

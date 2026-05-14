@@ -95,37 +95,6 @@ export default function Planning() {
         </div>
       </div>
 
-      {/* Big next shift banner */}
-      {nextShift && (
-        <div
-          className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-[#3BA4FF] to-[#1D70B8] text-white p-6 md:p-8"
-          data-testid="next-shift-banner"
-        >
-          <div className="absolute -right-10 -top-10 h-48 w-48 rounded-full bg-white/10 blur-3xl" />
-          <div className="relative flex items-center gap-5">
-            <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-white/15 backdrop-blur-md">
-              <CalendarClock className="h-7 w-7" />
-            </div>
-            <div className="flex-1">
-              <div className="text-xs uppercase tracking-[0.2em] text-white/70 font-semibold">
-                Votre prochaine journée de travail
-              </div>
-              <h2 className="mt-1 text-2xl md:text-3xl font-bold capitalize">
-                {new Date(nextShift.day).toLocaleDateString("fr-FR", {
-                  weekday: "long",
-                  day: "numeric",
-                  month: "long",
-                })}{" "}
-                · de {nextShift.start} à {nextShift.end}
-              </h2>
-              <p className="mt-1 text-sm text-white/80">
-                Pause {nextShift.pause_start}–{nextShift.pause_end} · {nextShift.location}
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
-
       <div className="flex items-center gap-2 justify-end">
         <div className="inline-flex rounded-xl bg-white border border-[#071B34]/8 p-1">
           <button

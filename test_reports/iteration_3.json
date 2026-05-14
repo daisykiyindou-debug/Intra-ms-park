@@ -1,0 +1,46 @@
+{
+  "summary": "Iter3 testing of MS Park intranet. Backend 8/9 pass (1 fail: schedule pauses are computed dynamically (mid-22min) instead of the spec's fixed values). Frontend: login, protected route, header profile dropdown/logout, dashboard 'Prise de poste du jour' card, date-first agenda cards, planning banner removal, agenda 'Aucune inscription requise', restaurant cart drawer (store-locked, anticipez, heure trop tôt), and messagerie group creation modal all verified. Found and FIXED a critical blank-page bug in Messagerie (missing 'Users' import from lucide-react). Found another issue: Profil page still renders a 'Se déconnecter' button in the hero — spec said it should be removed.",
+  "backend_issues": {
+    "critical": [
+      {"endpoint": "GET /api/schedule", "issue": "Pauses are computed dynamically as (mid_shift - 22min, + 45min) instead of the spec's FIXED values. For start='14:00' got pause 16:08-16:53 (expected 16:30/17:15); for start='12:00' got 14:08-14:53 (expected 15:00/15:45); for start='15:00' got 17:08-17:53 (expected 17:00/17:45). Bug is at backend/server.py lines 402-411 — replace the mid-based calculation with a fixed lookup keyed on start time.", "priority": "HIGH"}
+    ],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "Profil hero", "issue": "Hero still renders a 'Se déconnecter' button (Profil.jsx lines 70-76). Spec requires it removed (logout now lives only in the header avatar dropdown). Also: that button only navigate()s to /login WITHOUT setting localStorage 'ms_logged_out'='1', so it does not actually log out.", "selector": "main button:has-text('Se déconnecter')", "priority": "MEDIUM"},
+      {"component": "Messagerie page", "issue": "FIXED BY TESTER — Page rendered completely blank with React error 'Users is not defined'. Root cause: Messagerie.jsx used <Users /> on line 109 and line 389 but never imported it. Added 'Users' to the lucide-react import on line 3.", "selector": "/messagerie", "priority": "CRITICAL"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Restaurant cart drawer", "issues": ["Date/Heure de retrait use the browser's native <input type='date|time'> instead of the shadcn Calendar / Popover components used elsewhere — inconsistent UX (see system prompt design rule)."]},
+      {"screen": "Planning calendar", "issues": ["Pause times shown are 14:08/14:53, 16:08/16:53, 17:08/17:53 — visually confirms the backend schedule pause bug above. Users will see odd minute values until backend is fixed."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_mspark_iter3.py",
+    "/app/test_reports/pytest/pytest_iter3.xml"
+  ],
+  "action_items": [
+    "Backend: fix /api/schedule pause computation — use a fixed lookup `{('14:00','19:00'):('16:30','17:15'), ('12:00','17:00'):('15:00','15:45'), ('15:00','20:00'):('17:00','17:45'), ('14:00','18:00'):('15:30','16:15') or as per spec}` instead of mid-22min math. Update server.py around lines 402-411.",
+    "Frontend: remove the hero 'Se déconnecter' button from Profil.jsx (lines 70-76). If kept anywhere, it must localStorage.setItem('ms_logged_out','1') before navigate('/login').",
+    "Frontend: verify the Users-import fix landed (committed by tester). Optionally run a build/lint pass to catch other missing imports."
+  ],
+  "critical_code_review_comments": [
+    "Messagerie.jsx had a runtime ReferenceError that bricked the entire page — no automated check caught it. Add an eslint `react/jsx-no-undef` or `no-undef` rule in CI to prevent regressions.",
+    "Profil 'Se déconnecter' button calls navigate('/login') without flipping ms_logged_out — anyone landing on /dashboard right after would be redirected back in by ProtectedShell only if ms_logged_out is set. This is a logout-without-logout footgun even if the button is intentionally kept.",
+    "Schedule generation uses arithmetic that does not match the explicit spec. Prefer a small fixed map / constant table — easier to read and audit.",
+    "server.py is still ~1575 lines in a single file. Splitting into routers (schedule, channels, orders, badge) would make spec compliance reviews cheaper."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_mspark_iter3.py",
+    "/app/frontend/src/pages/Messagerie.jsx"
+  ],
+  "success_rate": {"backend": "89% (8/9 iter3 tests pass)", "frontend": "85% (login, protected route, header dropdown, dashboard, agenda, planning-banner, restaurant cart all OK; profil hero logout bug; messagerie was 0% then 100% after import fix)"},
+  "test_credentials": "N/A — fictional login, any email/password works",
+  "seed_data_creation": "Backend test created 1 channel ('TEST_Groupe iter3', is_group=true) and 2 soccer_bar orders (one picked up, one open). Frontend test attempted to create one 'TEST_équipe' group but the submit was blocked because Playwright filled the search input instead of the name input — no group actually persisted.",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iter3 test file: /app/backend/tests/test_mspark_iter3.py (run with REACT_APP_BACKEND_URL env var). Frontend routes are /dashboard, /rh/planning (NOT /planning), /rh/badgeage, /rh/demandes, /profil, /restaurant, /messagerie, /agenda — see App.js. Critical fix landed: /app/frontend/src/pages/Messagerie.jsx now imports Users. Two open bugs at handoff: (1) backend schedule pauses (server.py:402-411) — see RCA below; (2) Profil hero still has logout button. ms_logged_out localStorage key is the auth gate. After login click, key is removed; after header-avatar logout, key is set to '1'.",
+  "rca_of_the_issue": "Schedule pause RCA: server.py generates pauses with `mid = (start_m + end_m) // 2; pause_start_m = mid - 22; pause_end_m = pause_start_m + 45`. For a 12:00→17:00 shift this gives 14:08-14:53 instead of the spec's 15:00-15:45; for 14:00→19:00 gives 16:08-16:53 instead of 16:30-17:15; for 15:00→20:00 gives 17:08-17:53 instead of 17:00-17:45. Mitigation: replace with `FIXED = {'14:00': ('16:30','17:15'), '12:00': ('15:00','15:45'), '15:00': ('17:00','17:45'), '14:00_sun': ...}` keyed on (start,end) or just start, and look up ps/pe. Messagerie RCA: missing import — added Users to the lucide-react named-imports list at line 3. Profil logout-button RCA: the hero block (lines 56-77) was not deleted in this iteration's Profil.jsx rewrite — visual regression."
+}

@@ -1,9 +1,27 @@
-import { Bell, Menu, Search } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Bell, Menu, Search, LogOut, User } from "lucide-react";
+import { useNavigate, Link } from "react-router-dom";
 import { useApp } from "@/contexts/AppContext";
 
 export default function Header({ onMenuClick, onNotifClick }) {
   const { me, notifications } = useApp();
   const unread = notifications.filter((n) => !n.read).length;
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    const onClick = (e) => {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onClick);
+    return () => document.removeEventListener("mousedown", onClick);
+  }, []);
+
+  const logout = () => {
+    localStorage.setItem("ms_logged_out", "1");
+    navigate("/login");
+  };
 
   return (
     <header
@@ -40,31 +58,59 @@ export default function Header({ onMenuClick, onNotifClick }) {
           className="relative flex h-10 w-10 items-center justify-center rounded-xl bg-white border border-[#071B34]/8 hover:border-[#3BA4FF]/40 hover:shadow-[0_4px_14px_rgba(59,164,255,0.15)] transition-all"
           aria-label="Notifications"
         >
-          <Bell className="h-4.5 w-4.5 text-[#071B34]" />
+          <Bell className="h-4 w-4 text-[#071B34]" />
           {unread > 0 && (
-            <span
-              data-testid="notif-badge"
-              className="absolute -top-1 -right-1 flex h-5 min-w-[20px] items-center justify-center rounded-full bg-[#EF4444] px-1 text-[10px] font-bold text-white shadow-md"
-            >
+            <span className="absolute -top-1 -right-1 flex h-5 min-w-[20px] items-center justify-center rounded-full bg-[#EF4444] px-1 text-[10px] font-bold text-white shadow-md">
               {unread}
             </span>
           )}
         </button>
 
         {me && (
-          <div className="flex items-center gap-3 pl-2 md:pl-3 border-l border-[#071B34]/8">
-            <div className="hidden md:block text-right">
-              <div className="text-sm font-semibold text-[#071B34] leading-tight">
-                {me.first_name} {me.last_name}
+          <div ref={ref} className="relative">
+            <button
+              onClick={() => setOpen((o) => !o)}
+              data-testid="profile-dropdown"
+              className="flex items-center gap-3 pl-2 md:pl-3 border-l border-[#071B34]/8 cursor-pointer rounded-xl hover:bg-[#071B34]/5 px-2 py-1 transition-colors"
+            >
+              <div className="hidden md:block text-right">
+                <div className="text-sm font-semibold text-[#071B34] leading-tight">
+                  {me.first_name} {me.last_name}
+                </div>
+                <div className="text-xs text-[#475569]">{me.role}</div>
               </div>
-              <div className="text-xs text-[#475569]">{me.role}</div>
-            </div>
-            <img
-              src={me.avatar}
-              alt={me.first_name}
-              data-testid="header-avatar"
-              className="h-10 w-10 rounded-full object-cover ring-2 ring-white shadow-md"
-            />
+              <img
+                src={me.avatar}
+                alt={me.first_name}
+                data-testid="header-avatar"
+                className="h-10 w-10 rounded-full object-cover ring-2 ring-white shadow-md"
+              />
+            </button>
+            {open && (
+              <div
+                data-testid="profile-menu"
+                className="absolute right-0 top-full mt-2 w-56 rounded-2xl bg-white border border-[#071B34]/8 shadow-xl overflow-hidden ms-fade-up"
+              >
+                <div className="p-3 border-b border-[#071B34]/5">
+                  <div className="text-sm font-semibold text-[#071B34]">{me.first_name} {me.last_name}</div>
+                  <div className="text-[11px] text-[#475569] truncate">{me.email}</div>
+                </div>
+                <Link
+                  to="/profil"
+                  onClick={() => setOpen(false)}
+                  className="flex items-center gap-2 px-3 py-2.5 text-sm text-[#071B34] hover:bg-[#F4F7FA] transition-colors"
+                >
+                  <User className="h-4 w-4 text-[#475569]" /> Mon profil
+                </Link>
+                <button
+                  onClick={logout}
+                  data-testid="logout-btn"
+                  className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-[#EF4444] hover:bg-[#FEE2E2] transition-colors"
+                >
+                  <LogOut className="h-4 w-4" /> Se déconnecter
+                </button>
+              </div>
+            )}
           </div>
         )}
       </div>

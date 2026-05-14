@@ -223,7 +223,7 @@ async def _seed_once() -> None:
             "role": "Employé Polyvalent",
             "role_category": "employe",
             "department": "Opérations Parc",
-            "avatar": "https://images.unsplash.com/photo-1542909168-82c3e7fdca5c?w=400&h=400&fit=crop&crop=faces",
+            "avatar": "https://images.unsplash.com/photo-1531123897727-8f129e1688ce?w=400&h=400&fit=crop&crop=faces",
             "email": "idriss.malonga@mspark.fr",
             "personal_email": "idriss.malonga@gmail.com",
             "phone": "+33 6 12 34 56 78",
@@ -816,18 +816,16 @@ async def _seed_once() -> None:
 
     # ─── Channels & messages (mock messagerie)
     channels: list[dict] = [
-        {"id": "ch-accueil", "name": "Accueil", "icon": "hash", "members": 24, "unread": 0},
-        {"id": "ch-roller", "name": "Roller", "icon": "hash", "members": 12, "unread": 2},
-        {"id": "ch-karting", "name": "Karting", "icon": "hash", "members": 18, "unread": 0},
-        {"id": "ch-attractions", "name": "Attractions", "icon": "hash", "members": 14, "unread": 0},
-        {"id": "ch-restauration", "name": "Restauration", "icon": "hash", "members": 22, "unread": 1},
-        {"id": "ch-donut", "name": "Donut House", "icon": "hash", "members": 8, "unread": 0},
-        {"id": "ch-soccer", "name": "Soccer Bar", "icon": "hash", "members": 16, "unread": 0},
-        {"id": "ch-securite", "name": "Sécurité", "icon": "hash", "members": 9, "unread": 0},
-        {"id": "ch-nettoyage", "name": "Nettoyage", "icon": "hash", "members": 7, "unread": 0},
-        {"id": "ch-managers", "name": "Managers", "icon": "lock", "members": 10, "unread": 0},
-        {"id": "ch-rh", "name": "RH", "icon": "lock", "members": 5, "unread": 0},
-        {"id": "ch-direction", "name": "Direction", "icon": "lock", "members": 4, "unread": 0},
+        {"id": "ch-accueil", "name": "Accueil", "icon": "hash", "members": 24, "unread": 0, "is_dm": False, "is_group": False},
+        {"id": "ch-ops", "name": "Employés OPS", "icon": "hash", "members": 18, "unread": 3, "is_dm": False, "is_group": False},
+        {"id": "ch-roller", "name": "Roller", "icon": "hash", "members": 12, "unread": 2, "is_dm": False, "is_group": False},
+        {"id": "ch-karting", "name": "Karting", "icon": "hash", "members": 18, "unread": 0, "is_dm": False, "is_group": False},
+        {"id": "ch-attractions", "name": "Attractions", "icon": "hash", "members": 14, "unread": 0, "is_dm": False, "is_group": False},
+        {"id": "ch-restauration", "name": "Restauration", "icon": "hash", "members": 22, "unread": 1, "is_dm": False, "is_group": False},
+        {"id": "ch-donut", "name": "Donut House", "icon": "hash", "members": 8, "unread": 0, "is_dm": False, "is_group": False},
+        {"id": "ch-soccer", "name": "Soccer Bar", "icon": "hash", "members": 16, "unread": 0, "is_dm": False, "is_group": False},
+        {"id": "ch-securite", "name": "Sécurité", "icon": "hash", "members": 9, "unread": 0, "is_dm": False, "is_group": False},
+        {"id": "ch-nettoyage", "name": "Nettoyage", "icon": "hash", "members": 7, "unread": 0, "is_dm": False, "is_group": False},
     ]
     await db.channels.insert_many(channels)
 
@@ -836,6 +834,16 @@ async def _seed_once() -> None:
          "content": "Bonjour à toutes et tous, bonne journée 💙", "ts": _now()},
         {"id": _id(), "channel_id": "ch-accueil", "author_id": CURRENT_EMPLOYEE_ID,
          "content": "Bonjour Sophie ! Bonne journée également 🙌", "ts": _now()},
+        {"id": _id(), "channel_id": "ch-ops", "author_id": "emp-sophie",
+         "content": "Salut équipe OPS ! Briefing rapide à 10h dans la salle Atlas.", "ts": _now()},
+        {"id": _id(), "channel_id": "ch-ops", "author_id": "emp-karim",
+         "content": "OK je serai là 👍", "ts": _now()},
+        {"id": _id(), "channel_id": "ch-ops", "author_id": "emp-noah",
+         "content": "Pareil. Petit point sécurité à faire aussi ?", "ts": _now()},
+        {"id": _id(), "channel_id": "ch-ops", "author_id": "emp-sophie",
+         "content": "Oui prévu, on parle des nouvelles consignes incendie.", "ts": _now()},
+        {"id": _id(), "channel_id": "ch-ops", "author_id": CURRENT_EMPLOYEE_ID,
+         "content": "Top, à tout à l'heure 💪", "ts": _now()},
         {"id": _id(), "channel_id": "ch-restauration", "author_id": "emp-thomas",
          "content": "Pensez à vérifier les stocks frites avant l'ouverture.", "ts": _now()},
         {"id": _id(), "channel_id": "ch-restauration", "author_id": "emp-emma",
@@ -852,23 +860,33 @@ async def _seed_once() -> None:
         {"id": _id(), "title": "Roller Party White Night",
          "date": (today + timedelta(days=5)).isoformat(), "time": "21:00",
          "type": "event", "location": "Piste Roller",
-         "description": "Soirée mensuelle ouverte aux salariés et invités."},
+         "description": "Soirée mensuelle ouverte aux salariés et invités.",
+         "needs_registration": True},
         {"id": _id(), "title": "Formation sécurité incendie",
          "date": (today + timedelta(days=10)).isoformat(), "time": "10:00",
          "type": "training", "location": "Salle RH",
-         "description": "Formation obligatoire annuelle."},
+         "description": "Formation obligatoire annuelle.",
+         "needs_registration": True},
         {"id": _id(), "title": "Réunion équipe Opérations",
          "date": (today + timedelta(days=2)).isoformat(), "time": "09:30",
          "type": "meeting", "location": "Salle Atlas",
-         "description": "Brief hebdomadaire."},
+         "description": "Brief hebdomadaire — point sur le week-end et planning.",
+         "needs_registration": False},
         {"id": _id(), "title": "Anniversaire Sophie BERNARD",
          "date": (today + timedelta(days=14)).isoformat(), "time": "12:00",
          "type": "birthday", "location": "Espace détente",
-         "description": "Pot d'anniversaire à 12h, gâteau offert !"},
+         "description": "Pot d'anniversaire à 12h, gâteau offert ! Venez quand vous voulez.",
+         "needs_registration": False},
         {"id": _id(), "title": "Maintenance Karting",
          "date": (today + timedelta(days=8)).isoformat(), "time": "07:00",
          "type": "maintenance", "location": "Piste karting",
-         "description": "Maintenance technique mensuelle."},
+         "description": "Maintenance technique mensuelle, équipe atelier uniquement. Piste fermée 7h-10h.",
+         "needs_registration": False},
+        {"id": _id(), "title": "Tournoi Karting Inter-équipes",
+         "date": (today + timedelta(days=30)).isoformat(), "time": "14:00",
+         "type": "event", "location": "Piste karting",
+         "description": "Grand tournoi annuel. Équipes de 4. Lots à gagner. Inscription obligatoire.",
+         "needs_registration": True},
     ]
     await db.events.insert_many(events)
 
@@ -1133,16 +1151,20 @@ async def create_order(payload: OrderCreate):
     line_items: list[dict] = []
     total_points = 0
     total_eur = 0.0
+    pickup_point = payload.pickup_point
     for it in payload.items:
         p = await db.products.find_one({"id": it.product_id}, {"_id": 0})
         if not p:
             raise HTTPException(404, f"Product {it.product_id} not found")
+        # Pickup point follows the product's store (single-store cart enforced)
+        pickup_point = p["store"]
         sub_pts = p["points"] * it.quantity
         sub_eur = p["price_eur"] * it.quantity
         line_items.append({
             "product_id": p["id"],
             "name": p["name"],
             "image": p["image"],
+            "store": p["store"],
             "quantity": it.quantity,
             "points": p["points"],
             "price_eur": p["price_eur"],
@@ -1167,7 +1189,7 @@ async def create_order(payload: OrderCreate):
         "total_points": total_points,
         "points_used": points_used,
         "surcharge_eur": surcharge_eur,
-        "pickup_point": payload.pickup_point,
+        "pickup_point": pickup_point,
         "pickup_date": payload.pickup_date,
         "pickup_time": payload.pickup_time,
         "qr_code": f"MSPARK-ORDER-{order_id[:8].upper()}",
@@ -1195,6 +1217,17 @@ async def list_orders():
     items = await db.orders.find(
         {"employee_id": CURRENT_EMPLOYEE_ID}, {"_id": 0}
     ).sort("created_at", -1).to_list(50)
+    # Auto-evolve status: preparing → ready after 5min from creation
+    now = datetime.now(timezone.utc)
+    for it in items:
+        if it.get("status") == "preparing":
+            try:
+                created = datetime.fromisoformat(it["created_at"])
+                if (now - created).total_seconds() >= 300:  # 5 minutes
+                    await db.orders.update_one({"id": it["id"]}, {"$set": {"status": "ready"}})
+                    it["status"] = "ready"
+            except Exception:
+                pass
     return items
 
 
@@ -1489,11 +1522,36 @@ async def create_dm(payload: DMCreate):
             "members": 2,
             "unread": 0,
             "is_dm": True,
+            "is_group": False,
             "avatar": other["avatar"],
         }
         await db.channels.insert_one(ch.copy())
         existing = ch
     return existing
+
+
+class GroupCreate(BaseModel):
+    name: str
+    member_ids: List[str]
+
+
+@api.post("/channels/group")
+async def create_group(payload: GroupCreate):
+    if not payload.name.strip() or len(payload.member_ids) < 1:
+        raise HTTPException(400, "Nom et membres requis")
+    cid = f"grp-{_id()[:8]}"
+    ch = {
+        "id": cid,
+        "name": payload.name.strip(),
+        "icon": "users",
+        "members": len(payload.member_ids) + 1,
+        "unread": 0,
+        "is_dm": False,
+        "is_group": True,
+        "member_ids": payload.member_ids + [CURRENT_EMPLOYEE_ID],
+    }
+    await db.channels.insert_one(ch.copy())
+    return ch
 
 
 app.include_router(api)

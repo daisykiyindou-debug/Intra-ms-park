@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Hash, Lock, Send, Smile, Paperclip, Phone, Video, Search, User, Plus, X } from "lucide-react";
+import { Hash, Lock, Send, Smile, Paperclip, Phone, Video, Search, User, Users, Plus, X } from "lucide-react";
 import { api } from "@/lib/api";
 import { useApp } from "@/contexts/AppContext";
 
@@ -13,6 +13,9 @@ export default function Messagerie() {
   const [messages, setMessages] = useState([]);
   const [draft, setDraft] = useState("");
   const [dmModal, setDmModal] = useState(false);
+  const [groupModal, setGroupModal] = useState(false);
+  const [groupName, setGroupName] = useState("");
+  const [groupMembers, setGroupMembers] = useState([]);
   const [empSearch, setEmpSearch] = useState("");
   const bottomRef = useRef(null);
 
@@ -43,8 +46,28 @@ export default function Messagerie() {
     setSearchParams({ ch: data.id });
   };
 
+  const createGroup = async () => {
+    if (!groupName.trim() || groupMembers.length === 0) {
+      toast.error("Nom et au moins 1 membre requis");
+      return;
+    }
+    const { data } = await api.post("/channels/group", {
+      name: groupName.trim(),
+      member_ids: groupMembers,
+    });
+    await loadChannels();
+    setActive(data.id);
+    setGroupModal(false);
+    setGroupName("");
+    setGroupMembers([]);
+    setEmpSearch("");
+    toast.success(`Groupe "${data.name}" créé`);
+    setSearchParams({ ch: data.id });
+  };
+
   const currentChannel = channels.find((c) => c.id === active);
-  const teamChannels = channels.filter((c) => !c.is_dm);
+  const teamChannels = channels.filter((c) => !c.is_dm && !c.is_group);
+  const groupChannels = channels.filter((c) => c.is_group);
   const dmChannels = channels.filter((c) => c.is_dm);
 
   const employeeOptions = employees
@@ -54,6 +77,10 @@ export default function Messagerie() {
         ? `${e.first_name} ${e.last_name} ${e.role}`.toLowerCase().includes(empSearch.toLowerCase())
         : true
     );
+
+  const toggleMember = (id) => {
+    setGroupMembers((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  };
 
   return (
     <div className="space-y-4 ms-fade-up">
@@ -66,13 +93,20 @@ export default function Messagerie() {
 
       <div className="ms-card overflow-hidden grid grid-cols-1 md:grid-cols-12 h-[72vh]">
         <aside className="md:col-span-3 border-r border-[#071B34]/5 bg-[#F8FAFC] flex flex-col">
-          <div className="p-3 border-b border-[#071B34]/5">
+          <div className="p-3 border-b border-[#071B34]/5 space-y-2">
             <button
               onClick={() => setDmModal(true)}
               data-testid="new-dm"
               className="ms-btn-primary w-full text-xs"
             >
-              <Plus className="h-3.5 w-3.5" /> Nouvelle discussion
+              <Plus className="h-3.5 w-3.5" /> Discussion directe
+            </button>
+            <button
+              onClick={() => setGroupModal(true)}
+              data-testid="new-group"
+              className="ms-btn-outline w-full text-xs"
+            >
+              <Users className="h-3.5 w-3.5" /> Créer un groupe
             </button>
           </div>
           <div className="overflow-y-auto flex-1 p-2">
@@ -80,6 +114,14 @@ export default function Messagerie() {
             {teamChannels.map((c) => (
               <ChannelBtn key={c.id} channel={c} active={active === c.id} onClick={() => setActive(c.id)} />
             ))}
+            {groupChannels.length > 0 && (
+              <>
+                <div className="ms-overline px-3 mt-4 mb-1">Groupes</div>
+                {groupChannels.map((c) => (
+                  <ChannelBtn key={c.id} channel={c} active={active === c.id} onClick={() => setActive(c.id)} />
+                ))}
+              </>
+            )}
             {dmChannels.length > 0 && (
               <>
                 <div className="ms-overline px-3 mt-4 mb-1">Messages directs</div>
@@ -248,12 +290,104 @@ export default function Messagerie() {
           </div>
         </div>
       )}
+
+      {/* Group creation modal */}
+      {groupModal && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          onClick={() => setGroupModal(false)}
+          className="fixed inset-0 z-50 bg-black/40 backdrop-blur-md flex items-center justify-center p-4"
+        >
+          <div onClick={(e) => e.stopPropagation()} className="ms-card max-w-lg w-full p-6">
+            <div className="flex items-start justify-between mb-4">
+              <div>
+                <div className="ms-overline">Nouveau groupe</div>
+                <h3 className="text-xl font-bold text-[#071B34] mt-1">Créer un groupe de discussion</h3>
+              </div>
+              <button
+                onClick={() => setGroupModal(false)}
+                className="flex h-9 w-9 items-center justify-center rounded-xl hover:bg-[#071B34]/5"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="space-y-3">
+              <div>
+                <label className="ms-overline">Nom du groupe</label>
+                <input
+                  value={groupName}
+                  onChange={(e) => setGroupName(e.target.value)}
+                  data-testid="group-name"
+                  placeholder="Ex. Équipe Karting weekend"
+                  className="ms-input mt-2"
+                />
+              </div>
+              <div>
+                <label className="ms-overline">Membres ({groupMembers.length} sélectionnés)</label>
+                <div className="relative mt-2 mb-2">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[#475569]" />
+                  <input
+                    value={empSearch}
+                    onChange={(e) => setEmpSearch(e.target.value)}
+                    placeholder="Rechercher…"
+                    className="ms-input pl-10"
+                  />
+                </div>
+                <div className="max-h-64 overflow-y-auto space-y-1 rounded-xl border border-[#071B34]/5 p-2">
+                  {employeeOptions.map((e) => {
+                    const checked = groupMembers.includes(e.id);
+                    return (
+                      <button
+                        key={e.id}
+                        onClick={() => toggleMember(e.id)}
+                        data-testid={`group-pick-${e.id}`}
+                        className={`flex items-center gap-3 w-full rounded-lg p-2 text-left transition-colors ${
+                          checked ? "bg-[#3BA4FF]/12" : "hover:bg-[#F4F7FA]"
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          readOnly
+                          className="h-4 w-4 accent-[#3BA4FF]"
+                        />
+                        <img src={e.avatar} alt="" className="h-8 w-8 rounded-full object-cover" />
+                        <div className="flex-1 min-w-0">
+                          <div className="text-sm font-semibold text-[#071B34]">
+                            {e.first_name} {e.last_name}
+                          </div>
+                          <div className="text-[11px] text-[#475569]">{e.role}</div>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+              <button
+                onClick={createGroup}
+                data-testid="create-group"
+                disabled={!groupName.trim() || groupMembers.length === 0}
+                className="ms-btn-primary w-full disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                Créer le groupe
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
 function ChannelBtn({ channel, active, onClick }) {
-  const Icon = channel.icon === "lock" ? Lock : channel.is_dm ? User : Hash;
+  const Icon = channel.icon === "lock"
+    ? Lock
+    : channel.is_dm
+    ? User
+    : channel.is_group
+    ? Users
+    : Hash;
   return (
     <button
       onClick={onClick}
