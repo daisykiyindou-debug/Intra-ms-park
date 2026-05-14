@@ -5,7 +5,7 @@ import { toast } from "sonner";
 
 export default function LoginPage() {
   const navigate = useNavigate();
-  const [email, setEmail] = useState("idriss.malonga@mspark.fr");
+  const [email, setEmail] = useState("idriss.malonga@gmail.com");
   const [password, setPassword] = useState("•••••••");
   const [loading, setLoading] = useState(false);
 
@@ -73,7 +73,7 @@ export default function LoginPage() {
 
           <div className="mt-8 space-y-4">
             <div>
-              <label className="ms-overline">Identifiant</label>
+              <label className="ms-overline">Email personnel</label>
               <div className="relative mt-2">
                 <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[#475569]" />
                 <input
@@ -81,6 +81,8 @@ export default function LoginPage() {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   className="ms-input pl-10"
+                  placeholder="vous@exemple.com"
+                  data-testid="login-email"
                   required
                 />
               </div>

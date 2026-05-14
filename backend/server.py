@@ -1147,6 +1147,9 @@ async def menu(store: Optional[str] = None):
 @api.post("/orders")
 async def create_order(payload: OrderCreate):
     today = date.today().isoformat()
+    # Enforce same-day orders only — no past/future pickup dates
+    if payload.pickup_date != today:
+        raise HTTPException(400, "Les commandes ne sont possibles que pour le jour même.")
     # Hydrate items
     line_items: list[dict] = []
     total_points = 0

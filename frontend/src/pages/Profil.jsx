@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Mail, Phone, Award, BadgeCheck, Sparkles, Edit3, Save, X, LogOut, Home, AtSign } from "lucide-react";
+import { Mail, Phone, Award, BadgeCheck, Sparkles, Edit3, Save, X, LogOut, Home } from "lucide-react";
 import { toast } from "sonner";
 import { useApp } from "@/contexts/AppContext";
 import { api, roleQuotaLabel } from "@/lib/api";
@@ -16,7 +16,6 @@ export default function Profil() {
 
   const startEdit = () => {
     setForm({
-      email: me.email,
       personal_email: me.personal_email,
       phone: me.phone,
       address: me.address,
@@ -108,12 +107,6 @@ export default function Profil() {
           <div className="mt-4 space-y-3">
             <Field
               icon={Mail}
-              label="Email professionnel"
-              editable={false}
-              value={me.email}
-            />
-            <Field
-              icon={AtSign}
               label="Email personnel"
               editable={editing}
               value={editing ? form.personal_email : me.personal_email}

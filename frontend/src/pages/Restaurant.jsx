@@ -36,7 +36,7 @@ export default function Restaurant() {
   const [products, setProducts] = useState([]);
   const [activeCategory, setActiveCategory] = useState("Tous");
   const [cart, setCart] = useState({}); // { product_id: { product, qty } }
-  const [pickupDate, setPickupDate] = useState(todayIso());
+  const pickupDate = todayIso(); // Locked to today
   // default pickup time: +1h30 from now
   const [pickupTime, setPickupTime] = useState(() => {
     const d = new Date();
@@ -46,7 +46,7 @@ export default function Restaurant() {
   const [balance, setBalance] = useState(null);
   const [orderConfirm, setOrderConfirm] = useState(null);
   const [orders, setOrders] = useState([]);
-  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [cartOpen, setCartOpen] = useState(false);
   const [dayInfo, setDayInfo] = useState(null);
   const [selectedOrder, setSelectedOrder] = useState(null);
 
@@ -86,22 +86,20 @@ export default function Restaurant() {
   const totalPoints = cartItems.reduce((s, ci) => s + ci.product.points * ci.qty, 0);
   const totalEur = cartItems.reduce((s, ci) => s + ci.product.price_eur * ci.qty, 0);
   const remaining = balance?.remaining || 0;
-  const isToday = pickupDate === todayIso();
   const isWorkingDay = dayInfo?.is_working_day;
   const canOrder = isWorkingDay;
-  const pointsUsable = isToday ? remaining : 0;
+  const pointsUsable = remaining;
   const pointsUsed = Math.min(pointsUsable, totalPoints);
   const pointsToPayEur =
     totalPoints > 0 ? (totalEur * (totalPoints - pointsUsed)) / totalPoints : 0;
 
-  // Validate pickup time (must be future AND +60min from now if today)
+  // Validate pickup time (must be +60min from now, jour J uniquement)
   const minPickupTime = useMemo(() => {
-    if (!isToday) return "00:00";
     const d = new Date();
     d.setMinutes(d.getMinutes() + 60);
     return d.toTimeString().slice(0, 5);
-  }, [isToday]);
-  const timeTooSoon = isToday && pickupTime < minPickupTime;
+  }, []);
+  const timeTooSoon = pickupTime < minPickupTime;
 
   const updateQty = (product, delta) => {
     setCart((prev) => {
@@ -145,7 +143,7 @@ export default function Restaurant() {
       });
       setOrderConfirm(data);
       setCart({});
-      setDrawerOpen(false);
+      setCartOpen(false);
       await refreshBalance();
       await refreshOrders();
       toast.success("Commande validée !", { description: `QR ${data.qr_code}` });
@@ -181,7 +179,7 @@ export default function Restaurant() {
           </h1>
         </div>
         <button
-          onClick={() => setDrawerOpen(true)}
+          onClick={() => setCartOpen(true)}
           data-testid="open-cart"
           className="relative ms-btn-primary"
         >
@@ -317,10 +315,10 @@ export default function Restaurant() {
         <OrdersList orders={orders} onClick={(o) => setSelectedOrder(o)} />
       )}
 
-      {/* Cart drawer */}
-      <CartDrawer
-        open={drawerOpen}
-        onClose={() => setDrawerOpen(false)}
+      {/* Cart modal */}
+      <CartModal
+        open={cartOpen}
+        onClose={() => setCartOpen(false)}
         cartItems={cartItems}
         cartStore={cartStore}
         balance={balance}
@@ -329,15 +327,12 @@ export default function Restaurant() {
         pointsToPayEur={pointsToPayEur}
         totalPoints={totalPoints}
         totalEur={totalEur}
-        pickupDate={pickupDate}
-        setPickupDate={setPickupDate}
         pickupTime={pickupTime}
         setPickupTime={setPickupTime}
         minPickupTime={minPickupTime}
         timeTooSoon={timeTooSoon}
         canOrder={canOrder}
         dayInfo={dayInfo}
-        isToday={isToday}
         updateQty={updateQty}
         placeOrder={placeOrder}
       />
@@ -368,27 +363,32 @@ export default function Restaurant() {
   );
 }
 
-// ───────────────────────────────────────── Cart Drawer
+// ───────────────────────────────────────── Cart Modal (centered)
 
-function CartDrawer({
+function CartModal({
   open, onClose, cartItems, cartStore, balance, pointsUsable, pointsUsed, pointsToPayEur,
-  totalPoints, totalEur, pickupDate, setPickupDate, pickupTime, setPickupTime,
-  minPickupTime, timeTooSoon, canOrder, dayInfo, isToday, updateQty, placeOrder,
+  totalPoints, totalEur, pickupTime, setPickupTime,
+  minPickupTime, timeTooSoon, canOrder, dayInfo, updateQty, placeOrder,
 }) {
+  if (!open) return null;
+
+  const todayLabel = new Date().toLocaleDateString("fr-FR", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+  });
+
   return (
-    <>
-      {open && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          onClick={onClose}
-          className="fixed inset-0 z-40 bg-black/30 backdrop-blur-sm"
-        />
-      )}
-      <aside
-        data-testid="cart-drawer"
-        style={{ transform: open ? "translateX(0)" : "translateX(100%)" }}
-        className="fixed right-0 top-0 z-50 h-screen w-full sm:w-[420px] bg-white shadow-2xl transition-transform duration-300 ease-out flex flex-col"
+    <div
+      role="dialog"
+      aria-modal="true"
+      onClick={onClose}
+      data-testid="cart-modal"
+      className="fixed inset-0 z-50 bg-black/40 backdrop-blur-md flex items-center justify-center p-4 sm:p-6"
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="ms-card w-full max-w-lg max-h-[92vh] flex flex-col overflow-hidden bg-white"
       >
         <div className="flex h-16 items-center justify-between px-5 border-b border-[#071B34]/5 shrink-0">
           <div className="flex items-center gap-2">
@@ -407,7 +407,7 @@ function CartDrawer({
 
         {balance && (
           <div
-            className={`px-5 py-2.5 text-sm ${
+            className={`px-5 py-2.5 text-sm shrink-0 ${
               pointsUsable > 0
                 ? "bg-[#10B981]/10 border-b border-[#10B981]/20 text-[#065F46]"
                 : "bg-[#FEE2E2] border-b border-[#EF4444]/20 text-[#B91C1C]"
@@ -421,9 +421,7 @@ function CartDrawer({
             ) : (
               <div className="flex items-start gap-2 font-semibold leading-tight">
                 <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
-                {isToday
-                  ? "Vous n'avez plus de points disponibles aujourd'hui. Le paiement sera intégralement en CB et en euros."
-                  : "Les points ne sont valables que le jour même. Pour cette date, paiement uniquement en CB."}
+                Vous n'avez plus de points disponibles aujourd'hui. Le paiement sera intégralement en CB et en euros.
               </div>
             )}
           </div>
@@ -460,17 +458,17 @@ function CartDrawer({
         </div>
 
         <div className="border-t border-[#071B34]/5 p-4 space-y-3 bg-white shrink-0">
+          {/* Date locked to today + time picker */}
           <div className="grid grid-cols-2 gap-2">
             <div>
-              <div className="text-[10px] uppercase tracking-wider font-semibold text-[#475569] mb-1">Date de retrait</div>
-              <input
-                type="date"
-                value={pickupDate}
-                onChange={(e) => setPickupDate(e.target.value)}
-                data-testid="pickup-date"
-                min={todayIso()}
-                className="ms-input text-sm py-2"
-              />
+              <div className="text-[10px] uppercase tracking-wider font-semibold text-[#475569] mb-1">
+                Date de retrait
+              </div>
+              <div className="ms-input text-sm py-2 bg-[#F4F7FA] text-[#071B34] font-semibold capitalize flex items-center gap-2" data-testid="pickup-date-fixed">
+                <Clock className="h-3.5 w-3.5 text-[#3BA4FF]" />
+                Aujourd'hui
+              </div>
+              <div className="mt-1 text-[10px] text-[#475569] capitalize">{todayLabel}</div>
             </div>
             <div>
               <div className="text-[10px] uppercase tracking-wider font-semibold text-[#475569] mb-1">Heure de retrait</div>
@@ -479,7 +477,7 @@ function CartDrawer({
                 value={pickupTime}
                 onChange={(e) => setPickupTime(e.target.value)}
                 data-testid="pickup-time"
-                min={isToday ? minPickupTime : "00:00"}
+                min={minPickupTime}
                 className="ms-input text-sm py-2"
               />
             </div>
@@ -488,9 +486,7 @@ function CartDrawer({
           <div className="rounded-xl bg-[#FEF3C7] border border-[#F59E0B]/20 p-2.5 flex items-start gap-2 text-xs text-[#B45309]">
             <Timer className="h-3.5 w-3.5 shrink-0 mt-0.5" />
             <span>
-              <strong>Anticipez !</strong> Prévoyez au moins 1 h pour que la cuisine prépare votre
-              commande. Évitez les heures de service ({STORE_LABEL[cartStore] || "le restaurant"}{" "}
-              est très fréquenté entre 12h et 14h).
+              <strong>Commandes le jour même uniquement.</strong> Prévoyez au moins 1 h pour que la cuisine prépare votre commande.
             </span>
           </div>
 
@@ -512,7 +508,7 @@ function CartDrawer({
           <div className="rounded-xl bg-[#F4F7FA] p-3 space-y-1 text-sm">
             <Row label="Total commande" value={`${totalPoints} pts (${totalEur.toFixed(2)} €)`} />
             <Row
-              label={isToday ? "Points utilisés" : "Points utilisés (J uniquement)"}
+              label="Points utilisés"
               value={`${pointsUsed} pts`}
               color="#10B981"
             />
@@ -531,8 +527,8 @@ function CartDrawer({
             {!canOrder ? "Indisponible (jour OFF)" : timeTooSoon ? "Heure trop tôt" : "Valider la commande"}
           </button>
         </div>
-      </aside>
-    </>
+      </div>
+    </div>
   );
 }
 
