@@ -272,7 +272,7 @@ function PlanningManager() {
       .then((r) => setContract(r.data));
   };
 
-  useEffect(loadWeek, [selectedId, weekStart]);
+  useEffect(() => { loadWeek(); }, [selectedId, weekStart]);
 
   const days = useMemo(
     () => Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)),
@@ -669,7 +669,7 @@ function RequestsManager() {
     const q = filter === "all" ? "" : `?status=${filter}`;
     api.get(`/admin/requests${q}`).then((r) => setItems(r.data));
   };
-  useEffect(load, [filter]);
+  useEffect(() => { load(); }, [filter]);
 
   const decide = async (req, action) => {
     if (action === "info") {
@@ -853,7 +853,7 @@ function NewsManager() {
   });
   const [news, setNews] = useState([]);
   const load = () => api.get("/news").then((r) => setNews(r.data));
-  useEffect(load, []);
+  useEffect(() => { load(); }, []);
 
   const publish = async () => {
     if (!form.title.trim() || !form.content.trim()) return;

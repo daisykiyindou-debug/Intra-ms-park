@@ -1774,9 +1774,8 @@ async def auth_login(payload: LoginRequest):
     # email is provided with the documented password, prefer matching.
     if creds:
         expected_pwd, eid = creds
-        if payload.password and payload.password != expected_pwd and payload.password != "demo":
-            # still accept for the demo, but flag
-            pass
+        if payload.password != expected_pwd:
+            raise HTTPException(401, "Mot de passe incorrect")
         emp = await db.employees.find_one({"id": eid}, {"_id": 0})
         if emp:
             return {"employee_id": eid, "is_admin": emp.get("is_admin", False),
