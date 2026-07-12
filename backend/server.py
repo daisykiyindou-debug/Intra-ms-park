@@ -258,6 +258,15 @@ async def _seed_once() -> None:
             "badge_active": True,
             "leave_balance": {"cp_n_1": 4, "cp_n": 12.5, "rtt": 3},
             "contract_hours_weekly": 24,
+            "weekly_pattern": {
+                "0": {"type": "off"},
+                "1": {"type": "off"},
+                "2": {"type": "shift", "start": "09:00", "end": "14:00"},
+                "3": {"type": "shift", "start": "09:00", "end": "14:00"},
+                "4": {"type": "shift", "start": "09:00", "end": "14:00"},
+                "5": {"type": "shift", "start": "09:00", "end": "14:00"},
+                "6": {"type": "shift", "start": "10:00", "end": "14:00"},
+            },
             "is_admin": False,
             "can_post": False,
         },
@@ -283,6 +292,15 @@ async def _seed_once() -> None:
             "badge_active": True,
             "leave_balance": {"cp_n_1": 6, "cp_n": 20, "rtt": 8},
             "contract_hours_weekly": 35,
+            "weekly_pattern": {
+                "0": {"type": "shift", "start": "09:00", "end": "17:00", "pause_start": "12:30", "pause_end": "13:30"},
+                "1": {"type": "shift", "start": "09:00", "end": "17:00", "pause_start": "12:30", "pause_end": "13:30"},
+                "2": {"type": "shift", "start": "09:00", "end": "17:00", "pause_start": "12:30", "pause_end": "13:30"},
+                "3": {"type": "shift", "start": "09:00", "end": "17:00", "pause_start": "12:30", "pause_end": "13:30"},
+                "4": {"type": "shift", "start": "09:00", "end": "17:00", "pause_start": "12:30", "pause_end": "13:30"},
+                "5": {"type": "off"},
+                "6": {"type": "off"},
+            },
             "is_admin": True,
             "can_post": True,
         },
@@ -431,7 +449,7 @@ async def _seed_once() -> None:
     schedule: list[dict] = []
     today = date.today()
     start_period = today - timedelta(days=28)
-    end_period = today + timedelta(days=42)
+    end_period = today + timedelta(days=365)
     cur = start_period
     # Rotation pattern for Idriss — TOTAL 24h/week, matches his contract exactly
     pattern = {
@@ -1224,10 +1242,13 @@ async def get_schedule(month: Optional[str] = None):
     y, m = map(int, month.split("-"))
     first = date(y, m, 1)
     last = (date(y, m + 1, 1) if m < 12 else date(y + 1, 1, 1)) - timedelta(days=1)
-    pad_start = (first - timedelta(days=7)).isoformat()
-    pad_end = (last + timedelta(days=7)).isoformat()
+    pad_start = first - timedelta(days=7)
+    pad_end = last + timedelta(days=7)
+    # Materialize missing days from the pattern
+    await _ensure_range(current_user(), pad_start, pad_end)
     items = await db.schedules.find(
-        {"employee_id": current_user(), "day": {"$gte": pad_start, "$lte": pad_end}},
+        {"employee_id": current_user(),
+         "day": {"$gte": pad_start.isoformat(), "$lte": pad_end.isoformat()}},
         {"_id": 0},
     ).sort("day", 1).to_list(200)
     return items
@@ -1236,6 +1257,11 @@ async def get_schedule(month: Optional[str] = None):
 @api.get("/schedule/day")
 async def get_schedule_day(day: str):
     """Return schedule entry for a specific day (YYYY-MM-DD)."""
+    try:
+        d = date.fromisoformat(day)
+    except Exception:
+        raise HTTPException(400, "Date invalide")
+    await _ensure_range(current_user(), d, d)
     item = await db.schedules.find_one(
         {"employee_id": current_user(), "day": day}, {"_id": 0}
     )
@@ -2066,15 +2092,75 @@ def _covered_minutes(entry: dict) -> int:
         return 0
 
 
+def _entry_from_pattern(emp: dict, day: date) -> dict:
+    """Build a fresh schedule entry for `day` using the employee's weekly_pattern.
+    Falls back to OFF when no pattern is defined."""
+    pattern = emp.get("weekly_pattern") or {}
+    p = pattern.get(str(day.weekday())) or {}
+    if not p or p.get("type") == "off":
+        return {
+            "id": _id(),
+            "employee_id": emp["id"],
+            "day": day.isoformat(),
+            "type": "off",
+            "start": None, "end": None,
+            "pause_start": None, "pause_end": None,
+            "break_minutes": 0,
+            "location": None, "manager": None, "service": None,
+            "note": "Jour de repos",
+        }
+    return {
+        "id": _id(),
+        "employee_id": emp["id"],
+        "day": day.isoformat(),
+        "type": p.get("type", "shift"),
+        "start": p.get("start"),
+        "end": p.get("end"),
+        "pause_start": p.get("pause_start"),
+        "pause_end": p.get("pause_end"),
+        "break_minutes": p.get("break_minutes", 0),
+        "location": p.get("location") or "MS Park",
+        "manager": emp.get("manager"),
+        "service": emp.get("department"),
+        "note": None,
+    }
+
+
+async def _ensure_range(employee_id: str, start: date, end: date) -> None:
+    """Materialize any missing schedule days between [start, end] from the employee's pattern.
+    Idempotent — never overwrites existing entries."""
+    emp = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not emp:
+        return
+    existing_days = set()
+    async for e in db.schedules.find(
+        {"employee_id": employee_id,
+         "day": {"$gte": start.isoformat(), "$lte": end.isoformat()}},
+        {"_id": 0, "day": 1},
+    ):
+        existing_days.add(e["day"])
+    to_insert = []
+    d = start
+    while d <= end:
+        if d.isoformat() not in existing_days:
+            to_insert.append(_entry_from_pattern(emp, d))
+        d = d + timedelta(days=1)
+    if to_insert:
+        await db.schedules.insert_many(to_insert)
+
+
 @api.get("/admin/employees")
 async def admin_list_employees():
     await require_admin()
     items = await db.employees.find({}, {"_id": 0}).to_list(500)
     # add total scheduled hours for current week
     today_d = date.today()
-    monday = (today_d - timedelta(days=today_d.weekday())).isoformat()
-    sunday = ((today_d - timedelta(days=today_d.weekday())) + timedelta(days=6)).isoformat()
+    monday_d = today_d - timedelta(days=today_d.weekday())
+    sunday_d = monday_d + timedelta(days=6)
+    monday = monday_d.isoformat()
+    sunday = sunday_d.isoformat()
     for emp in items:
+        await _ensure_range(emp["id"], monday_d, sunday_d)
         schs = await db.schedules.find(
             {"employee_id": emp["id"], "day": {"$gte": monday, "$lte": sunday}},
             {"_id": 0},
@@ -2092,6 +2178,8 @@ async def admin_get_schedule(employee_id: str, week_start: Optional[str] = None)
     if week_start:
         ws = date.fromisoformat(week_start)
         we = ws + timedelta(days=6)
+        # Materialize the week
+        await _ensure_range(employee_id, ws, we)
         q["day"] = {"$gte": ws.isoformat(), "$lte": we.isoformat()}
     items = await db.schedules.find(q, {"_id": 0}).sort("day", 1).to_list(200)
     return items
@@ -2167,6 +2255,8 @@ async def admin_contract_status(employee_id: str, week_start: Optional[str] = No
     else:
         ws = today_d - timedelta(days=today_d.weekday())
     we = ws + timedelta(days=6)
+    # Ensure schedule is materialized for the week
+    await _ensure_range(employee_id, ws, we)
     schs = await db.schedules.find(
         {"employee_id": employee_id, "day": {"$gte": ws.isoformat(), "$lte": we.isoformat()}},
         {"_id": 0},
@@ -2245,6 +2335,9 @@ async def admin_approve_request(rid: str, payload: RequestDecision):
         emp_id = req["employee_id"]
         start = date.fromisoformat(req["start_date"])
         end = date.fromisoformat(req.get("end_date") or req["start_date"])
+        # STEP 1: Materialize any missing days from the employee's weekly pattern
+        # so a CP request in a future/uncovered period still creates leave entries.
+        await _ensure_range(emp_id, start, end)
         new_type = "leave" if req["type"] == "cp" else "rtt"
         note = "Congé payé (validé)" if req["type"] == "cp" else "RTT (validé)"
         d = start
@@ -2253,13 +2346,12 @@ async def admin_approve_request(rid: str, payload: RequestDecision):
             existing = await db.schedules.find_one(
                 {"employee_id": emp_id, "day": d.isoformat()}, {"_id": 0}
             )
-            # Rule 1: no planning entry (day out of horizon) → skip, no consumption
-            # Rule 2: OFF days → skip, no consumption (user is off anyway)
-            # Rule 3: already leave/rtt/training → skip
+            # Rule 1: OFF days → skip, no consumption (user is off anyway)
+            # Rule 2: already leave/rtt/training → skip
             if not existing or existing.get("type") in ("off", "leave", "rtt", "training"):
                 d = d + timedelta(days=1)
                 continue
-            # Rule 4: shift day → convert to leave/rtt, PRESERVE hours so they count toward contract
+            # Rule 3: shift day → convert to leave/rtt, PRESERVE hours so they count toward contract
             await db.schedules.update_one(
                 {"employee_id": emp_id, "day": d.isoformat()},
                 {"$set": {"type": new_type, "note": note}},
@@ -2364,6 +2456,8 @@ async def leave_preview(payload: LeavePreview):
         raise HTTPException(400, "Dates invalides")
     if end < start:
         raise HTTPException(400, "La fin doit être postérieure au début")
+    # Materialize the range for accurate calc
+    await _ensure_range(current_user(), start, end)
     schs = await db.schedules.find(
         {"employee_id": current_user(),
          "day": {"$gte": start.isoformat(), "$lte": end.isoformat()}},
