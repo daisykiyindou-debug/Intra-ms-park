@@ -1460,6 +1460,10 @@ async def list_posts():
 
 @api.post("/posts")
 async def create_post(payload: PostCreate):
+    # Only admins can publish to the internal feed
+    me = await db.employees.find_one({"id": current_user()}, {"_id": 0})
+    if not me or not me.get("is_admin"):
+        raise HTTPException(403, "Seuls les administrateurs peuvent publier sur le fil")
     p = {
         "id": _id(),
         "author_id": current_user(),
@@ -1473,6 +1477,15 @@ async def create_post(payload: PostCreate):
     }
     await db.posts.insert_one(p.copy())
     return await _strip(p)
+
+
+@api.delete("/posts/{post_id}")
+async def delete_post(post_id: str):
+    me = await db.employees.find_one({"id": current_user()}, {"_id": 0})
+    if not me or not me.get("is_admin"):
+        raise HTTPException(403, "Seuls les administrateurs peuvent supprimer")
+    await db.posts.delete_one({"id": post_id})
+    return {"ok": True}
 
 
 @api.post("/posts/{post_id}/like")
@@ -2072,9 +2085,14 @@ def _shift_minutes(entry: dict) -> int:
 
 
 def _covered_minutes(entry: dict) -> int:
-    """Minutes that count toward contract fulfilment: shift + paid leave + rtt + training.
-    A CP day preserves its planned start/end so those hours count as 'covered'.
-    OFF days always return 0."""
+    """Minutes that count toward contract fulfilment.
+    Uses explicit `covered_minutes` field if set (for leave/rtt that no longer store start/end),
+    otherwise computes from start/end minus pause."""
+    if entry.get("covered_minutes") is not None:
+        try:
+            return max(0, int(entry["covered_minutes"]))
+        except Exception:
+            pass
     if entry.get("type") not in ("shift", "leave", "rtt", "training"):
         return 0
     if not entry.get("start") or not entry.get("end"):
@@ -2351,10 +2369,21 @@ async def admin_approve_request(rid: str, payload: RequestDecision):
             if not existing or existing.get("type") in ("off", "leave", "rtt", "training"):
                 d = d + timedelta(days=1)
                 continue
-            # Rule 3: shift day → convert to leave/rtt, PRESERVE hours so they count toward contract
+            # Rule 3: shift day → convert to leave/rtt. Store the covered minutes so
+            # contract calc keeps working, but CLEAR start/end/pause so the UI doesn't show hours.
+            covered = _covered_minutes(existing)
             await db.schedules.update_one(
                 {"employee_id": emp_id, "day": d.isoformat()},
-                {"$set": {"type": new_type, "note": note}},
+                {"$set": {
+                    "type": new_type,
+                    "note": note,
+                    "start": None,
+                    "end": None,
+                    "pause_start": None,
+                    "pause_end": None,
+                    "break_minutes": 0,
+                    "covered_minutes": covered,
+                }},
             )
             # Remove any real badging for that day (paid leave, not clocked-in)
             await db.badging.delete_many({"employee_id": emp_id, "day": d.isoformat()})

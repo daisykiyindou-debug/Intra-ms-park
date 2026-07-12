@@ -15,9 +15,8 @@ const subNav = [
   { to: "/management/planning", label: "Plannings", icon: ClipboardList },
   { to: "/management/demandes", label: "Demandes", icon: Inbox },
   { to: "/management/attributions", label: "RTT / CP", icon: Gift },
-  { to: "/management/actualites", label: "Actualités", icon: Newspaper },
+  { to: "/management/carrousel", label: "Carrousel accueil", icon: Newspaper },
   { to: "/management/documents", label: "Documents RH", icon: FileText },
-  { to: "/management/fil", label: "Fil MS Park", icon: Megaphone },
 ];
 
 const isoDate = (d) =>
@@ -89,9 +88,10 @@ export default function ManagementShell() {
         <Route path="planning" element={<PlanningManager />} />
         <Route path="demandes" element={<RequestsManager />} />
         <Route path="attributions" element={<LeaveGrantManager />} />
-        <Route path="actualites" element={<NewsManager />} />
+        <Route path="carrousel" element={<NewsManager />} />
+        <Route path="actualites" element={<Navigate to="/management/carrousel" replace />} />
         <Route path="documents" element={<DocumentsManager />} />
-        <Route path="fil" element={<BroadcastManager />} />
+        <Route path="fil" element={<Navigate to="/actualites" replace />} />
         <Route path="*" element={<Navigate to="/management" replace />} />
       </Routes>
     </div>
@@ -909,7 +909,11 @@ function NewsManager() {
   return (
     <div className="grid grid-cols-1 lg:grid-cols-5 gap-5">
       <div className="lg:col-span-2 ms-card p-5">
-        <h3 className="text-lg font-bold text-[#071B34] mb-3">Publier une actualité</h3>
+        <h3 className="text-lg font-bold text-[#071B34] mb-1">Ajouter une slide au carrousel</h3>
+        <p className="text-xs text-[#475569] mb-3">
+          Ces slides sont affichées sur la page d'accueil des employés (Dashboard).
+          Pour publier une actualité dans le fil MS Park, utilisez <strong>Entreprise → Actualités</strong>.
+        </p>
         <div className="space-y-3">
           <div>
             <label className="ms-overline">Titre</label>

@@ -46,9 +46,8 @@ const adminNav = [
   { to: "/management/planning", label: "Plannings employés", icon: ClipboardList, key: "mgmt-planning" },
   { to: "/management/demandes", label: "Validation demandes", icon: Inbox, key: "mgmt-demandes" },
   { to: "/management/attributions", label: "RTT / CP", icon: Gift, key: "mgmt-rtt" },
-  { to: "/management/actualites", label: "Actualités", icon: Newspaper, key: "mgmt-news" },
+  { to: "/management/carrousel", label: "Carrousel accueil", icon: Newspaper, key: "mgmt-carrousel" },
   { to: "/management/documents", label: "Documents RH", icon: FileText, key: "mgmt-docs" },
-  { to: "/management/fil", label: "Fil MS Park", icon: Megaphone, key: "mgmt-fil" },
 ];
 
 export default function Sidebar({ open, onClose }) {
