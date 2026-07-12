@@ -1109,6 +1109,7 @@ async def dashboard():
 
     week_minutes = 0
     week_planned_minutes = 0
+    week_leave_minutes = 0
     off_days = 0
     leave_days = 0
     late_count = 0
@@ -1122,23 +1123,18 @@ async def dashboard():
         if stype == "off":
             off_days += 1
             continue
-        if stype == "leave":
+        if stype in ("leave", "rtt"):
+            # Paid leave / RTT count toward the contract using their preserved hours
+            covered = _covered_minutes(sched)
+            week_planned_minutes += covered
+            week_minutes += covered
+            week_leave_minutes += covered
             leave_days += 1
             continue
         if stype == "shift":
             # planned duration (excluding pause)
-            try:
-                ps = datetime.strptime(sched["start"], "%H:%M")
-                pe = datetime.strptime(sched["end"], "%H:%M")
-                planned = int((pe - ps).total_seconds() // 60)
-                # remove pause
-                if sched.get("pause_start") and sched.get("pause_end"):
-                    pps = datetime.strptime(sched["pause_start"], "%H:%M")
-                    ppe = datetime.strptime(sched["pause_end"], "%H:%M")
-                    planned -= int((ppe - pps).total_seconds() // 60)
-                week_planned_minutes += max(0, planned)
-            except Exception:
-                pass
+            planned = _covered_minutes(sched)
+            week_planned_minutes += planned
 
             badge = badge_by_day.get(day_iso)
             if day_iso < today_iso:
@@ -1162,7 +1158,7 @@ async def dashboard():
                             )
                             live = max(0, int((datetime.now() - start_dt).total_seconds() // 60))
                             # cap to planned for this day
-                            week_minutes += min(live, planned if 'planned' in locals() else live)
+                            week_minutes += min(live, planned)
                         except Exception:
                             pass
 
@@ -1194,6 +1190,7 @@ async def dashboard():
         "upcoming_schedule": upcoming,
         "week_minutes": week_minutes,
         "week_planned_minutes": week_planned_minutes,
+        "week_leave_minutes": week_leave_minutes,
         "week_hours_target": 24 * 60,
         "presence_rate": presence_rate,
         "off_days_week": off_days,
@@ -1819,6 +1816,27 @@ def _shift_minutes(entry: dict) -> int:
         return 0
 
 
+def _covered_minutes(entry: dict) -> int:
+    """Minutes that count toward contract fulfilment: shift + paid leave + rtt + training.
+    A CP day preserves its planned start/end so those hours count as 'covered'.
+    OFF days always return 0."""
+    if entry.get("type") not in ("shift", "leave", "rtt", "training"):
+        return 0
+    if not entry.get("start") or not entry.get("end"):
+        return 0
+    try:
+        s = datetime.strptime(entry["start"], "%H:%M")
+        e = datetime.strptime(entry["end"], "%H:%M")
+        m = int((e - s).total_seconds() // 60)
+        if entry.get("pause_start") and entry.get("pause_end"):
+            ps = datetime.strptime(entry["pause_start"], "%H:%M")
+            pe = datetime.strptime(entry["pause_end"], "%H:%M")
+            m -= int((pe - ps).total_seconds() // 60)
+        return max(0, m)
+    except Exception:
+        return 0
+
+
 @api.get("/admin/employees")
 async def admin_list_employees():
     await require_admin()
@@ -1832,7 +1850,7 @@ async def admin_list_employees():
             {"employee_id": emp["id"], "day": {"$gte": monday, "$lte": sunday}},
             {"_id": 0},
         ).to_list(20)
-        emp["week_planned_minutes"] = sum(_shift_minutes(s) for s in schs)
+        emp["week_planned_minutes"] = sum(_covered_minutes(s) for s in schs)
         emp["contract_hours_weekly"] = emp.get("contract_hours_weekly", 35)
     return items
 
@@ -1909,7 +1927,7 @@ async def admin_delete_schedule(schedule_id: str):
 
 @api.get("/admin/contract-status/{employee_id}")
 async def admin_contract_status(employee_id: str, week_start: Optional[str] = None):
-    """Return contract vs planned hours for the week, with alert state."""
+    """Return contract vs planned hours (shift + leave + rtt count as covered)."""
     await require_admin()
     emp = await db.employees.find_one({"id": employee_id}, {"_id": 0})
     if not emp:
@@ -1924,7 +1942,7 @@ async def admin_contract_status(employee_id: str, week_start: Optional[str] = No
         {"employee_id": employee_id, "day": {"$gte": ws.isoformat(), "$lte": we.isoformat()}},
         {"_id": 0},
     ).to_list(20)
-    planned_minutes = sum(_shift_minutes(s) for s in schs)
+    planned_minutes = sum(_covered_minutes(s) for s in schs)
     contract_hours = emp.get("contract_hours_weekly", 35)
     contract_minutes = contract_hours * 60
     delta_minutes = planned_minutes - contract_minutes
@@ -1998,53 +2016,49 @@ async def admin_approve_request(rid: str, payload: RequestDecision):
         emp_id = req["employee_id"]
         start = date.fromisoformat(req["start_date"])
         end = date.fromisoformat(req.get("end_date") or req["start_date"])
-        entry_type = "leave" if req["type"] == "cp" else "rtt"
+        new_type = "leave" if req["type"] == "cp" else "rtt"
         note = "Congé payé (validé)" if req["type"] == "cp" else "RTT (validé)"
         d = start
-        days_used = 0
+        days_consumed = 0  # only working-days that are actually converted
         while d <= end:
-            # Overwrite any existing entry for this day
             existing = await db.schedules.find_one(
                 {"employee_id": emp_id, "day": d.isoformat()}, {"_id": 0}
             )
-            payload_sch = {
-                "employee_id": emp_id,
-                "day": d.isoformat(),
-                "type": entry_type,
-                "start": None, "end": None,
-                "pause_start": None, "pause_end": None,
-                "break_minutes": 0,
-                "location": None, "manager": None, "service": None,
-                "note": note,
-            }
-            # Remove any badging that could exist for that day (leave = no work)
+            # Rule 1: no planning entry (day out of horizon) → skip, no consumption
+            # Rule 2: OFF days → skip, no consumption (user is off anyway)
+            # Rule 3: already leave/rtt/training → skip
+            if not existing or existing.get("type") in ("off", "leave", "rtt", "training"):
+                d = d + timedelta(days=1)
+                continue
+            # Rule 4: shift day → convert to leave/rtt, PRESERVE hours so they count toward contract
+            await db.schedules.update_one(
+                {"employee_id": emp_id, "day": d.isoformat()},
+                {"$set": {"type": new_type, "note": note}},
+            )
+            # Remove any real badging for that day (paid leave, not clocked-in)
             await db.badging.delete_many({"employee_id": emp_id, "day": d.isoformat()})
-            if existing:
-                await db.schedules.update_one(
-                    {"employee_id": emp_id, "day": d.isoformat()},
-                    {"$set": payload_sch},
-                )
-            else:
-                payload_sch["id"] = _id()
-                await db.schedules.insert_one(payload_sch.copy())
-            days_used += 1
+            days_consumed += 1
             d = d + timedelta(days=1)
 
-        # Decrement counter on employee
+        # Decrement counter on employee (only for real working-days consumed)
         emp = await db.employees.find_one({"id": emp_id}, {"_id": 0})
-        if emp:
+        if emp and days_consumed > 0:
             bal = dict(emp.get("leave_balance") or {})
             if req["type"] == "cp":
-                # Consume CP N-1 first, then CP N
-                remaining = days_used
+                remaining = days_consumed
                 take_n1 = min(remaining, float(bal.get("cp_n_1", 0)))
                 bal["cp_n_1"] = round(float(bal.get("cp_n_1", 0)) - take_n1, 1)
                 remaining -= take_n1
                 if remaining > 0:
                     bal["cp_n"] = round(max(0, float(bal.get("cp_n", 0)) - remaining), 1)
             elif req["type"] == "rtt":
-                bal["rtt"] = round(max(0, float(bal.get("rtt", 0)) - days_used), 1)
+                bal["rtt"] = round(max(0, float(bal.get("rtt", 0)) - days_consumed), 1)
             await db.employees.update_one({"id": emp_id}, {"$set": {"leave_balance": bal}})
+
+        # Persist the effective consumption on the request for traceability
+        await db.requests.update_one(
+            {"id": rid}, {"$set": {"days_consumed": days_consumed}}
+        )
 
     await db.notifications.insert_one({
         "id": _id(),
@@ -2102,6 +2116,62 @@ async def admin_request_info(rid: str, payload: RequestDecision):
         "read": False,
     })
     return {"ok": True}
+
+
+# ─── Leave request preview (before submission) — respects OFF days
+class LeavePreview(BaseModel):
+    start_date: str
+    end_date: str
+
+
+@api.post("/leave/preview")
+async def leave_preview(payload: LeavePreview):
+    """Return how many working-days a CP/RTT request would actually consume.
+    Off days, existing leaves/rtt, or days without a shift are excluded."""
+    try:
+        start = date.fromisoformat(payload.start_date)
+        end = date.fromisoformat(payload.end_date)
+    except Exception:
+        raise HTTPException(400, "Dates invalides")
+    if end < start:
+        raise HTTPException(400, "La fin doit être postérieure au début")
+    schs = await db.schedules.find(
+        {"employee_id": current_user(),
+         "day": {"$gte": start.isoformat(), "$lte": end.isoformat()}},
+        {"_id": 0},
+    ).to_list(60)
+    by_day = {s["day"]: s for s in schs}
+    working = 0
+    off = 0
+    unknown = 0
+    total_minutes = 0
+    d = start
+    breakdown = []
+    while d <= end:
+        s = by_day.get(d.isoformat())
+        if not s:
+            unknown += 1
+            breakdown.append({"day": d.isoformat(), "type": "unknown", "consumed": False, "minutes": 0})
+        elif s.get("type") == "off":
+            off += 1
+            breakdown.append({"day": d.isoformat(), "type": "off", "consumed": False, "minutes": 0})
+        elif s.get("type") == "shift":
+            m = _covered_minutes(s)
+            total_minutes += m
+            working += 1
+            breakdown.append({"day": d.isoformat(), "type": "shift", "consumed": True, "minutes": m,
+                              "start": s.get("start"), "end": s.get("end")})
+        else:
+            breakdown.append({"day": d.isoformat(), "type": s.get("type"), "consumed": False, "minutes": 0})
+        d = d + timedelta(days=1)
+    return {
+        "days_total": (end - start).days + 1,
+        "days_off": off,
+        "days_unknown": unknown,
+        "days_consumed": working,
+        "covered_minutes": total_minutes,
+        "breakdown": breakdown,
+    }
 
 
 # ─── Admin news publishing
@@ -2321,7 +2391,7 @@ async def admin_stats():
             {"employee_id": emp["id"], "day": {"$gte": monday.isoformat(), "$lte": sunday.isoformat()}},
             {"_id": 0},
         ).to_list(20)
-        total_planned += sum(_shift_minutes(s) for s in schs)
+        total_planned += sum(_covered_minutes(s) for s in schs)
         total_contract += emp.get("contract_hours_weekly", 35) * 60
     pending = await db.requests.count_documents({"status": "pending"})
     return {

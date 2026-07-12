@@ -32,9 +32,13 @@ Intranet premium pour employés du parc MS Park + espace administrateur pour le 
 ## Règles métier clés
 - Commande restaurant : le jour J uniquement, ≥ 1 h avant retrait
 - Auto-consommation CP : d'abord CP N-1 puis CP N
-- Auto-génération planning lors de l'approbation de congé : type=`leave` (CP) ou `rtt`, note "Congé payé (validé)" / "RTT (validé)", badgeage effacé pour ces jours
+- **Approbation congé** : pour chaque jour de la période demandée
+  - Si jour OFF → **ignoré** (pas d'entrée CP, pas de décompte)
+  - Si jour SHIFT → converti en `type=leave`, horaires préservés, décompte 1 jour
+  - Si jour déjà leave/rtt/training → ignoré
+- **Heures CP couvertes** : `_covered_minutes` prend shift + leave + rtt en compte → un jour CP couvre bien les heures prévues du contrat, aucune heure manquante générée
 - Acquisition CP : +2,5 jours au 1er du mois (idempotent par employé/mois)
-- Sync bidirectionnelle admin ↔ employé : le frontend envoie `X-Employee-Id` header sur chaque requête
+- Sync bidirectionnelle admin ↔ employé : `X-Employee-Id` header
 
 ## Architecture
 - Backend FastAPI `/app/backend/server.py` (~2400 lignes) — routes `/api`, admin sous `/api/admin`, MongoDB motor, ContextVar pour l'utilisateur courant
