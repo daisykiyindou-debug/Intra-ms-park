@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { Mail, Phone, Award, BadgeCheck, Sparkles, Edit3, Save, X, LogOut, Home } from "lucide-react";
 import { toast } from "sonner";
 import { useApp } from "@/contexts/AppContext";
-import { api, roleQuotaLabel } from "@/lib/api";
+import { api, setAuthId, roleQuotaLabel } from "@/lib/api";
 
 export default function Profil() {
   const { me } = useApp();
@@ -67,8 +67,12 @@ export default function Profil() {
             </div>
           </div>
           <button
-            onClick={() => navigate("/login")}
-            data-testid="logout-btn"
+            onClick={() => {
+              setAuthId(null);
+              localStorage.setItem("ms_logged_out", "1");
+              window.location.href = "/login";
+            }}
+            data-testid="profile-logout-hero"
             className="inline-flex items-center gap-2 rounded-xl bg-white/8 backdrop-blur-md hover:bg-white/15 px-4 py-2.5 text-sm font-semibold text-white transition-colors"
           >
             <LogOut className="h-4 w-4" /> Se déconnecter

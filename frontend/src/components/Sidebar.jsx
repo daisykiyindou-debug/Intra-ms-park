@@ -14,6 +14,10 @@ import {
   Users,
   User,
   Sparkles,
+  ShieldCheck,
+  ClipboardList,
+  Inbox,
+  BarChart3,
 } from "lucide-react";
 import { useApp } from "@/contexts/AppContext";
 
@@ -35,8 +39,18 @@ const nav = [
   { to: "/contacts", label: "Contacts", icon: Users, key: "contacts" },
 ];
 
+const adminNav = [
+  { divider: "Management", adminBadge: true },
+  { to: "/management", label: "Vue d'ensemble", icon: BarChart3, key: "mgmt-overview" },
+  { to: "/management/planning", label: "Plannings employés", icon: ClipboardList, key: "mgmt-planning" },
+  { to: "/management/demandes", label: "Validation demandes", icon: Inbox, key: "mgmt-demandes" },
+  { to: "/management/actualites", label: "Publier actualité", icon: Newspaper, key: "mgmt-news" },
+];
+
 export default function Sidebar({ open, onClose }) {
   const { me } = useApp();
+  const isAdmin = !!me?.is_admin;
+  const items = isAdmin ? [...nav, ...adminNav] : nav;
 
   return (
     <>
@@ -66,12 +80,15 @@ export default function Sidebar({ open, onClose }) {
         </div>
 
         <nav className="px-3 py-4 space-y-0.5 overflow-y-auto" style={{ height: "calc(100vh - 5rem - 5rem)" }}>
-          {nav.map((item, i) =>
+          {items.map((item, i) =>
             item.divider ? (
               <div
                 key={`d-${i}`}
-                className="px-3 pt-5 pb-2 text-[10px] uppercase tracking-[0.2em] font-semibold text-white/40"
+                className={`px-3 pt-5 pb-2 text-[10px] uppercase tracking-[0.2em] font-semibold flex items-center gap-1.5 ${
+                  item.adminBadge ? "text-[#A78BFA]" : "text-white/40"
+                }`}
               >
+                {item.adminBadge && <ShieldCheck className="h-3 w-3" />}
                 {item.divider}
               </div>
             ) : (
@@ -110,17 +127,30 @@ export default function Sidebar({ open, onClose }) {
         {me && (
           <div className="absolute bottom-0 left-0 right-0 px-4 py-4 border-t border-white/5">
             <div className="flex items-center gap-3 rounded-xl bg-white/[0.03] p-3">
-              <img
-                src={me.avatar}
-                alt={me.first_name}
-                className="h-10 w-10 rounded-full object-cover ring-2 ring-[#3BA4FF]/40"
-                data-testid="sidebar-user-avatar"
-              />
+              <div className="relative">
+                <img
+                  src={me.avatar}
+                  alt={me.first_name}
+                  className="h-10 w-10 rounded-full object-cover ring-2 ring-[#3BA4FF]/40"
+                  data-testid="sidebar-user-avatar"
+                />
+                {isAdmin && (
+                  <span
+                    className="absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-[#A78BFA] ring-2 ring-[#071B34]"
+                    title="Administrateur"
+                  >
+                    <ShieldCheck className="h-3 w-3 text-white" />
+                  </span>
+                )}
+              </div>
               <div className="min-w-0">
                 <div className="truncate text-sm font-semibold text-white">
                   {me.first_name} {me.last_name}
                 </div>
-                <div className="truncate text-xs text-white/50">{me.role}</div>
+                <div className="truncate text-xs text-white/50">
+                  {isAdmin ? "Administrateur · " : ""}
+                  {me.role}
+                </div>
               </div>
             </div>
           </div>

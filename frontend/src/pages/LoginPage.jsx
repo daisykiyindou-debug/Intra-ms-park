@@ -1,22 +1,44 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Sparkles, LogIn, Mail, Lock, ArrowRight } from "lucide-react";
+import { Sparkles, LogIn, Mail, Lock, ArrowRight, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
+import { api, setAuthId } from "@/lib/api";
 
 export default function LoginPage() {
   const navigate = useNavigate();
   const [email, setEmail] = useState("idriss.malonga@gmail.com");
-  const [password, setPassword] = useState("•••••••");
+  const [password, setPassword] = useState("Idriss2026!");
   const [loading, setLoading] = useState(false);
 
-  const submit = (e) => {
+  const submit = async (e) => {
     e.preventDefault();
     setLoading(true);
-    setTimeout(() => {
+    try {
+      const { data } = await api.post("/auth/login", { email, password });
+      setAuthId(data.employee_id);
       localStorage.removeItem("ms_logged_out");
-      toast.success("Connecté à MS Park");
-      navigate("/dashboard");
-    }, 700);
+      toast.success(`Bienvenue ${data.first_name} ${data.last_name}`, {
+        description: data.is_admin ? "Espace administrateur disponible" : "Espace employé",
+      });
+      // Force a full reload so AppContext re-fetches /me with the new header
+      window.location.href = "/dashboard";
+    } catch (err) {
+      toast.error("Identifiants incorrects", {
+        description:
+          "Essayez idriss.malonga@gmail.com / Idriss2026! ou marcus.simeo@mspark.fr / MSPark@Admin2026!",
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fillAdmin = () => {
+    setEmail("marcus.simeo@mspark.fr");
+    setPassword("MSPark@Admin2026!");
+  };
+  const fillEmployee = () => {
+    setEmail("idriss.malonga@gmail.com");
+    setPassword("Idriss2026!");
   };
 
   return (
@@ -71,7 +93,26 @@ export default function LoginPage() {
             Connectez-vous avec votre identifiant MS Park pour accéder à l'intranet.
           </p>
 
-          <div className="mt-8 space-y-4">
+          <div className="mt-6 grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={fillEmployee}
+              data-testid="quickfill-employee"
+              className="text-[11px] font-semibold text-[#3BA4FF] bg-[#3BA4FF]/10 hover:bg-[#3BA4FF]/20 rounded-lg px-3 py-2 transition-colors"
+            >
+              👤 Démo employé
+            </button>
+            <button
+              type="button"
+              onClick={fillAdmin}
+              data-testid="quickfill-admin"
+              className="text-[11px] font-semibold text-[#7C3AED] bg-[#A78BFA]/10 hover:bg-[#A78BFA]/20 rounded-lg px-3 py-2 transition-colors inline-flex items-center justify-center gap-1.5"
+            >
+              <ShieldCheck className="h-3 w-3" /> Démo administrateur
+            </button>
+          </div>
+
+          <div className="mt-4 space-y-4">
             <div>
               <label className="ms-overline">Email personnel</label>
               <div className="relative mt-2">
@@ -96,6 +137,7 @@ export default function LoginPage() {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   className="ms-input pl-10"
+                  data-testid="login-password"
                   required
                 />
               </div>
@@ -111,7 +153,7 @@ export default function LoginPage() {
             type="submit"
             disabled={loading}
             data-testid="login-btn"
-            className="ms-btn-primary w-full mt-8 !py-3 disabled:opacity-60"
+            className="ms-btn-primary w-full mt-6 !py-3 disabled:opacity-60"
           >
             {loading ? (
               <span className="inline-flex items-center gap-2">

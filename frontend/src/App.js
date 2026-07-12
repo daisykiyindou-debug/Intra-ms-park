@@ -20,6 +20,7 @@ import Agenda from "@/pages/Agenda";
 import Avantages from "@/pages/Avantages";
 import Contacts from "@/pages/Contacts";
 import Profil from "@/pages/Profil";
+import ManagementShell from "@/pages/Management";
 
 function ProtectedShell() {
   const isOut = typeof window !== "undefined" && localStorage.getItem("ms_logged_out") === "1";
@@ -82,6 +83,7 @@ function App() {
               <Route path="/avantages" element={<Avantages />} />
               <Route path="/contacts" element={<Contacts />} />
               <Route path="/profil" element={<Profil />} />
+              <Route path="/management/*" element={<ManagementShell />} />
             </Route>
           </Routes>
         </BrowserRouter>

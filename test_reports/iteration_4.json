@@ -1,0 +1,49 @@
+{
+  "summary": "Iter4 testing of MS Park intranet with real login flow (X-Employee-Id + /api/auth/login). Backend: 14/15 pass — only auth/bad-password is not rejected (server accepts ANY password). Auto-sync CP (approve → planning entries + counter decrement) works end-to-end. Admin planning CRUD, contract-status, news+carousel toggle, leave/grant RTT, orders same-day 400 all pass. Frontend: admin sees the 5 Management links (Vue d'ensemble, Plannings, Demandes, Attributions RTT/CP, Actualités); employee (Idriss) sees none — RBAC OK. Restaurant cart is a modal (cart-modal) with pickup-date-fixed (no date input). Profil hides pro email @mspark.fr, shows only perso @gmail.com. Messagerie exposes new-group, messages-scroll, send-msg. Two frontend bugs found: (1) `contract-alert` data-testid MISSING on /management/plannings (spec requires it), (2) console PAGEERROR 'destroy is not a function' + useEffect async return warnings on management pages (non-blocking but must be fixed). Also planning pauses still off-by-computation (14:08/14:53) — iter3 bug still open.",
+  "backend_issues": {
+    "critical": [
+      {"endpoint": "POST /api/auth/login", "issue": "Wrong password is accepted with 200. server.py:1777 has `pass` in the mismatch branch — should raise 401. Bad password payload returns full employee_id and frontend redirects to /dashboard. Spec (and mocked_api list: 'accepte pwd attendu OU demo') requires rejection.", "priority": "CRITICAL"}
+    ],
+    "minor": [
+      {"endpoint": "GET /api/schedule (still)", "issue": "Pause times still computed as (mid-22min,+45min) → visible in Idriss planning cells as 14:08/14:53, 16:08/16:53, 17:08/17:53. Iter3 open item, not fixed. Users see odd minute values."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "Management > Plannings", "issue": "`data-testid=\"contract-alert\"` is NOT rendered on /management/plannings. Spec explicitly requires it to expose the state 'X heures manquantes' / 'Contrat respecté' / 'X heures supplémentaires prévues'. Add the testid to the contract banner in PlanningManager.", "selector": "[data-testid='contract-alert']", "priority": "HIGH"},
+      {"component": "LoginPage bad password", "issue": "With wrong password submitted, no toast/error is displayed AND the user is redirected to /dashboard. Both the backend accepting the pwd (see backend critical) and the front (no client-side check / no error rendering) must be fixed.", "selector": "[data-testid='login-btn']", "priority": "CRITICAL"},
+      {"component": "Management pages (all subroutes)", "issue": "React PAGEERROR: 'destroy is not a function' fires on /management/{attributions,plannings,demandes}. Also 2 useEffect warnings: 'must not return anything besides a function' — someone wrote useEffect(async ()=>{...}) which implicitly returns a Promise and breaks React's cleanup contract. Pages still render but behaviour of any cleanup logic is undefined.", "selector": "console", "priority": "HIGH"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "/management/actualites", "issues": ["Screenshot appears mostly empty aside from 'Made with Emergent' watermark on first paint — content loads a beat later but no skeleton visible during hydration."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_mspark_iter4.py",
+    "/app/test_reports/pytest/pytest_iter4.xml"
+  ],
+  "action_items": [
+    "server.py:1777 — replace `pass` with `raise HTTPException(401, 'Mot de passe incorrect')` when payload.password not in (expected_pwd, 'demo'). Do not keep the silent-accept fallback.",
+    "LoginPage.jsx — surface backend 401 as a toast (sonner) and DO NOT navigate on failure. Verify /login stays on screen.",
+    "Add data-testid='contract-alert' to the contract banner in Management PlanningManager (see /app/frontend/src/pages/Management.jsx).",
+    "Fix useEffect async return in Management sub-pages — wrap async work in an inner function and call it: `useEffect(() => { const run = async () => {...}; run(); }, [deps]);`. This kills the 'destroy is not a function' PAGEERROR.",
+    "Backend schedule pauses (iter3 open) — replace mid-22min math with a fixed lookup table keyed on (start,end)."
+  ],
+  "critical_code_review_comments": [
+    "Auth: the ‘accept anything’ backdoor in /api/auth/login is a security footgun even for a mock intranet — remove it or gate behind an ENV flag.",
+    "Multiple useEffect(async ...) in the codebase — add an eslint rule `react-hooks/exhaustive-deps` + custom `no-async-effect` to prevent regressions.",
+    "server.py is now 2367 lines — still monolithic; split /admin, /orders, /schedule into routers.",
+    "Sidebar innerText only exposes 'Attributions RTT/CP' — playwright substring 'Attributions' should match; verify the sidebar keeps a stable label to avoid future test drift."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_mspark_iter4.py"
+  ],
+  "success_rate": {"backend": "93% (14/15)", "frontend": "80% (login+RBAC+restaurant+profil+messagerie OK; contract-alert missing; management pageerror)"},
+  "test_credentials": "Employee idriss.malonga@gmail.com / Idriss2026! ; Admin marcus.simeo@mspark.fr / MSPark@Admin2026! (see /app/memory/test_credentials.md — file is now stale, says 'any password' which is currently technically true because backend accepts anything — after fix update it).",
+  "seed_data_creation": "Test approved a CP request for Idriss (created + approved + rolled back planning entries). Granted +2 RTT then -2 RTT. Created + toggled + deleted a TEST_iter4 news item. No lingering test data expected.",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Auth flow: POST /api/auth/login with email+password → returns {employee_id, is_admin, first_name, last_name}. Frontend stores employee_id in localStorage.ms_employee_id and all subsequent calls send X-Employee-Id. To force logout in tests: localStorage.clear() then setItem('ms_logged_out','1') and reload /login. Backend test file /app/backend/tests/test_mspark_iter4.py. Known open bugs at handoff: (1) auth accepts any password [BACKEND critical], (2) contract-alert testid missing [FRONTEND high], (3) useEffect async → PAGEERROR on management [FRONTEND high], (4) schedule pause math [BACKEND minor, from iter3].",
+  "rca_of_the_issue": "Bad-password RCA: server.py auth_login has `if payload.password and payload.password != expected_pwd and payload.password != \"demo\": pass` — the `pass` was left as a TODO and any known email will return success regardless of password. Mitigation: replace `pass` with `raise HTTPException(401, ...)`. useEffect RCA: management sub-pages likely use `useEffect(async () => { await fetchX(); }, [])` — React treats the returned Promise as the cleanup function and calls `.destroy()` on it, hence the runtime 'destroy is not a function'. Mitigation: define an inner async fn and call it. contract-alert RCA: PlanningManager renders the banner but forgot the data-testid attribute — add it to the banner div."
+}

@@ -40,7 +40,11 @@ export default function Dashboard() {
 
   useEffect(() => {
     api.get("/dashboard").then((r) => setData(r.data));
-    api.get("/news").then((r) => setNews(r.data));
+    api.get("/carousel").then((r) => {
+      // If admin didn't feature anything, fall back to latest news
+      if (r.data && r.data.length) setNews(r.data);
+      else api.get("/news").then((n) => setNews(n.data));
+    });
     api.get("/events").then((r) => setEvents(r.data));
     api.get("/meal-points/today").then((r) => setPoints(r.data));
     const t = setInterval(() => setNow(new Date()), 1000);
@@ -57,7 +61,8 @@ export default function Dashboard() {
     );
   }
 
-  const weekPct = Math.min(100, Math.round((data.week_minutes / data.week_hours_target) * 100));
+  const weekTarget = data.week_planned_minutes || data.week_hours_target;
+  const weekPct = weekTarget > 0 ? Math.min(100, Math.round((data.week_minutes / weekTarget) * 100)) : 0;
   const nextShift = data.upcoming_schedule.find((s) => s.type === "shift");
   const parisTime = now.toLocaleTimeString("fr-FR", {
     timeZone: "Europe/Paris",
@@ -187,7 +192,7 @@ export default function Dashboard() {
           icon={Clock}
           label="Heures semaine"
           value={formatMinutes(data.week_minutes)}
-          sub={`Objectif 24h · ${weekPct}%`}
+          sub={`Planifié ${formatMinutes(data.week_planned_minutes || 0)} · ${weekPct}%`}
           accent="#3BA4FF"
         />
         <KPICard
@@ -199,7 +204,7 @@ export default function Dashboard() {
         />
         <KPICard
           icon={CalendarDays}
-          label="Horaires futurs"
+          label="Shifts à venir"
           value={data.upcoming_schedule.filter((s) => s.type === "shift").length}
           sub="cette semaine"
           accent="#F59E0B"
@@ -211,6 +216,49 @@ export default function Dashboard() {
           sub="dans mon espace"
           accent="#A78BFA"
         />
+      </div>
+
+      {/* Semaine en chiffres (synthèse planning) */}
+      <div className="ms-card p-5">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-base font-bold text-[#071B34]">Ma semaine en chiffres</h3>
+          <Link
+            to="/rh/planning"
+            className="text-xs font-semibold text-[#3BA4FF] hover:underline inline-flex items-center gap-1"
+          >
+            Voir planning <ArrowRight className="h-3 w-3" />
+          </Link>
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <WeekStat
+            label="Jours OFF"
+            value={data.off_days_week ?? 0}
+            color="#64748B"
+            icon={PauseCircle}
+            testid="stat-off"
+          />
+          <WeekStat
+            label="Congés"
+            value={data.leave_days_week ?? 0}
+            color="#7C3AED"
+            icon={CalendarDays}
+            testid="stat-leave"
+          />
+          <WeekStat
+            label="Retards"
+            value={data.late_count_week ?? 0}
+            color="#F59E0B"
+            icon={CircleDot}
+            testid="stat-late"
+          />
+          <WeekStat
+            label="Absences"
+            value={data.absence_count_week ?? 0}
+            color="#EF4444"
+            icon={CircleDot}
+            testid="stat-absence"
+          />
+        </div>
       </div>
 
       {/* Points + Badgeage today */}
@@ -279,7 +327,10 @@ export default function Dashboard() {
           <div className="space-y-2">
             {data.upcoming_schedule.slice(0, 5).map((s) => {
               const d = new Date(s.day);
-              const isToday = s.day === new Date().toISOString().slice(0, 10);
+              const isToday = (() => {
+                const t = new Date();
+                return s.day === `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, "0")}-${String(t.getDate()).padStart(2, "0")}`;
+              })();
               const isOff = s.type === "off";
               const isLeave = s.type === "leave";
               const isTraining = s.type === "training";
@@ -392,5 +443,27 @@ function QuickLink({ to, icon: Icon, label, color }) {
       </div>
       <div className="text-sm font-semibold text-[#071B34]">{label}</div>
     </Link>
+  );
+}
+
+function WeekStat({ label, value, color, icon: Icon, testid }) {
+  return (
+    <div
+      data-testid={testid}
+      className="rounded-2xl border border-[#071B34]/5 p-4 flex items-center gap-3"
+    >
+      <div
+        className="flex h-10 w-10 items-center justify-center rounded-xl shrink-0"
+        style={{ background: `${color}1F`, color }}
+      >
+        <Icon className="h-5 w-5" />
+      </div>
+      <div className="min-w-0">
+        <div className="text-2xl font-extrabold text-[#071B34] leading-none">{value}</div>
+        <div className="text-[11px] uppercase tracking-wider font-semibold text-[#475569] mt-1">
+          {label}
+        </div>
+      </div>
+    </div>
   );
 }

@@ -27,7 +27,10 @@ const STATUS_META = {
   cancelled: { label: "Annulée", color: "#64748B", bg: "#F1F5F9", step: 0 },
 };
 
-const todayIso = () => new Date().toISOString().slice(0, 10);
+const todayIso = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
 const nowHHMM = () => new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
 
 export default function Restaurant() {
@@ -674,6 +677,7 @@ function OrderQRModal({ order, onClose, onPickup, onCancel, onSeeOrders, isDetai
 // ───────────────────────────────────────── Orders list
 
 function OrdersList({ orders, onClick }) {
+  const [showAll, setShowAll] = useState(false);
   if (orders.length === 0) {
     return (
       <div className="ms-card p-12 text-center">
@@ -685,9 +689,11 @@ function OrdersList({ orders, onClick }) {
       </div>
     );
   }
+  const visible = showAll ? orders : orders.slice(0, 3);
+  const hiddenCount = orders.length - visible.length;
   return (
     <div className="space-y-3">
-      {orders.map((o) => {
+      {visible.map((o) => {
         const meta = STATUS_META[o.status];
         const pickupDate = new Date(o.pickup_date);
         return (
@@ -770,6 +776,25 @@ function OrdersList({ orders, onClick }) {
           </button>
         );
       })}
+      {hiddenCount > 0 && (
+        <button
+          onClick={() => setShowAll(true)}
+          data-testid="see-all-orders"
+          className="ms-card ms-card-hover w-full p-4 text-center text-sm font-semibold text-[#3BA4FF] hover:text-[#1D70B8] transition-colors flex items-center justify-center gap-2"
+        >
+          <ListOrdered className="h-4 w-4" />
+          Voir tout l'historique ({hiddenCount} commande{hiddenCount > 1 ? "s" : ""} de plus)
+        </button>
+      )}
+      {showAll && orders.length > 3 && (
+        <button
+          onClick={() => setShowAll(false)}
+          data-testid="collapse-orders"
+          className="w-full p-3 text-center text-xs font-semibold text-[#475569] hover:text-[#071B34] transition-colors"
+        >
+          Réduire à 3 commandes
+        </button>
+      )}
     </div>
   );
 }

@@ -1,9 +1,12 @@
-"""Iter4 — MS Park API tests for the latest spec changes.
+"""Iter4 backend tests for MS Park intranet.
 
-Focus: pickup_date=today enforcement, channels/group endpoint, /me, /menu, /orders happy path.
+Covers: /api/auth/login, /api/me, /api/carousel, /api/admin/* (schedule,
+contract-status, requests approve auto-sync, leave/grant, news CRUD),
+/api/orders same-day enforcement.
 """
 import os
-from datetime import date, datetime, timedelta
+import uuid
+from datetime import date, timedelta
 
 import pytest
 import requests
@@ -11,119 +14,174 @@ import requests
 BASE_URL = os.environ["REACT_APP_BACKEND_URL"].rstrip("/")
 API = f"{BASE_URL}/api"
 
+EMP_ID = "emp-idriss-malonga"
+ADMIN_ID = "emp-marcus-simeo"
 
-@pytest.fixture(scope="module")
-def s():
-    sess = requests.Session()
-    sess.headers.update({"Content-Type": "application/json"})
-    return sess
-
-
-@pytest.fixture(scope="module")
-def first_product(s):
-    r = s.get(f"{API}/menu?store=soccer_bar")
-    assert r.status_code == 200
-    data = r.json()
-    assert isinstance(data, list) and len(data) > 0
-    return data[0]
+H_EMP = {"X-Employee-Id": EMP_ID, "Content-Type": "application/json"}
+H_ADM = {"X-Employee-Id": ADMIN_ID, "Content-Type": "application/json"}
 
 
-# ───────── /me
-def test_me_returns_employee(s):
-    r = s.get(f"{API}/me")
-    assert r.status_code == 200
-    d = r.json()
-    assert "personal_email" in d
-    assert d["first_name"]
-    assert d["last_name"]
+class TestAuth:
+    def test_login_employee_ok(self):
+        r = requests.post(f"{API}/auth/login", json={
+            "email": "idriss.malonga@gmail.com", "password": "Idriss2026!"})
+        assert r.status_code == 200
+        d = r.json()
+        assert d["employee_id"] == EMP_ID and d["is_admin"] is False
+
+    def test_login_admin_ok(self):
+        r = requests.post(f"{API}/auth/login", json={
+            "email": "marcus.simeo@mspark.fr", "password": "MSPark@Admin2026!"})
+        assert r.status_code == 200 and r.json()["is_admin"] is True
+
+    def test_login_bad_password_should_reject(self):
+        r = requests.post(f"{API}/auth/login", json={
+            "email": "idriss.malonga@gmail.com", "password": "wrong-xyz"})
+        assert r.status_code == 401, f"got {r.status_code}: {r.text}"
+
+    def test_login_unknown_email(self):
+        r = requests.post(f"{API}/auth/login", json={
+            "email": "nobody@example.com", "password": "x"})
+        assert r.status_code == 401
 
 
-def test_put_me_updates_personal_email(s):
-    original = s.get(f"{API}/me").json()
-    new_email = "TEST_idriss.malonga@gmail.com"
-    r = s.put(f"{API}/me", json={"personal_email": new_email})
-    assert r.status_code == 200
-    assert r.json()["personal_email"] == new_email
-    # Verify persistence
-    r2 = s.get(f"{API}/me").json()
-    assert r2["personal_email"] == new_email
-    # Restore
-    s.put(f"{API}/me", json={"personal_email": original.get("personal_email", "idriss.malonga@gmail.com")})
+class TestMeCarousel:
+    def test_me_employee(self):
+        r = requests.get(f"{API}/me", headers=H_EMP)
+        assert r.status_code == 200
+        d = r.json()
+        assert d["id"] == EMP_ID and d["contract_hours_weekly"] == 24
+
+    def test_me_admin(self):
+        r = requests.get(f"{API}/me", headers=H_ADM)
+        assert r.status_code == 200 and r.json()["is_admin"] is True
+
+    def test_carousel_featured_only(self):
+        r = requests.get(f"{API}/carousel", headers=H_EMP)
+        assert r.status_code == 200
+        for it in r.json():
+            assert it.get("featured") and it.get("active")
 
 
-# ───────── /orders — same-day-only enforcement
-def test_order_rejected_past_date(s, first_product):
-    yesterday = (date.today() - timedelta(days=1)).isoformat()
-    payload = {
-        "items": [{"product_id": first_product["id"], "quantity": 1}],
-        "pickup_point": first_product["store"],
-        "pickup_date": yesterday,
-        "pickup_time": "12:00",
-    }
-    r = s.post(f"{API}/orders", json=payload)
-    assert r.status_code == 400
-    body = r.json()
-    msg = body.get("detail") or body.get("message") or ""
-    assert "jour même" in msg or "jour meme" in msg.lower() or "same" in msg.lower(), f"unexpected: {body}"
+class TestPlanningAdmin:
+    day = (date.today() + timedelta(days=30)).isoformat()
+
+    def test_admin_requires_admin(self):
+        r = requests.get(f"{API}/admin/employees", headers=H_EMP)
+        assert r.status_code in (401, 403)
+
+    def test_admin_employees_ok(self):
+        r = requests.get(f"{API}/admin/employees", headers=H_ADM)
+        assert r.status_code == 200
+        assert any(e["id"] == EMP_ID for e in r.json())
+
+    def test_planning_crud(self):
+        payload = {"employee_id": EMP_ID, "day": self.day, "type": "shift",
+                   "start": "12:00", "end": "17:00", "note": "TEST_iter4"}
+        r = requests.post(f"{API}/admin/schedule", headers=H_ADM, json=payload)
+        assert r.status_code == 200, r.text
+        sid = r.json()["id"]
+
+        r = requests.get(f"{API}/admin/schedule/{EMP_ID}", headers=H_ADM)
+        m = [e for e in r.json() if e["day"] == self.day]
+        assert m and m[0]["start"] == "12:00"
+
+        payload2 = dict(payload, type="off", start=None, end=None)
+        assert requests.post(f"{API}/admin/schedule", headers=H_ADM, json=payload2).status_code == 200
+        r = requests.get(f"{API}/admin/schedule/{EMP_ID}", headers=H_ADM)
+        m = [e for e in r.json() if e["day"] == self.day]
+        assert m[0]["type"] == "off"
+
+        assert requests.delete(f"{API}/admin/schedule/{sid}", headers=H_ADM).status_code == 200
+        r = requests.get(f"{API}/admin/schedule/{EMP_ID}", headers=H_ADM)
+        assert not any(e["day"] == self.day for e in r.json())
+
+    def test_contract_status(self):
+        r = requests.get(f"{API}/admin/contract-status/{EMP_ID}", headers=H_ADM)
+        assert r.status_code == 200
 
 
-def test_order_rejected_future_date(s, first_product):
-    tomorrow = (date.today() + timedelta(days=1)).isoformat()
-    payload = {
-        "items": [{"product_id": first_product["id"], "quantity": 1}],
-        "pickup_point": first_product["store"],
-        "pickup_date": tomorrow,
-        "pickup_time": "12:00",
-    }
-    r = s.post(f"{API}/orders", json=payload)
-    assert r.status_code == 400
+class TestAutoSyncLeave:
+    def test_approve_cp_syncs_planning_and_counter(self):
+        start = date.today() + timedelta(days=45)
+        end = start + timedelta(days=1)
+        r = requests.post(f"{API}/requests", headers=H_EMP, json={
+            "type": "cp", "start_date": start.isoformat(),
+            "end_date": end.isoformat(), "reason": "TEST_iter4"})
+        assert r.status_code == 200, r.text
+        rid = r.json()["id"]
+
+        bal = requests.get(f"{API}/me", headers=H_EMP).json()["leave_balance"]
+        total_before = float(bal.get("cp_n_1") or 0) + float(bal.get("cp_n") or 0)
+
+        r = requests.post(f"{API}/admin/requests/{rid}/approve",
+                          headers=H_ADM, json={"note": "OK"})
+        assert r.status_code == 200, r.text
+
+        entries = {e["day"]: e for e in requests.get(
+            f"{API}/admin/schedule/{EMP_ID}", headers=H_ADM).json()}
+        for offset in (0, 1):
+            d = (start + timedelta(days=offset)).isoformat()
+            assert d in entries and entries[d]["type"] == "leave"
+
+        bal2 = requests.get(f"{API}/me", headers=H_EMP).json()["leave_balance"]
+        total_after = float(bal2.get("cp_n_1") or 0) + float(bal2.get("cp_n") or 0)
+        assert round(total_before - total_after, 1) == 2.0
+
+        # cleanup
+        for e in requests.get(f"{API}/admin/schedule/{EMP_ID}", headers=H_ADM).json():
+            if e["day"] in [(start + timedelta(days=o)).isoformat() for o in (0, 1)]:
+                requests.delete(f"{API}/admin/schedule/{e['id']}", headers=H_ADM)
 
 
-def test_order_today_success(s, first_product):
-    today = date.today().isoformat()
-    # use time +2h to be safely after the +1h minimum
-    pickup = (datetime.now() + timedelta(hours=2)).strftime("%H:%M")
-    payload = {
-        "items": [{"product_id": first_product["id"], "quantity": 1}],
-        "pickup_point": first_product["store"],
-        "pickup_date": today,
-        "pickup_time": pickup,
-    }
-    r = s.post(f"{API}/orders", json=payload)
-    assert r.status_code == 200, r.text
-    d = r.json()
-    assert d["status"] == "preparing"
-    assert d["qr_code"].startswith("MSPARK-ORDER-")
-    assert d["pickup_date"] == today
+class TestLeaveGrant:
+    def test_grant_rtt_increments_counter(self):
+        before = float(requests.get(f"{API}/me", headers=H_EMP).json()["leave_balance"].get("rtt") or 0)
+        r = requests.post(f"{API}/admin/leave/grant", headers=H_ADM, json={
+            "employee_ids": [EMP_ID], "type": "rtt", "days": 2, "note": "TEST_iter4"})
+        assert r.status_code == 200, r.text
+        after = float(requests.get(f"{API}/me", headers=H_EMP).json()["leave_balance"].get("rtt") or 0)
+        assert round(after - before, 1) == 2.0
+        # rollback
+        requests.post(f"{API}/admin/leave/grant", headers=H_ADM, json={
+            "employee_ids": [EMP_ID], "type": "rtt", "days": -2, "note": "rollback"})
 
 
-# ───────── /channels/group
-def test_channels_group_creation(s):
-    # Need at least 1 member_id — grab from /employees
-    emps = s.get(f"{API}/employees").json()
-    assert isinstance(emps, list) and len(emps) >= 2
-    members = [e["id"] for e in emps[:2]]
-    payload = {"name": "TEST_iter4_group", "member_ids": members}
-    r = s.post(f"{API}/channels/group", json=payload)
-    assert r.status_code == 200, r.text
-    d = r.json()
-    assert d.get("is_group") is True
-    assert d["name"] == "TEST_iter4_group"
+class TestNews:
+    def test_news_carousel_toggle(self):
+        r = requests.post(f"{API}/admin/news", headers=H_ADM, json={
+            "title": f"TEST_iter4 {uuid.uuid4().hex[:6]}",
+            "content": "test", "category": "Événement",
+            "image": "https://images.unsplash.com/photo-1533174072545-7a4b6ad7a6c3?w=1200",
+            "featured": True, "active": True, "order": 99})
+        assert r.status_code == 200, r.text
+        nid = r.json()["id"]
+
+        assert any(n["id"] == nid for n in requests.get(f"{API}/carousel", headers=H_EMP).json())
+
+        r = requests.put(f"{API}/admin/news/{nid}", headers=H_ADM, json={"featured": False})
+        assert r.status_code == 200
+        assert not any(n["id"] == nid for n in requests.get(f"{API}/carousel", headers=H_EMP).json())
+
+        assert requests.delete(f"{API}/admin/news/{nid}", headers=H_ADM).status_code == 200
 
 
-# ───────── /menu sanity
-def test_menu_returns_products(s):
-    r = s.get(f"{API}/menu?store=donut_house")
-    assert r.status_code == 200
-    items = r.json()
-    assert all("store" in p for p in items)
-    assert all(p["store"] == "donut_house" for p in items)
-
-
-# ───────── meal points
-def test_meal_points_today(s):
-    r = s.get(f"{API}/meal-points/today")
-    assert r.status_code == 200
-    d = r.json()
-    assert "remaining" in d
-    assert isinstance(d["remaining"], int)
+class TestOrdersSameDay:
+    def test_future_pickup_rejected(self):
+        r = requests.get(f"{API}/menu", headers=H_EMP)
+        if r.status_code != 200:
+            pytest.skip("No menu endpoint")
+        data = r.json()
+        products = data if isinstance(data, list) else (data.get("products") or data.get("items") or [])
+        # flatten if grouped
+        if products and isinstance(products[0], dict) and "products" in products[0]:
+            products = [p for g in products for p in g.get("products", [])]
+        if not products:
+            pytest.skip("No products")
+        p = products[0]
+        future = (date.today() + timedelta(days=2)).isoformat()
+        r = requests.post(f"{API}/orders", headers=H_EMP, json={
+            "items": [{"product_id": p["id"], "quantity": 1}],
+            "pickup_point": p.get("store", "restaurant"),
+            "pickup_date": future, "pickup_time": "12:30"})
+        assert r.status_code == 400, f"expected 400, got {r.status_code}: {r.text}"

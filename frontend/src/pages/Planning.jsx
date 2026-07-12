@@ -43,7 +43,9 @@ export default function Planning() {
   }, [month]);
 
   const byDay = useMemo(() => Object.fromEntries(data.map((s) => [s.day, s])), [data]);
-  const iso = (d) => d.toISOString().slice(0, 10);
+  // Local-timezone ISO to avoid UTC shift (Sat OFF → shows as Sun on other continents)
+  const iso = (d) =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 
   const monthMins = useMemo(() => {
     let mins = 0;

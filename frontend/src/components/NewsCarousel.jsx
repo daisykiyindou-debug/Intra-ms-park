@@ -50,15 +50,29 @@ export default function NewsCarousel({ items = [] }) {
                   <h3 className="mt-3 text-2xl md:text-4xl font-bold tracking-tight text-white leading-tight">
                     {n.title}
                   </h3>
-                  <p className="mt-2 text-sm md:text-base text-white/80 max-w-xl">{n.summary}</p>
+                  <p className="mt-2 text-sm md:text-base text-white/80 max-w-xl line-clamp-2">
+                    {n.summary || n.content}
+                  </p>
                   <div className="mt-4 flex items-center gap-4">
-                    <Link
-                      to="/actualites"
-                      data-testid={`news-cta-${n.id}`}
-                      className="ms-btn-primary"
-                    >
-                      Lire l'actualité <ArrowUpRight className="h-4 w-4" />
-                    </Link>
+                    {n.cta_url && n.cta_url.startsWith("http") ? (
+                      <a
+                        href={n.cta_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        data-testid={`news-cta-${n.id}`}
+                        className="ms-btn-primary"
+                      >
+                        {n.cta_text || "En savoir plus"} <ArrowUpRight className="h-4 w-4" />
+                      </a>
+                    ) : (
+                      <Link
+                        to={n.cta_url || "/actualites"}
+                        data-testid={`news-cta-${n.id}`}
+                        className="ms-btn-primary"
+                      >
+                        {n.cta_text || "Lire l'actualité"} <ArrowUpRight className="h-4 w-4" />
+                      </Link>
+                    )}
                     <span className="text-xs text-white/60">{formatDateFr(n.date)}</span>
                   </div>
                 </div>

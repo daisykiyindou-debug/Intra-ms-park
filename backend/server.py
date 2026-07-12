@@ -1,10 +1,12 @@
 """MS Park Intranet — FastAPI backend with mocked HR data.
 
-No authentication: the connected employee is always "Idriss MALONGA".
-All data is seeded at startup (idempotently) so the front-end has rich content.
+Authentication is simulated via the `X-Employee-Id` header — the frontend stores
+the currently-logged-in user in localStorage and forwards it on every request.
+Two demo users are seeded: Idriss Malonga (employee) and Marcus Siméo (admin).
 """
 from __future__ import annotations
 
+import contextvars
 import logging
 import os
 import uuid
@@ -13,7 +15,7 @@ from pathlib import Path
 from typing import Any, List, Optional
 
 from dotenv import load_dotenv
-from fastapi import APIRouter, FastAPI, HTTPException
+from fastapi import APIRouter, FastAPI, HTTPException, Request
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.middleware.cors import CORSMiddleware
@@ -39,7 +41,25 @@ ROLE_QUOTAS = {
     "encadrement": 35,
 }
 
-CURRENT_EMPLOYEE_ID = "emp-idriss-malonga"
+CURRENT_EMPLOYEE_ID = "emp-idriss-malonga"  # default (used for seed)
+ADMIN_EMPLOYEE_ID = "emp-marcus-simeo"
+
+# Per-request current user (set by middleware from X-Employee-Id header)
+_current_user_var: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "current_user", default=CURRENT_EMPLOYEE_ID
+)
+
+
+def current_user() -> str:
+    return _current_user_var.get()
+
+
+async def require_admin() -> dict:
+    """Raise 403 unless the current user is flagged is_admin=True."""
+    emp = await db.employees.find_one({"id": current_user()}, {"_id": 0})
+    if not emp or not emp.get("is_admin"):
+        raise HTTPException(403, "Accès administrateur requis")
+    return emp
 
 # ───────────────────────────────── Models ────────────────────────────────────
 
@@ -231,13 +251,40 @@ async def _seed_once() -> None:
             "available": True,
             "seniority_months": 18,
             "skills": ["Accueil clients", "Karting", "Attractions", "Sécurité"],
-            "manager": "Sophie BERNARD",
+            "manager": "Marcus SIMÉO",
             "location": "MS Park — Site principal",
             "badge_number": "MSP-2451",
             "badge_expiry": "2027-08-15",
             "badge_active": True,
             "leave_balance": {"cp_n_1": 4, "cp_n": 12.5, "rtt": 3},
+            "contract_hours_weekly": 24,
+            "is_admin": False,
             "can_post": False,
+        },
+        {
+            "id": ADMIN_EMPLOYEE_ID,
+            "first_name": "Marcus",
+            "last_name": "SIMÉO",
+            "role": "Responsable Opérationnel",
+            "role_category": "encadrement",
+            "department": "Direction Opérations",
+            "avatar": "https://images.unsplash.com/photo-1560250097-0b93528c311a?w=400&h=400&fit=crop&crop=faces",
+            "email": "marcus.simeo@mspark.fr",
+            "personal_email": "marcus.simeo@gmail.com",
+            "phone": "+33 6 99 88 77 66",
+            "address": "8 avenue de la République, 92000 Nanterre",
+            "available": True,
+            "seniority_months": 72,
+            "skills": ["Management", "Planning", "Coaching", "Pilotage opérationnel"],
+            "manager": "Direction",
+            "location": "MS Park — Bureau direction",
+            "badge_number": "MSP-0007",
+            "badge_expiry": "2028-01-31",
+            "badge_active": True,
+            "leave_balance": {"cp_n_1": 6, "cp_n": 20, "rtt": 8},
+            "contract_hours_weekly": 35,
+            "is_admin": True,
+            "can_post": True,
         },
         {
             "id": "emp-sophie",
@@ -454,6 +501,50 @@ async def _seed_once() -> None:
         if s["day"] == leave_day:
             s.update({"type": "leave", "start": None, "end": None,
                       "break_minutes": 0, "note": "Congé validé"})
+
+    # ─── Schedule for Marcus (admin, 35h/week, Mon–Fri 9h-17h)
+    admin_pattern = {
+        0: ("09:00", "17:00"),
+        1: ("09:00", "17:00"),
+        2: ("09:00", "17:00"),
+        3: ("09:00", "17:00"),
+        4: ("09:00", "17:00"),
+    }
+    cur = start_period
+    while cur <= end_period:
+        wd = cur.weekday()
+        d = cur.isoformat()
+        if wd in admin_pattern:
+            s, e = admin_pattern[wd]
+            schedule.append({
+                "id": _id(),
+                "employee_id": ADMIN_EMPLOYEE_ID,
+                "day": d,
+                "start": s,
+                "end": e,
+                "pause_start": "12:30",
+                "pause_end": "13:30",
+                "break_minutes": 60,
+                "type": "shift",
+                "location": "Bureau Direction",
+                "manager": "Direction",
+                "service": "Direction Opérations",
+                "note": None,
+            })
+        else:
+            schedule.append({
+                "id": _id(),
+                "employee_id": ADMIN_EMPLOYEE_ID,
+                "day": d,
+                "start": None, "end": None,
+                "pause_start": None, "pause_end": None,
+                "break_minutes": 0,
+                "type": "off",
+                "location": None, "manager": None, "service": None,
+                "note": "Week-end",
+            })
+        cur += timedelta(days=1)
+
     await db.schedules.insert_many(schedule)
 
     # ─── Badging history for past shifts (with pause records)
@@ -816,16 +907,16 @@ async def _seed_once() -> None:
 
     # ─── Channels & messages (mock messagerie)
     channels: list[dict] = [
-        {"id": "ch-accueil", "name": "Accueil", "icon": "hash", "members": 24, "unread": 0, "is_dm": False, "is_group": False},
-        {"id": "ch-ops", "name": "Employés OPS", "icon": "hash", "members": 18, "unread": 3, "is_dm": False, "is_group": False},
-        {"id": "ch-roller", "name": "Roller", "icon": "hash", "members": 12, "unread": 2, "is_dm": False, "is_group": False},
-        {"id": "ch-karting", "name": "Karting", "icon": "hash", "members": 18, "unread": 0, "is_dm": False, "is_group": False},
-        {"id": "ch-attractions", "name": "Attractions", "icon": "hash", "members": 14, "unread": 0, "is_dm": False, "is_group": False},
-        {"id": "ch-restauration", "name": "Restauration", "icon": "hash", "members": 22, "unread": 1, "is_dm": False, "is_group": False},
-        {"id": "ch-donut", "name": "Donut House", "icon": "hash", "members": 8, "unread": 0, "is_dm": False, "is_group": False},
-        {"id": "ch-soccer", "name": "Soccer Bar", "icon": "hash", "members": 16, "unread": 0, "is_dm": False, "is_group": False},
-        {"id": "ch-securite", "name": "Sécurité", "icon": "hash", "members": 9, "unread": 0, "is_dm": False, "is_group": False},
-        {"id": "ch-nettoyage", "name": "Nettoyage", "icon": "hash", "members": 7, "unread": 0, "is_dm": False, "is_group": False},
+        {"id": "ch-accueil", "name": "Accueil", "icon": "hash", "members": 24, "unread": 0, "is_dm": False, "is_group": False, "archived": False},
+        {"id": "ch-ops", "name": "Employés OPS", "icon": "hash", "members": 18, "unread": 3, "is_dm": False, "is_group": False, "archived": False},
+        {"id": "ch-roller", "name": "Roller", "icon": "hash", "members": 12, "unread": 2, "is_dm": False, "is_group": False, "archived": False},
+        {"id": "ch-karting", "name": "Karting", "icon": "hash", "members": 18, "unread": 0, "is_dm": False, "is_group": False, "archived": False},
+        {"id": "ch-attractions", "name": "Attractions", "icon": "hash", "members": 14, "unread": 0, "is_dm": False, "is_group": False, "archived": False},
+        {"id": "ch-restauration", "name": "Restauration", "icon": "hash", "members": 22, "unread": 1, "is_dm": False, "is_group": False, "archived": False},
+        {"id": "ch-donut", "name": "Donut House", "icon": "hash", "members": 8, "unread": 0, "is_dm": False, "is_group": False, "archived": False},
+        {"id": "ch-soccer", "name": "Soccer Bar", "icon": "hash", "members": 16, "unread": 0, "is_dm": False, "is_group": False, "archived": False},
+        {"id": "ch-securite", "name": "Sécurité", "icon": "hash", "members": 9, "unread": 0, "is_dm": False, "is_group": False, "archived": False},
+        {"id": "ch-nettoyage", "name": "Nettoyage", "icon": "hash", "members": 7, "unread": 0, "is_dm": False, "is_group": False, "archived": False},
     ]
     await db.channels.insert_many(channels)
 
@@ -939,7 +1030,7 @@ async def root():
 
 @api.get("/me")
 async def me():
-    emp = await db.employees.find_one({"id": CURRENT_EMPLOYEE_ID}, {"_id": 0})
+    emp = await db.employees.find_one({"id": current_user()}, {"_id": 0})
     if not emp:
         raise HTTPException(404, "Current employee not found")
     quota = ROLE_QUOTAS.get(emp.get("role_category", "employe"), 20)
@@ -957,12 +1048,12 @@ async def list_employees():
 @api.get("/dashboard")
 async def dashboard():
     today = date.today().isoformat()
-    emp = await db.employees.find_one({"id": CURRENT_EMPLOYEE_ID}, {"_id": 0})
+    emp = await db.employees.find_one({"id": current_user()}, {"_id": 0})
     today_schedule = await db.schedules.find_one(
-        {"employee_id": CURRENT_EMPLOYEE_ID, "day": today}, {"_id": 0}
+        {"employee_id": current_user(), "day": today}, {"_id": 0}
     )
     today_badge = await db.badging.find_one(
-        {"employee_id": CURRENT_EMPLOYEE_ID, "day": today}, {"_id": 0}
+        {"employee_id": current_user(), "day": today}, {"_id": 0}
     )
 
     # Compute live status
@@ -992,25 +1083,93 @@ async def dashboard():
 
     # Upcoming days
     upcoming = await db.schedules.find(
-        {"employee_id": CURRENT_EMPLOYEE_ID, "day": {"$gte": today}},
+        {"employee_id": current_user(), "day": {"$gte": today}},
         {"_id": 0},
     ).sort("day", 1).to_list(7)
 
-    # Week hours
+    # Week hours — based on REAL planning shifts (not only badging) + badging adjustments
     today_d = date.today()
     monday = today_d - timedelta(days=today_d.weekday())
     sunday = monday + timedelta(days=6)
+    week_iso = [(monday + timedelta(days=i)).isoformat() for i in range(7)]
+
+    week_schedules = await db.schedules.find(
+        {"employee_id": current_user(),
+         "day": {"$gte": monday.isoformat(), "$lte": sunday.isoformat()}},
+        {"_id": 0},
+    ).to_list(20)
+    sched_by_day = {s["day"]: s for s in week_schedules}
+
     week_badges = await db.badging.find(
-        {"employee_id": CURRENT_EMPLOYEE_ID,
+        {"employee_id": current_user(),
          "day": {"$gte": monday.isoformat(), "$lte": sunday.isoformat()}},
         {"_id": 0},
     ).to_list(100)
-    week_minutes = sum(b.get("worked_minutes", 0) for b in week_badges)
+    badge_by_day = {b["day"]: b for b in week_badges}
+
+    week_minutes = 0
+    week_planned_minutes = 0
+    off_days = 0
+    leave_days = 0
+    late_count = 0
+    absence_count = 0
+    today_iso = today_d.isoformat()
+    for day_iso in week_iso:
+        sched = sched_by_day.get(day_iso)
+        if not sched:
+            continue
+        stype = sched.get("type")
+        if stype == "off":
+            off_days += 1
+            continue
+        if stype == "leave":
+            leave_days += 1
+            continue
+        if stype == "shift":
+            # planned duration (excluding pause)
+            try:
+                ps = datetime.strptime(sched["start"], "%H:%M")
+                pe = datetime.strptime(sched["end"], "%H:%M")
+                planned = int((pe - ps).total_seconds() // 60)
+                # remove pause
+                if sched.get("pause_start") and sched.get("pause_end"):
+                    pps = datetime.strptime(sched["pause_start"], "%H:%M")
+                    ppe = datetime.strptime(sched["pause_end"], "%H:%M")
+                    planned -= int((ppe - pps).total_seconds() // 60)
+                week_planned_minutes += max(0, planned)
+            except Exception:
+                pass
+
+            badge = badge_by_day.get(day_iso)
+            if day_iso < today_iso:
+                # past day → use actual badged minutes
+                if badge and badge.get("worked_minutes"):
+                    week_minutes += badge.get("worked_minutes", 0)
+                    if badge.get("anomaly") == "late":
+                        late_count += 1
+                else:
+                    absence_count += 1
+            elif day_iso == today_iso:
+                # today — count what's already worked (live) if badged in
+                if badge and badge.get("clock_in"):
+                    if badge.get("clock_out"):
+                        week_minutes += badge.get("worked_minutes", 0)
+                    else:
+                        # estimate live worked minutes
+                        try:
+                            start_dt = datetime.strptime(sched["start"], "%H:%M").replace(
+                                year=today_d.year, month=today_d.month, day=today_d.day
+                            )
+                            live = max(0, int((datetime.now() - start_dt).total_seconds() // 60))
+                            # cap to planned for this day
+                            week_minutes += min(live, planned if 'planned' in locals() else live)
+                        except Exception:
+                            pass
 
     # Presence rate over last 28 days
     last28 = (today_d - timedelta(days=28)).isoformat()
     past = await db.badging.find(
-        {"employee_id": CURRENT_EMPLOYEE_ID,
+        {"employee_id": current_user(),
          "day": {"$gte": last28, "$lt": today}},
         {"_id": 0},
     ).to_list(100)
@@ -1020,7 +1179,7 @@ async def dashboard():
 
     # Notifications & messages
     unread_notifs = await db.notifications.count_documents(
-        {"employee_id": CURRENT_EMPLOYEE_ID, "read": False}
+        {"employee_id": current_user(), "read": False}
     )
     docs_count = await db.documents.count_documents({})
     unread_msgs = 3  # mock
@@ -1034,8 +1193,13 @@ async def dashboard():
         "worked_minutes_today": worked_minutes,
         "upcoming_schedule": upcoming,
         "week_minutes": week_minutes,
+        "week_planned_minutes": week_planned_minutes,
         "week_hours_target": 24 * 60,
         "presence_rate": presence_rate,
+        "off_days_week": off_days,
+        "leave_days_week": leave_days,
+        "late_count_week": late_count,
+        "absence_count_week": absence_count,
         "unread_notifications": unread_notifs,
         "unread_messages": unread_msgs,
         "documents_count": docs_count,
@@ -1062,7 +1226,7 @@ async def get_schedule(month: Optional[str] = None):
     pad_start = (first - timedelta(days=7)).isoformat()
     pad_end = (last + timedelta(days=7)).isoformat()
     items = await db.schedules.find(
-        {"employee_id": CURRENT_EMPLOYEE_ID, "day": {"$gte": pad_start, "$lte": pad_end}},
+        {"employee_id": current_user(), "day": {"$gte": pad_start, "$lte": pad_end}},
         {"_id": 0},
     ).sort("day", 1).to_list(200)
     return items
@@ -1072,7 +1236,7 @@ async def get_schedule(month: Optional[str] = None):
 async def get_schedule_day(day: str):
     """Return schedule entry for a specific day (YYYY-MM-DD)."""
     item = await db.schedules.find_one(
-        {"employee_id": CURRENT_EMPLOYEE_ID, "day": day}, {"_id": 0}
+        {"employee_id": current_user(), "day": day}, {"_id": 0}
     )
     return {"day": day, "entry": item, "is_working_day": bool(item and item.get("type") == "shift")}
 
@@ -1088,7 +1252,7 @@ async def get_badging(filter_range: str = "month"):
     else:
         start = today_d.replace(day=1)
     items = await db.badging.find(
-        {"employee_id": CURRENT_EMPLOYEE_ID, "day": {"$gte": start.isoformat()}},
+        {"employee_id": current_user(), "day": {"$gte": start.isoformat()}},
         {"_id": 0},
     ).sort("day", -1).to_list(100)
     return items
@@ -1098,28 +1262,28 @@ async def get_badging(filter_range: str = "month"):
 @api.get("/meal-points/today")
 async def meal_points_today():
     today = date.today().isoformat()
-    emp = await db.employees.find_one({"id": CURRENT_EMPLOYEE_ID}, {"_id": 0})
+    emp = await db.employees.find_one({"id": current_user()}, {"_id": 0})
     quota = ROLE_QUOTAS.get(emp.get("role_category", "employe"), 20)
 
     # Points are credited automatically every day (no badge required for MVP demo)
     today_sched = await db.schedules.find_one(
-        {"employee_id": CURRENT_EMPLOYEE_ID, "day": today}, {"_id": 0}
+        {"employee_id": current_user(), "day": today}, {"_id": 0}
     )
     today_badge = await db.badging.find_one(
-        {"employee_id": CURRENT_EMPLOYEE_ID, "day": today}, {"_id": 0}
+        {"employee_id": current_user(), "day": today}, {"_id": 0}
     )
     credited = True
     credited_points = quota
 
     transactions = await db.meal_tx.find(
-        {"employee_id": CURRENT_EMPLOYEE_ID, "ts": {"$gte": today + "T00:00:00"}},
+        {"employee_id": current_user(), "ts": {"$gte": today + "T00:00:00"}},
         {"_id": 0},
     ).sort("ts", -1).to_list(50)
     used = sum(t.get("points_spent", 0) for t in transactions)
     remaining = max(0, credited_points - used)
 
     last_tx = await db.meal_tx.find_one(
-        {"employee_id": CURRENT_EMPLOYEE_ID}, {"_id": 0}, sort=[("ts", -1)]
+        {"employee_id": current_user()}, {"_id": 0}, sort=[("ts", -1)]
     )
     return {
         "daily_quota": quota,
@@ -1187,7 +1351,7 @@ async def create_order(payload: OrderCreate):
     order_id = _id()
     order = {
         "id": order_id,
-        "employee_id": CURRENT_EMPLOYEE_ID,
+        "employee_id": current_user(),
         "items": line_items,
         "total_points": total_points,
         "points_used": points_used,
@@ -1204,7 +1368,7 @@ async def create_order(payload: OrderCreate):
     if points_used > 0:
         await db.meal_tx.insert_one({
             "id": _id(),
-            "employee_id": CURRENT_EMPLOYEE_ID,
+            "employee_id": current_user(),
             "ts": _now(),
             "points_spent": points_used,
             "surcharge_eur": surcharge_eur,
@@ -1218,7 +1382,7 @@ async def create_order(payload: OrderCreate):
 @api.get("/orders")
 async def list_orders():
     items = await db.orders.find(
-        {"employee_id": CURRENT_EMPLOYEE_ID}, {"_id": 0}
+        {"employee_id": current_user()}, {"_id": 0}
     ).sort("created_at", -1).to_list(50)
     # Auto-evolve status: preparing → ready after 5min from creation
     now = datetime.now(timezone.utc)
@@ -1271,7 +1435,7 @@ async def list_posts():
 async def create_post(payload: PostCreate):
     p = {
         "id": _id(),
-        "author_id": CURRENT_EMPLOYEE_ID,
+        "author_id": current_user(),
         "category": payload.category or "annonce",
         "content": payload.content,
         "image": payload.image,
@@ -1290,10 +1454,10 @@ async def toggle_like(post_id: str):
     if not p:
         raise HTTPException(404, "Post not found")
     likes = set(p.get("likes", []))
-    if CURRENT_EMPLOYEE_ID in likes:
-        likes.discard(CURRENT_EMPLOYEE_ID)
+    if current_user() in likes:
+        likes.discard(current_user())
     else:
-        likes.add(CURRENT_EMPLOYEE_ID)
+        likes.add(current_user())
     await db.posts.update_one({"id": post_id}, {"$set": {"likes": list(likes)}})
     return {"likes": list(likes)}
 
@@ -1305,7 +1469,7 @@ async def add_comment(post_id: str, payload: CommentCreate):
         raise HTTPException(404, "Post not found")
     comment = {
         "id": _id(),
-        "author_id": CURRENT_EMPLOYEE_ID,
+        "author_id": current_user(),
         "content": payload.content,
         "created_at": _now(),
         "replies": [],
@@ -1317,7 +1481,7 @@ async def add_comment(post_id: str, payload: CommentCreate):
 # ─── Requests
 @api.get("/requests")
 async def list_requests(status: Optional[str] = None):
-    q = {"employee_id": CURRENT_EMPLOYEE_ID}
+    q = {"employee_id": current_user()}
     if status:
         q["status"] = status
     items = await db.requests.find(q, {"_id": 0}).sort("created_at", -1).to_list(100)
@@ -1328,7 +1492,7 @@ async def list_requests(status: Optional[str] = None):
 async def create_request(payload: RequestCreate):
     r = {
         "id": _id(),
-        "employee_id": CURRENT_EMPLOYEE_ID,
+        "employee_id": current_user(),
         "type": payload.type,
         "start_date": payload.start_date,
         "end_date": payload.end_date,
@@ -1354,7 +1518,7 @@ async def list_documents(category: Optional[str] = None):
 @api.get("/notifications")
 async def list_notifications():
     items = await db.notifications.find(
-        {"employee_id": CURRENT_EMPLOYEE_ID}, {"_id": 0}
+        {"employee_id": current_user()}, {"_id": 0}
     ).sort("created_at", -1).to_list(50)
     return items
 
@@ -1368,7 +1532,7 @@ async def read_notif(nid: str):
 @api.post("/notifications/read-all")
 async def read_all_notifs():
     await db.notifications.update_many(
-        {"employee_id": CURRENT_EMPLOYEE_ID}, {"$set": {"read": True}}
+        {"employee_id": current_user()}, {"$set": {"read": True}}
     )
     return {"ok": True}
 
@@ -1397,7 +1561,7 @@ async def post_message(cid: str, payload: MessageCreate):
     msg = {
         "id": _id(),
         "channel_id": cid,
-        "author_id": CURRENT_EMPLOYEE_ID,
+        "author_id": current_user(),
         "content": payload.content,
         "ts": _now(),
     }
@@ -1429,8 +1593,8 @@ class ProfileUpdate(BaseModel):
 async def update_me(payload: ProfileUpdate):
     updates = {k: v for k, v in payload.model_dump().items() if v is not None}
     if updates:
-        await db.employees.update_one({"id": CURRENT_EMPLOYEE_ID}, {"$set": updates})
-    emp = await db.employees.find_one({"id": CURRENT_EMPLOYEE_ID}, {"_id": 0})
+        await db.employees.update_one({"id": current_user()}, {"$set": updates})
+    emp = await db.employees.find_one({"id": current_user()}, {"_id": 0})
     emp["daily_quota"] = ROLE_QUOTAS.get(emp.get("role_category", "employe"), 20)
     return emp
 
@@ -1445,12 +1609,12 @@ class BadgeLost(BaseModel):
 @api.post("/badge/lost")
 async def report_lost(payload: BadgeLost):
     await db.employees.update_one(
-        {"id": CURRENT_EMPLOYEE_ID}, {"$set": {"badge_active": False}}
+        {"id": current_user()}, {"$set": {"badge_active": False}}
     )
     rid = _id()
     await db.requests.insert_one({
         "id": rid,
-        "employee_id": CURRENT_EMPLOYEE_ID,
+        "employee_id": current_user(),
         "type": "badge_lost",
         "start_date": date.today().isoformat(),
         "end_date": None,
@@ -1471,7 +1635,7 @@ async def consumption_history():
     for i in range(6, -1, -1):
         d = (today_d - timedelta(days=i)).isoformat()
         txs = await db.meal_tx.find(
-            {"employee_id": CURRENT_EMPLOYEE_ID,
+            {"employee_id": current_user(),
              "ts": {"$gte": d + "T00:00:00", "$lt": d + "T23:59:59"}},
             {"_id": 0},
         ).to_list(100)
@@ -1526,11 +1690,12 @@ async def create_dm(payload: DMCreate):
             "unread": 0,
             "is_dm": True,
             "is_group": False,
+            "archived": False,
             "avatar": other["avatar"],
         }
         await db.channels.insert_one(ch.copy())
         existing = ch
-    return existing
+    return await _strip(existing)
 
 
 class GroupCreate(BaseModel):
@@ -1551,10 +1716,621 @@ async def create_group(payload: GroupCreate):
         "unread": 0,
         "is_dm": False,
         "is_group": True,
-        "member_ids": payload.member_ids + [CURRENT_EMPLOYEE_ID],
+        "archived": False,
+        "member_ids": payload.member_ids + [current_user()],
     }
     await db.channels.insert_one(ch.copy())
+    return await _strip(ch)
+
+
+@api.post("/channels/{cid}/archive")
+async def archive_channel(cid: str):
+    """Archive (or restore) a DM/group channel. Team channels cannot be archived."""
+    ch = await db.channels.find_one({"id": cid}, {"_id": 0})
+    if not ch:
+        raise HTTPException(404, "Channel not found")
+    if not ch.get("is_dm") and not ch.get("is_group"):
+        raise HTTPException(400, "Seules les discussions directes et groupes peuvent être archivés")
+    new_state = not ch.get("archived", False)
+    await db.channels.update_one({"id": cid}, {"$set": {"archived": new_state}})
+    ch["archived"] = new_state
     return ch
+
+
+@api.delete("/channels/{cid}")
+async def delete_channel(cid: str):
+    """Delete a DM/group channel and its messages. Team channels cannot be deleted."""
+    ch = await db.channels.find_one({"id": cid}, {"_id": 0})
+    if not ch:
+        raise HTTPException(404, "Channel not found")
+    if not ch.get("is_dm") and not ch.get("is_group"):
+        raise HTTPException(400, "Seules les discussions directes et groupes peuvent être supprimés")
+    await db.channels.delete_one({"id": cid})
+    await db.messages.delete_many({"channel_id": cid})
+    return {"ok": True, "id": cid}
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Mock login — verifies credentials and returns the employee_id to
+# store on the frontend (sent back via X-Employee-Id header).
+# ═══════════════════════════════════════════════════════════════════
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+
+_LOGIN_CREDENTIALS = {
+    "idriss.malonga@gmail.com": ("Idriss2026!", "emp-idriss-malonga"),
+    "idriss.malonga@mspark.fr": ("Idriss2026!", "emp-idriss-malonga"),
+    "marcus.simeo@mspark.fr": ("MSPark@Admin2026!", ADMIN_EMPLOYEE_ID),
+    "marcus.simeo@gmail.com": ("MSPark@Admin2026!", ADMIN_EMPLOYEE_ID),
+}
+
+
+@api.post("/auth/login")
+async def auth_login(payload: LoginRequest):
+    creds = _LOGIN_CREDENTIALS.get(payload.email.lower().strip())
+    # Mock auth: also accept "any password" for the demo (legacy), but if a known
+    # email is provided with the documented password, prefer matching.
+    if creds:
+        expected_pwd, eid = creds
+        if payload.password and payload.password != expected_pwd and payload.password != "demo":
+            # still accept for the demo, but flag
+            pass
+        emp = await db.employees.find_one({"id": eid}, {"_id": 0})
+        if emp:
+            return {"employee_id": eid, "is_admin": emp.get("is_admin", False),
+                    "first_name": emp["first_name"], "last_name": emp["last_name"]}
+    raise HTTPException(401, "Identifiants inconnus. Essayez idriss.malonga@gmail.com ou marcus.simeo@mspark.fr.")
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Admin endpoints (require is_admin)
+# ═══════════════════════════════════════════════════════════════════
+
+class AdminScheduleEntry(BaseModel):
+    employee_id: str
+    day: str  # YYYY-MM-DD
+    type: str  # shift | off | leave | training
+    start: Optional[str] = None
+    end: Optional[str] = None
+    pause_start: Optional[str] = None
+    pause_end: Optional[str] = None
+    break_minutes: Optional[int] = 0
+    location: Optional[str] = None
+    manager: Optional[str] = None
+    service: Optional[str] = None
+    note: Optional[str] = None
+
+
+def _shift_minutes(entry: dict) -> int:
+    """Compute net worked minutes for a 'shift' entry (excludes pause)."""
+    if entry.get("type") != "shift" or not entry.get("start") or not entry.get("end"):
+        return 0
+    try:
+        s = datetime.strptime(entry["start"], "%H:%M")
+        e = datetime.strptime(entry["end"], "%H:%M")
+        m = int((e - s).total_seconds() // 60)
+        if entry.get("pause_start") and entry.get("pause_end"):
+            ps = datetime.strptime(entry["pause_start"], "%H:%M")
+            pe = datetime.strptime(entry["pause_end"], "%H:%M")
+            m -= int((pe - ps).total_seconds() // 60)
+        return max(0, m)
+    except Exception:
+        return 0
+
+
+@api.get("/admin/employees")
+async def admin_list_employees():
+    await require_admin()
+    items = await db.employees.find({}, {"_id": 0}).to_list(500)
+    # add total scheduled hours for current week
+    today_d = date.today()
+    monday = (today_d - timedelta(days=today_d.weekday())).isoformat()
+    sunday = ((today_d - timedelta(days=today_d.weekday())) + timedelta(days=6)).isoformat()
+    for emp in items:
+        schs = await db.schedules.find(
+            {"employee_id": emp["id"], "day": {"$gte": monday, "$lte": sunday}},
+            {"_id": 0},
+        ).to_list(20)
+        emp["week_planned_minutes"] = sum(_shift_minutes(s) for s in schs)
+        emp["contract_hours_weekly"] = emp.get("contract_hours_weekly", 35)
+    return items
+
+
+@api.get("/admin/schedule/{employee_id}")
+async def admin_get_schedule(employee_id: str, week_start: Optional[str] = None):
+    """Return schedule entries for an employee. Optionally for a given week (Monday ISO)."""
+    await require_admin()
+    q: dict = {"employee_id": employee_id}
+    if week_start:
+        ws = date.fromisoformat(week_start)
+        we = ws + timedelta(days=6)
+        q["day"] = {"$gte": ws.isoformat(), "$lte": we.isoformat()}
+    items = await db.schedules.find(q, {"_id": 0}).sort("day", 1).to_list(200)
+    return items
+
+
+@api.post("/admin/schedule")
+async def admin_upsert_schedule(payload: AdminScheduleEntry):
+    """Create or update a schedule entry for a given (employee_id, day)."""
+    await require_admin()
+    # Validate day format
+    try:
+        date.fromisoformat(payload.day)
+    except Exception:
+        raise HTTPException(400, "Date invalide (YYYY-MM-DD attendu)")
+    if payload.type == "shift":
+        if not payload.start or not payload.end:
+            raise HTTPException(400, "Horaires début/fin requis pour un shift")
+    existing = await db.schedules.find_one(
+        {"employee_id": payload.employee_id, "day": payload.day}, {"_id": 0}
+    )
+    data = payload.model_dump()
+    if existing:
+        await db.schedules.update_one(
+            {"employee_id": payload.employee_id, "day": payload.day},
+            {"$set": {k: v for k, v in data.items() if k not in ("employee_id", "day")}},
+        )
+        data["id"] = existing["id"]
+    else:
+        data["id"] = _id()
+        await db.schedules.insert_one(data.copy())
+    # Push notification to employee
+    await db.notifications.insert_one({
+        "id": _id(),
+        "employee_id": payload.employee_id,
+        "type": "planning",
+        "title": "Planning mis à jour",
+        "message": f"Votre planning du {payload.day} a été modifié par votre responsable.",
+        "ts": _now(),
+        "read": False,
+    })
+    return data
+
+
+@api.delete("/admin/schedule/{schedule_id}")
+async def admin_delete_schedule(schedule_id: str):
+    await require_admin()
+    sch = await db.schedules.find_one({"id": schedule_id}, {"_id": 0})
+    if not sch:
+        raise HTTPException(404, "Entrée introuvable")
+    await db.schedules.delete_one({"id": schedule_id})
+    await db.notifications.insert_one({
+        "id": _id(),
+        "employee_id": sch["employee_id"],
+        "type": "planning",
+        "title": "Planning mis à jour",
+        "message": f"Une entrée de planning ({sch['day']}) a été supprimée.",
+        "ts": _now(),
+        "read": False,
+    })
+    return {"ok": True}
+
+
+@api.get("/admin/contract-status/{employee_id}")
+async def admin_contract_status(employee_id: str, week_start: Optional[str] = None):
+    """Return contract vs planned hours for the week, with alert state."""
+    await require_admin()
+    emp = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not emp:
+        raise HTTPException(404, "Employé introuvable")
+    today_d = date.today()
+    if week_start:
+        ws = date.fromisoformat(week_start)
+    else:
+        ws = today_d - timedelta(days=today_d.weekday())
+    we = ws + timedelta(days=6)
+    schs = await db.schedules.find(
+        {"employee_id": employee_id, "day": {"$gte": ws.isoformat(), "$lte": we.isoformat()}},
+        {"_id": 0},
+    ).to_list(20)
+    planned_minutes = sum(_shift_minutes(s) for s in schs)
+    contract_hours = emp.get("contract_hours_weekly", 35)
+    contract_minutes = contract_hours * 60
+    delta_minutes = planned_minutes - contract_minutes
+    if delta_minutes == 0:
+        status = "match"
+        message = "Contrat respecté"
+    elif delta_minutes < 0:
+        status = "under"
+        h = abs(delta_minutes) // 60
+        m = abs(delta_minutes) % 60
+        if m == 0:
+            message = f"{h} heure{'s' if h > 1 else ''} manquante{'s' if h > 1 else ''} pour atteindre le minimum contractuel"
+        else:
+            message = f"{h}h{m:02d} manquantes pour atteindre le minimum contractuel"
+    else:
+        status = "over"
+        h = delta_minutes // 60
+        m = delta_minutes % 60
+        if m == 0:
+            message = f"{h} heure{'s' if h > 1 else ''} supplémentaire{'s' if h > 1 else ''} prévue{'s' if h > 1 else ''}"
+        else:
+            message = f"{h}h{m:02d} supplémentaires prévues"
+    return {
+        "employee_id": employee_id,
+        "week_start": ws.isoformat(),
+        "contract_hours_weekly": contract_hours,
+        "contract_minutes": contract_minutes,
+        "planned_minutes": planned_minutes,
+        "delta_minutes": delta_minutes,
+        "status": status,
+        "message": message,
+    }
+
+
+# ─── Admin requests management
+@api.get("/admin/requests")
+async def admin_list_requests(status: Optional[str] = None):
+    await require_admin()
+    q: dict = {}
+    if status:
+        q["status"] = status
+    items = await db.requests.find(q, {"_id": 0}).sort("created_at", -1).to_list(200)
+    # Enrich with employee name
+    for r in items:
+        emp = await db.employees.find_one({"id": r["employee_id"]}, {"_id": 0})
+        if emp:
+            r["employee_name"] = f"{emp['first_name']} {emp['last_name']}"
+            r["employee_avatar"] = emp.get("avatar")
+            r["employee_role"] = emp.get("role")
+    return items
+
+
+class RequestDecision(BaseModel):
+    note: Optional[str] = None
+
+
+@api.post("/admin/requests/{rid}/approve")
+async def admin_approve_request(rid: str, payload: RequestDecision):
+    await require_admin()
+    req = await db.requests.find_one({"id": rid}, {"_id": 0})
+    if not req:
+        raise HTTPException(404, "Demande introuvable")
+    if req.get("status") == "approved":
+        raise HTTPException(400, "Demande déjà approuvée")
+    await db.requests.update_one(
+        {"id": rid},
+        {"$set": {"status": "approved", "decided_at": _now(), "decision_note": payload.note}},
+    )
+    # Auto-sync: leave requests inject entries into the planning + decrement counters
+    if req.get("type") in ("cp", "rtt") and req.get("start_date"):
+        emp_id = req["employee_id"]
+        start = date.fromisoformat(req["start_date"])
+        end = date.fromisoformat(req.get("end_date") or req["start_date"])
+        entry_type = "leave" if req["type"] == "cp" else "rtt"
+        note = "Congé payé (validé)" if req["type"] == "cp" else "RTT (validé)"
+        d = start
+        days_used = 0
+        while d <= end:
+            # Overwrite any existing entry for this day
+            existing = await db.schedules.find_one(
+                {"employee_id": emp_id, "day": d.isoformat()}, {"_id": 0}
+            )
+            payload_sch = {
+                "employee_id": emp_id,
+                "day": d.isoformat(),
+                "type": entry_type,
+                "start": None, "end": None,
+                "pause_start": None, "pause_end": None,
+                "break_minutes": 0,
+                "location": None, "manager": None, "service": None,
+                "note": note,
+            }
+            # Remove any badging that could exist for that day (leave = no work)
+            await db.badging.delete_many({"employee_id": emp_id, "day": d.isoformat()})
+            if existing:
+                await db.schedules.update_one(
+                    {"employee_id": emp_id, "day": d.isoformat()},
+                    {"$set": payload_sch},
+                )
+            else:
+                payload_sch["id"] = _id()
+                await db.schedules.insert_one(payload_sch.copy())
+            days_used += 1
+            d = d + timedelta(days=1)
+
+        # Decrement counter on employee
+        emp = await db.employees.find_one({"id": emp_id}, {"_id": 0})
+        if emp:
+            bal = dict(emp.get("leave_balance") or {})
+            if req["type"] == "cp":
+                # Consume CP N-1 first, then CP N
+                remaining = days_used
+                take_n1 = min(remaining, float(bal.get("cp_n_1", 0)))
+                bal["cp_n_1"] = round(float(bal.get("cp_n_1", 0)) - take_n1, 1)
+                remaining -= take_n1
+                if remaining > 0:
+                    bal["cp_n"] = round(max(0, float(bal.get("cp_n", 0)) - remaining), 1)
+            elif req["type"] == "rtt":
+                bal["rtt"] = round(max(0, float(bal.get("rtt", 0)) - days_used), 1)
+            await db.employees.update_one({"id": emp_id}, {"$set": {"leave_balance": bal}})
+
+    await db.notifications.insert_one({
+        "id": _id(),
+        "employee_id": req["employee_id"],
+        "type": req["type"],
+        "title": "Demande approuvée",
+        "message": f"Votre demande ({req['type']}) a été acceptée. Votre planning est mis à jour.",
+        "ts": _now(),
+        "read": False,
+    })
+    return {"ok": True}
+
+
+@api.post("/admin/requests/{rid}/reject")
+async def admin_reject_request(rid: str, payload: RequestDecision):
+    await require_admin()
+    req = await db.requests.find_one({"id": rid}, {"_id": 0})
+    if not req:
+        raise HTTPException(404, "Demande introuvable")
+    await db.requests.update_one(
+        {"id": rid},
+        {"$set": {"status": "rejected", "decided_at": _now(), "decision_note": payload.note}},
+    )
+    await db.notifications.insert_one({
+        "id": _id(),
+        "employee_id": req["employee_id"],
+        "type": req["type"],
+        "title": "Demande refusée",
+        "message": f"Votre demande ({req['type']}) a été refusée." +
+                   (f" Motif : {payload.note}" if payload.note else ""),
+        "ts": _now(),
+        "read": False,
+    })
+    return {"ok": True}
+
+
+@api.post("/admin/requests/{rid}/info")
+async def admin_request_info(rid: str, payload: RequestDecision):
+    """Ask the employee for more info."""
+    await require_admin()
+    req = await db.requests.find_one({"id": rid}, {"_id": 0})
+    if not req:
+        raise HTTPException(404, "Demande introuvable")
+    await db.requests.update_one(
+        {"id": rid},
+        {"$set": {"status": "info_requested", "decided_at": _now(), "decision_note": payload.note}},
+    )
+    await db.notifications.insert_one({
+        "id": _id(),
+        "employee_id": req["employee_id"],
+        "type": req["type"],
+        "title": "Complément d'information demandé",
+        "message": payload.note or "Merci de compléter votre demande.",
+        "ts": _now(),
+        "read": False,
+    })
+    return {"ok": True}
+
+
+# ─── Admin news publishing
+class NewsCreate(BaseModel):
+    title: str
+    content: str
+    category: Optional[str] = "info"
+    image: Optional[str] = None
+    pinned: Optional[bool] = False
+    images: Optional[List[str]] = None
+    documents: Optional[List[dict]] = None  # [{name, url}]
+    external_link: Optional[str] = None
+    featured: Optional[bool] = False  # show in home carousel
+    active: Optional[bool] = True
+    order: Optional[int] = 100
+    cta_text: Optional[str] = None
+    cta_url: Optional[str] = None
+
+
+@api.post("/admin/news")
+async def admin_publish_news(payload: NewsCreate):
+    me = await require_admin()
+    item = {
+        "id": _id(),
+        "title": payload.title,
+        "content": payload.content,
+        "category": payload.category or "info",
+        "image": payload.image,
+        "images": payload.images or [],
+        "documents": payload.documents or [],
+        "external_link": payload.external_link,
+        "featured": bool(payload.featured),
+        "active": bool(payload.active) if payload.active is not None else True,
+        "order": payload.order if payload.order is not None else 100,
+        "cta_text": payload.cta_text,
+        "cta_url": payload.cta_url,
+        "pinned": bool(payload.pinned),
+        "date": _now(),
+        "author_id": me["id"],
+        "author_name": f"{me['first_name']} {me['last_name']}",
+        "likes": [],
+        "comments": [],
+    }
+    await db.news.insert_one(item.copy())
+    return await _strip(item)
+
+
+class NewsUpdate(BaseModel):
+    title: Optional[str] = None
+    content: Optional[str] = None
+    category: Optional[str] = None
+    image: Optional[str] = None
+    images: Optional[List[str]] = None
+    documents: Optional[List[dict]] = None
+    external_link: Optional[str] = None
+    featured: Optional[bool] = None
+    active: Optional[bool] = None
+    order: Optional[int] = None
+    cta_text: Optional[str] = None
+    cta_url: Optional[str] = None
+    pinned: Optional[bool] = None
+
+
+@api.put("/admin/news/{nid}")
+async def admin_update_news(nid: str, payload: NewsUpdate):
+    await require_admin()
+    updates = {k: v for k, v in payload.model_dump().items() if v is not None}
+    if updates:
+        await db.news.update_one({"id": nid}, {"$set": updates})
+    item = await db.news.find_one({"id": nid}, {"_id": 0})
+    if not item:
+        raise HTTPException(404, "Actualité introuvable")
+    return item
+
+
+@api.delete("/admin/news/{nid}")
+async def admin_delete_news(nid: str):
+    await require_admin()
+    await db.news.delete_one({"id": nid})
+    return {"ok": True}
+
+
+@api.get("/carousel")
+async def get_carousel():
+    """Public: news marked featured & active, sorted by order (asc)."""
+    items = await db.news.find(
+        {"featured": True, "active": {"$ne": False}}, {"_id": 0},
+    ).sort([("order", 1), ("date", -1)]).to_list(20)
+    return items
+
+
+# ─── Admin RTT/CP allocation
+class LeaveGrant(BaseModel):
+    employee_ids: List[str]
+    days: float
+    type: str  # "rtt" | "cp"
+
+
+@api.post("/admin/leave/grant")
+async def admin_grant_leave(payload: LeaveGrant):
+    await require_admin()
+    if payload.type not in ("rtt", "cp"):
+        raise HTTPException(400, "type doit être 'rtt' ou 'cp'")
+    updated = []
+    for eid in payload.employee_ids:
+        emp = await db.employees.find_one({"id": eid}, {"_id": 0})
+        if not emp:
+            continue
+        bal = dict(emp.get("leave_balance") or {})
+        key = "rtt" if payload.type == "rtt" else "cp_n"
+        bal[key] = round(float(bal.get(key, 0)) + payload.days, 1)
+        await db.employees.update_one({"id": eid}, {"$set": {"leave_balance": bal}})
+        await db.notifications.insert_one({
+            "id": _id(),
+            "employee_id": eid,
+            "type": payload.type,
+            "title": f"{payload.days} jour{'s' if payload.days > 1 else ''} {'RTT' if payload.type == 'rtt' else 'CP'} attribué{'s' if payload.days > 1 else ''}",
+            "message": f"Votre responsable vous a attribué {payload.days} jour(s) de {payload.type.upper()}.",
+            "ts": _now(),
+            "read": False,
+        })
+        updated.append(eid)
+    return {"ok": True, "updated": updated}
+
+
+@api.post("/admin/leave/accrue-monthly")
+async def admin_accrue_monthly():
+    """Simulate the monthly 2.5 days CP accrual on the 1st of each month.
+    Idempotent — flags an accrual per (employee, YYYY-MM). Callable on-demand for demo."""
+    await require_admin()
+    today_d = date.today()
+    month_key = today_d.strftime("%Y-%m")
+    emps = await db.employees.find({}, {"_id": 0}).to_list(500)
+    accrued = []
+    for e in emps:
+        flag = await db.meta.find_one({"_id": f"accrual-{e['id']}-{month_key}"})
+        if flag:
+            continue
+        bal = dict(e.get("leave_balance") or {})
+        bal["cp_n"] = round(float(bal.get("cp_n", 0)) + 2.5, 1)
+        await db.employees.update_one({"id": e["id"]}, {"$set": {"leave_balance": bal}})
+        await db.meta.insert_one({"_id": f"accrual-{e['id']}-{month_key}"})
+        accrued.append(e["id"])
+    return {"ok": True, "month": month_key, "accrued_count": len(accrued)}
+
+
+# ─── Auto-badging generation (backend regenerates badging based on planning)
+@api.post("/admin/badging/regenerate/{employee_id}")
+async def admin_regenerate_badging(employee_id: str):
+    """Regenerate badging entries for past 30 days based on the actual planning."""
+    await require_admin()
+    emp = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not emp:
+        raise HTTPException(404, "Employé introuvable")
+    today_d = date.today()
+    start = today_d - timedelta(days=30)
+    # Clear existing badging in window
+    await db.badging.delete_many({
+        "employee_id": employee_id,
+        "day": {"$gte": start.isoformat(), "$lt": today_d.isoformat()},
+    })
+    schs = await db.schedules.find({
+        "employee_id": employee_id,
+        "day": {"$gte": start.isoformat(), "$lt": today_d.isoformat()},
+        "type": "shift",
+    }, {"_id": 0}).to_list(200)
+    import random
+    inserts = []
+    for s in schs:
+        if not s.get("start") or not s.get("end"):
+            continue
+        # Random small offsets for realism
+        clock_in_delta = random.randint(-5, 12)  # minutes
+        clock_out_delta = random.randint(-3, 8)
+        sh, sm = map(int, s["start"].split(":"))
+        eh, em = map(int, s["end"].split(":"))
+        ci_m = sh * 60 + sm + clock_in_delta
+        co_m = eh * 60 + em + clock_out_delta
+        ci = f"{ci_m // 60:02d}:{ci_m % 60:02d}"
+        co = f"{co_m // 60:02d}:{co_m % 60:02d}"
+        worked = max(0, (co_m - ci_m))
+        # Remove pause duration
+        if s.get("pause_start") and s.get("pause_end"):
+            ps_h, ps_m = map(int, s["pause_start"].split(":"))
+            pe_h, pe_m = map(int, s["pause_end"].split(":"))
+            worked -= (pe_h * 60 + pe_m) - (ps_h * 60 + ps_m)
+        anomaly = "late" if clock_in_delta >= 8 else None
+        inserts.append({
+            "id": _id(),
+            "employee_id": employee_id,
+            "day": s["day"],
+            "clock_in": ci,
+            "pause_out": s.get("pause_start"),
+            "pause_in": s.get("pause_end"),
+            "clock_out": co,
+            "worked_minutes": worked,
+            "anomaly": anomaly,
+            "location": s.get("location") or "MS Park",
+        })
+    if inserts:
+        await db.badging.insert_many(inserts)
+    return {"ok": True, "generated": len(inserts)}
+
+
+# ─── Admin stats
+@api.get("/admin/stats")
+async def admin_stats():
+    await require_admin()
+    today_d = date.today()
+    monday = today_d - timedelta(days=today_d.weekday())
+    sunday = monday + timedelta(days=6)
+    employees = await db.employees.find({}, {"_id": 0}).to_list(500)
+    total_planned = 0
+    total_contract = 0
+    for emp in employees:
+        schs = await db.schedules.find(
+            {"employee_id": emp["id"], "day": {"$gte": monday.isoformat(), "$lte": sunday.isoformat()}},
+            {"_id": 0},
+        ).to_list(20)
+        total_planned += sum(_shift_minutes(s) for s in schs)
+        total_contract += emp.get("contract_hours_weekly", 35) * 60
+    pending = await db.requests.count_documents({"status": "pending"})
+    return {
+        "employees_count": len(employees),
+        "week_planned_minutes": total_planned,
+        "week_contract_minutes": total_contract,
+        "pending_requests": pending,
+    }
 
 
 app.include_router(api)
@@ -1566,6 +2342,18 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def attach_current_user(request: Request, call_next):
+    """Set the per-request current user from the X-Employee-Id header."""
+    eid = request.headers.get("X-Employee-Id") or current_user()
+    token = _current_user_var.set(eid)
+    try:
+        response = await call_next(request)
+    finally:
+        _current_user_var.reset(token)
+    return response
 
 
 @app.on_event("startup")

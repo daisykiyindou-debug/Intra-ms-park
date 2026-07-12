@@ -8,6 +8,23 @@ export const api = axios.create({
   headers: { "Content-Type": "application/json" },
 });
 
+// ── Auth (mock) ──────────────────────────────────────────────────
+// The frontend stores the connected employee_id in localStorage and
+// forwards it to the backend via the X-Employee-Id header.
+const AUTH_KEY = "ms_employee_id";
+export const getAuthId = () =>
+  (typeof window !== "undefined" && localStorage.getItem(AUTH_KEY)) || "emp-idriss-malonga";
+export const setAuthId = (id) => {
+  if (typeof window === "undefined") return;
+  if (id) localStorage.setItem(AUTH_KEY, id);
+  else localStorage.removeItem(AUTH_KEY);
+};
+
+api.interceptors.request.use((config) => {
+  config.headers["X-Employee-Id"] = getAuthId();
+  return config;
+});
+
 // ── helpers used across pages ─────────────────────────────────────
 export const formatMinutes = (mins) => {
   const h = Math.floor((mins || 0) / 60);

@@ -71,7 +71,10 @@ export default function Demandes() {
 
   const balance = me?.leave_balance || { cp_n_1: 0, cp_n: 0, rtt: 0 };
   const totalCP = balance.cp_n_1 + balance.cp_n;
-  const todayIso = new Date().toISOString().slice(0, 10);
+  const todayIso = (() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  })();
 
   return (
     <div className="space-y-6 ms-fade-up">

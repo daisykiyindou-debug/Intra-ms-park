@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Bell, Menu, Search, LogOut, User } from "lucide-react";
 import { useNavigate, Link } from "react-router-dom";
 import { useApp } from "@/contexts/AppContext";
+import { setAuthId } from "@/lib/api";
 
 export default function Header({ onMenuClick, onNotifClick }) {
   const { me, notifications } = useApp();
@@ -19,8 +20,9 @@ export default function Header({ onMenuClick, onNotifClick }) {
   }, []);
 
   const logout = () => {
+    setAuthId(null);
     localStorage.setItem("ms_logged_out", "1");
-    navigate("/login");
+    window.location.href = "/login";
   };
 
   return (
