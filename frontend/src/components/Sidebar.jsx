@@ -18,6 +18,9 @@ import {
   ClipboardList,
   Inbox,
   BarChart3,
+  Gift,
+  FileText,
+  Megaphone,
 } from "lucide-react";
 import { useApp } from "@/contexts/AppContext";
 
@@ -44,7 +47,10 @@ const adminNav = [
   { to: "/management", label: "Vue d'ensemble", icon: BarChart3, key: "mgmt-overview" },
   { to: "/management/planning", label: "Plannings employés", icon: ClipboardList, key: "mgmt-planning" },
   { to: "/management/demandes", label: "Validation demandes", icon: Inbox, key: "mgmt-demandes" },
-  { to: "/management/actualites", label: "Publier actualité", icon: Newspaper, key: "mgmt-news" },
+  { to: "/management/attributions", label: "RTT / CP", icon: Gift, key: "mgmt-rtt" },
+  { to: "/management/actualites", label: "Actualités", icon: Newspaper, key: "mgmt-news" },
+  { to: "/management/documents", label: "Documents RH", icon: FileText, key: "mgmt-docs" },
+  { to: "/management/fil", label: "Fil MS Park", icon: Megaphone, key: "mgmt-fil" },
 ];
 
 export default function Sidebar({ open, onClose }) {

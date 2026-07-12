@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { FileText, Download, Eye, Search, X } from "lucide-react";
+import { FileText, Download, Eye, Search, X, Receipt } from "lucide-react";
+import { Link } from "react-router-dom";
 import { api, formatDateFr } from "@/lib/api";
 
 const CATEGORIES = [
@@ -87,22 +88,34 @@ export default function Documents() {
                 {d.category} · {formatDateFr(d.issued_at)} · {d.size_kb} Ko
               </div>
               <div className="mt-3 flex items-center gap-2">
-                <button
-                  onClick={() => setPreview(d)}
-                  data-testid={`preview-${d.id}`}
-                  className="inline-flex items-center gap-1.5 rounded-lg bg-[#F4F7FA] hover:bg-[#071B34]/5 px-3 py-1.5 text-xs font-semibold text-[#071B34]"
-                >
-                  <Eye className="h-3.5 w-3.5" /> Aperçu
-                </button>
-                <a
-                  href={d.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  data-testid={`download-${d.id}`}
-                  className="inline-flex items-center gap-1.5 rounded-lg bg-[#3BA4FF] hover:bg-[#2A8DE0] px-3 py-1.5 text-xs font-semibold text-white"
-                >
-                  <Download className="h-3.5 w-3.5" /> Télécharger
-                </a>
+                {d.is_payslip ? (
+                  <Link
+                    to={`/documents/payslip/${d.target_employee_id}/${d.payslip_year}/${d.payslip_month}`}
+                    data-testid={`open-payslip-${d.id}`}
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-[#3BA4FF] hover:bg-[#2A8DE0] px-3 py-1.5 text-xs font-semibold text-white"
+                  >
+                    <Receipt className="h-3.5 w-3.5" /> Voir la fiche
+                  </Link>
+                ) : (
+                  <>
+                    <button
+                      onClick={() => setPreview(d)}
+                      data-testid={`preview-${d.id}`}
+                      className="inline-flex items-center gap-1.5 rounded-lg bg-[#F4F7FA] hover:bg-[#071B34]/5 px-3 py-1.5 text-xs font-semibold text-[#071B34]"
+                    >
+                      <Eye className="h-3.5 w-3.5" /> Aperçu
+                    </button>
+                    <a
+                      href={d.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      data-testid={`download-${d.id}`}
+                      className="inline-flex items-center gap-1.5 rounded-lg bg-[#3BA4FF] hover:bg-[#2A8DE0] px-3 py-1.5 text-xs font-semibold text-white"
+                    >
+                      <Download className="h-3.5 w-3.5" /> Télécharger
+                    </a>
+                  </>
+                )}
               </div>
             </div>
           </div>

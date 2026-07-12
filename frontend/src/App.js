@@ -21,6 +21,7 @@ import Avantages from "@/pages/Avantages";
 import Contacts from "@/pages/Contacts";
 import Profil from "@/pages/Profil";
 import ManagementShell from "@/pages/Management";
+import Payslip from "@/pages/Payslip";
 
 function ProtectedShell() {
   const isOut = typeof window !== "undefined" && localStorage.getItem("ms_logged_out") === "1";
@@ -79,6 +80,7 @@ function App() {
               <Route path="/actualites" element={<Actualites />} />
               <Route path="/messagerie" element={<Messagerie />} />
               <Route path="/documents" element={<Documents />} />
+              <Route path="/documents/payslip/:employeeId/:year/:month" element={<Payslip />} />
               <Route path="/agenda" element={<Agenda />} />
               <Route path="/avantages" element={<Avantages />} />
               <Route path="/contacts" element={<Contacts />} />

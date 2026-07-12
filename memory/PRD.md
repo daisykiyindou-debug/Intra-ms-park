@@ -47,7 +47,16 @@ Intranet premium pour employés du parc MS Park + espace administrateur pour le 
 - `/app/frontend/src/lib/api.js` — interceptor axios ajoutant `X-Employee-Id` depuis localStorage
 
 ## Changelog
-### 2026-07 (session actuelle)
+### 2026-07 — Update final
+- **Seed Idriss corrigé** : planning 24h/semaine exact (Mer-Sam 09h-14h + Dim 10h-14h)
+- Suppression des pauses artificielles sur shifts < 6h (conforme code du travail)
+- **Contract respecté** même sur une semaine complète en CP (24h/24h)
+- **Générateur de fiche de paie** conforme au modèle simplifié français (SIRET, APE, cotisations CSG/CRDS/retraite/maladie/chômage/complémentaire, net imposable, prélèvement à la source)
+- **Page /documents/payslip/:emp/:year/:month** — rendu premium imprimable
+- **Onglets Management ajoutés** : Documents RH (upload avec ciblage employé/tous + génération fiche de paie 1 clic) et Fil MS Park (broadcast dans canaux publics)
+- **Endpoint POST /api/admin/broadcast** — messages officiels avec badge "📣 Annonce officielle"
+- **Endpoint POST /api/admin/documents** + `/admin/documents/payslip`
+- **Endpoint GET /api/documents** filtré par target_employee_id (employé voit uniquement les siens + les broadcast "all")
 - **Compte admin Marcus SIMÉO** ajouté au seed avec `is_admin: True`, contract_hours_weekly: 35
 - **X-Employee-Id middleware** + ContextVar : multi-utilisateur simulé
 - **Login réel** POST `/api/auth/login` avec rejet 401 si mauvais mot de passe

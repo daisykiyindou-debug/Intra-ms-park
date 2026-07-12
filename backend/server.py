@@ -426,48 +426,39 @@ async def _seed_once() -> None:
     ]
     await db.employees.insert_many(employees)
 
-    # ─── Schedule (Idriss works Wed-Sun, varied 12h-20h, 24h/week, 45min breaks)
+    # ─── Schedule (Idriss: 24h/week contract, Wed-Sun, no pauses under 6h)
     # Build planning for 8 weeks centered on today
     schedule: list[dict] = []
     today = date.today()
     start_period = today - timedelta(days=28)
     end_period = today + timedelta(days=42)
     cur = start_period
-    # Rotation pattern (weekday → (start,end))
+    # Rotation pattern for Idriss — TOTAL 24h/week, matches his contract exactly
     pattern = {
-        2: ("14:00", "19:00"),  # Wed
-        3: ("12:00", "17:00"),  # Thu
-        4: ("15:00", "20:00"),  # Fri
-        5: ("12:00", "17:00"),  # Sat
-        6: ("14:00", "18:00"),  # Sun
+        2: ("09:00", "14:00"),  # Wed 5h
+        3: ("09:00", "14:00"),  # Thu 5h
+        4: ("09:00", "14:00"),  # Fri 5h
+        5: ("09:00", "14:00"),  # Sat 5h
+        6: ("10:00", "14:00"),  # Sun 4h
     }
     while cur <= end_period:
         wd = cur.weekday()  # 0=Mon
         d = cur.isoformat()
         if wd in pattern:
             s, e = pattern[wd]
-            # Compute pause window: middle of the shift, 45min long
-            sh, sm = map(int, s.split(":"))
-            eh, em = map(int, e.split(":"))
-            start_m = sh * 60 + sm
-            end_m = eh * 60 + em
-            mid = (start_m + end_m) // 2
-            pause_start_m = mid - 22  # ~22min before mid
-            pause_end_m = pause_start_m + 45
-            ps = f"{pause_start_m // 60:02d}:{pause_start_m % 60:02d}"
-            pe = f"{pause_end_m // 60:02d}:{pause_end_m % 60:02d}"
+            # Shifts under 6h — no mandatory pause (French labour code)
             schedule.append({
                 "id": _id(),
                 "employee_id": CURRENT_EMPLOYEE_ID,
                 "day": d,
                 "start": s,
                 "end": e,
-                "pause_start": ps,
-                "pause_end": pe,
-                "break_minutes": 45,
+                "pause_start": None,
+                "pause_end": None,
+                "break_minutes": 0,
                 "type": "shift",
                 "location": "MS Park — Zone Karting & Attractions",
-                "manager": "Sophie BERNARD",
+                "manager": "Marcus SIMÉO",
                 "service": "Opérations Parc",
                 "note": None,
             })
@@ -827,26 +818,39 @@ async def _seed_once() -> None:
 
     # ─── Documents
     documents: list[dict] = [
-        {"id": _id(), "name": "Fiche de paie — Janvier 2026", "category": "Paie",
-         "issued_at": "2026-02-01", "size_kb": 248, "read": False,
-         "url": "https://www.africau.edu/images/default/sample.pdf"},
+        {"id": _id(), "name": "Fiche de paie — Juin 2026", "category": "Paie",
+         "issued_at": today.isoformat(), "size_kb": 248, "read": False,
+         "target_employee_id": CURRENT_EMPLOYEE_ID,
+         "url": f"/api/payslip/{CURRENT_EMPLOYEE_ID}/2026/6",
+         "is_payslip": True, "payslip_year": 2026, "payslip_month": 6},
+        {"id": _id(), "name": "Fiche de paie — Mai 2026", "category": "Paie",
+         "issued_at": (today - timedelta(days=30)).isoformat(), "size_kb": 245, "read": True,
+         "target_employee_id": CURRENT_EMPLOYEE_ID,
+         "url": f"/api/payslip/{CURRENT_EMPLOYEE_ID}/2026/5",
+         "is_payslip": True, "payslip_year": 2026, "payslip_month": 5},
         {"id": _id(), "name": "Contrat CDI — Idriss MALONGA", "category": "Contrats",
          "issued_at": "2024-08-15", "size_kb": 412, "read": True,
+         "target_employee_id": CURRENT_EMPLOYEE_ID,
          "url": "https://www.africau.edu/images/default/sample.pdf"},
         {"id": _id(), "name": "Avenant 24h hebdomadaires", "category": "Contrats",
          "issued_at": "2025-09-01", "size_kb": 188, "read": True,
+         "target_employee_id": CURRENT_EMPLOYEE_ID,
          "url": "https://www.africau.edu/images/default/sample.pdf"},
         {"id": _id(), "name": "Règlement intérieur 2026", "category": "Règlements",
          "issued_at": "2026-01-02", "size_kb": 524, "read": False,
+         "target_employee_id": "all",
          "url": "https://www.africau.edu/images/default/sample.pdf"},
         {"id": _id(), "name": "Procédure sécurité incendie", "category": "Sécurité",
          "issued_at": "2025-11-12", "size_kb": 156, "read": True,
+         "target_employee_id": "all",
          "url": "https://www.africau.edu/images/default/sample.pdf"},
-        {"id": _id(), "name": "Planning PDF — Février 2026", "category": "Planning",
+        {"id": _id(), "name": "Planning PDF — Juillet 2026", "category": "Planning",
          "issued_at": today.isoformat(), "size_kb": 92, "read": False,
+         "target_employee_id": CURRENT_EMPLOYEE_ID,
          "url": "https://www.africau.edu/images/default/sample.pdf"},
         {"id": _id(), "name": "Attestation employeur", "category": "Attestations",
          "issued_at": "2025-12-10", "size_kb": 124, "read": True,
+         "target_employee_id": CURRENT_EMPLOYEE_ID,
          "url": "https://www.africau.edu/images/default/sample.pdf"},
     ]
     await db.documents.insert_many(documents)
@@ -1507,8 +1511,233 @@ async def create_request(payload: RequestCreate):
 @api.get("/documents")
 async def list_documents(category: Optional[str] = None):
     q = {"category": category} if category else {}
+    # Filter: docs assigned to me OR global (target_employee_id null/all)
+    q["$or"] = [
+        {"target_employee_id": current_user()},
+        {"target_employee_id": None},
+        {"target_employee_id": "all"},
+        {"target_employee_id": {"$exists": False}},
+    ]
     items = await db.documents.find(q, {"_id": 0}).sort("issued_at", -1).to_list(100)
     return items
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Payslip generator (fake but realistic French "fiche de paie")
+# ═══════════════════════════════════════════════════════════════════
+_FR_MONTHS = ["Janvier", "Février", "Mars", "Avril", "Mai", "Juin",
+              "Juillet", "Août", "Septembre", "Octobre", "Novembre", "Décembre"]
+
+
+def _generate_payslip(emp: dict, year: int, month: int) -> dict:
+    """Build a realistic French payslip payload."""
+    contract_h = emp.get("contract_hours_weekly") or 35
+    monthly_h = round(contract_h * 4.33, 2)
+    # Base gross salary — CDI level dependent
+    if emp.get("role_category") == "encadrement":
+        hourly = 21.50
+    elif emp.get("role_category") == "restauration":
+        hourly = 13.20
+    else:
+        hourly = 12.85  # SMIC + prime
+    gross = round(monthly_h * hourly, 2)
+    # Cotisations approximatives salariales ~22%
+    csg_crds = round(gross * 0.0975, 2)
+    retraite = round(gross * 0.0765, 2)
+    maladie = round(gross * 0.0075, 2)
+    chomage = round(gross * 0.019, 2)
+    complementaire = round(gross * 0.037, 2)
+    total_deductions = round(csg_crds + retraite + maladie + chomage + complementaire, 2)
+    net = round(gross - total_deductions, 2)
+    net_imposable = round(net + csg_crds * 0.29, 2)  # part non déductible
+    prelevement = round(net_imposable * 0.03, 2)
+    net_a_payer = round(net - prelevement, 2)
+
+    return {
+        "employee": {
+            "id": emp["id"],
+            "first_name": emp["first_name"],
+            "last_name": emp["last_name"],
+            "role": emp["role"],
+            "badge_number": emp.get("badge_number"),
+            "address": emp.get("address"),
+            "seniority_months": emp.get("seniority_months", 0),
+        },
+        "employer": {
+            "name": "MS PARK SAS",
+            "address": "Zone Parc, 92350 Le Plessis-Robinson",
+            "siret": "812 456 789 00021",
+            "ape": "9321Z",
+            "convention": "Convention Collective HCR – Espaces de loisirs, d'attractions et culturels (IDCC 1790)",
+        },
+        "period": {
+            "month": month,
+            "year": year,
+            "label": f"{_FR_MONTHS[month - 1]} {year}",
+            "from": date(year, month, 1).isoformat(),
+            "to": date(year, month, 28).isoformat(),
+        },
+        "worked": {
+            "contract_hours_weekly": contract_h,
+            "monthly_hours": monthly_h,
+            "hourly_rate": hourly,
+        },
+        "lines_gross": [
+            {"label": "Salaire de base", "base": monthly_h, "rate": hourly, "amount": gross},
+        ],
+        "lines_deductions": [
+            {"label": "CSG déductible / non déductible + CRDS", "rate": 9.75, "amount": csg_crds},
+            {"label": "Retraite sécurité sociale + complémentaire", "rate": 7.65, "amount": retraite},
+            {"label": "Assurance maladie", "rate": 0.75, "amount": maladie},
+            {"label": "Assurance chômage", "rate": 1.9, "amount": chomage},
+            {"label": "Retraite complémentaire ARRCO/AGIRC", "rate": 3.7, "amount": complementaire},
+        ],
+        "totals": {
+            "gross": gross,
+            "deductions": total_deductions,
+            "net_before_tax": net,
+            "net_imposable": net_imposable,
+            "prelevement_source": prelevement,
+            "net_a_payer": net_a_payer,
+        },
+        "generated_at": _now(),
+    }
+
+
+@api.get("/payslip/{employee_id}/{year}/{month}")
+async def get_payslip(employee_id: str, year: int, month: int):
+    """Employee can access own payslip; admin can access any."""
+    if employee_id != current_user():
+        me_doc = await db.employees.find_one({"id": current_user()}, {"_id": 0})
+        if not me_doc or not me_doc.get("is_admin"):
+            raise HTTPException(403, "Accès refusé")
+    emp = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not emp:
+        raise HTTPException(404, "Employé introuvable")
+    if year < 2020 or year > 2100 or month < 1 or month > 12:
+        raise HTTPException(400, "Période invalide")
+    return _generate_payslip(emp, year, month)
+
+
+class DocumentCreate(BaseModel):
+    name: str
+    category: str  # Paie | Contrats | Règlements | Sécurité | Planning | Attestations | Autre
+    url: Optional[str] = None
+    target_employee_id: Optional[str] = None  # None or "all" = broadcast
+    description: Optional[str] = None
+    size_kb: Optional[int] = 100
+
+
+@api.post("/admin/documents")
+async def admin_create_document(payload: DocumentCreate):
+    await require_admin()
+    doc = {
+        "id": _id(),
+        "name": payload.name,
+        "category": payload.category,
+        "url": payload.url,
+        "description": payload.description,
+        "target_employee_id": payload.target_employee_id or "all",
+        "issued_at": _now()[:10],
+        "size_kb": payload.size_kb or 100,
+        "read": False,
+    }
+    await db.documents.insert_one(doc.copy())
+    # Notify employee(s)
+    targets = []
+    if payload.target_employee_id and payload.target_employee_id != "all":
+        targets = [payload.target_employee_id]
+    else:
+        emps = await db.employees.find({}, {"_id": 0}).to_list(500)
+        targets = [e["id"] for e in emps]
+    for tid in targets:
+        await db.notifications.insert_one({
+            "id": _id(),
+            "employee_id": tid,
+            "type": "document",
+            "title": "Nouveau document RH",
+            "content": f"{payload.name} — disponible dans Documents RH.",
+            "message": f"{payload.name} — disponible dans Documents RH.",
+            "ts": _now(),
+            "created_at": _now(),
+            "read": False,
+        })
+    return doc
+
+
+class PayslipGenerate(BaseModel):
+    employee_id: str
+    year: int
+    month: int
+
+
+@api.post("/admin/documents/payslip")
+async def admin_generate_payslip_document(payload: PayslipGenerate):
+    """Register a payslip document linked to the generator endpoint."""
+    await require_admin()
+    emp = await db.employees.find_one({"id": payload.employee_id}, {"_id": 0})
+    if not emp:
+        raise HTTPException(404, "Employé introuvable")
+    label = f"{_FR_MONTHS[payload.month - 1]} {payload.year}"
+    doc = {
+        "id": _id(),
+        "name": f"Fiche de paie — {label}",
+        "category": "Paie",
+        "url": f"/api/payslip/{payload.employee_id}/{payload.year}/{payload.month}",
+        "description": f"Bulletin de salaire — {label}",
+        "target_employee_id": payload.employee_id,
+        "issued_at": _now()[:10],
+        "size_kb": 248,
+        "read": False,
+        "is_payslip": True,
+        "payslip_year": payload.year,
+        "payslip_month": payload.month,
+    }
+    await db.documents.insert_one(doc.copy())
+    await db.notifications.insert_one({
+        "id": _id(),
+        "employee_id": payload.employee_id,
+        "type": "document",
+        "title": "Nouvelle fiche de paie",
+        "content": f"Votre bulletin de {label} est disponible.",
+        "message": f"Votre bulletin de {label} est disponible.",
+        "ts": _now(),
+        "created_at": _now(),
+        "read": False,
+    })
+    return doc
+
+
+@api.delete("/admin/documents/{did}")
+async def admin_delete_document(did: str):
+    await require_admin()
+    await db.documents.delete_one({"id": did})
+    return {"ok": True}
+
+
+# ─── Admin: broadcast message on the #accueil channel (fil MS Park)
+class ChannelBroadcast(BaseModel):
+    content: str
+    channel_id: Optional[str] = "ch-accueil"
+
+
+@api.post("/admin/broadcast")
+async def admin_broadcast(payload: ChannelBroadcast):
+    me = await require_admin()
+    ch = await db.channels.find_one({"id": payload.channel_id}, {"_id": 0})
+    if not ch:
+        raise HTTPException(404, "Canal introuvable")
+    msg = {
+        "id": _id(),
+        "channel_id": payload.channel_id,
+        "author_id": me["id"],
+        "content": payload.content,
+        "ts": _now(),
+        "attachments": [],
+        "is_admin_broadcast": True,
+    }
+    await db.messages.insert_one(msg.copy())
+    return msg
 
 
 # ─── Notifications

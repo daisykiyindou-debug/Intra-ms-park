@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { NavLink, Route, Routes, Navigate } from "react-router-dom";
 import {
   BarChart3, ClipboardList, Inbox, Newspaper, ShieldCheck, ArrowRight,
   Users as UsersIcon, AlertTriangle, CheckCircle2, TrendingUp, ChevronLeft, ChevronRight,
   Plus, Trash2, Save, X, CalendarDays, Clock, MessageCircle, Gift, Sparkles,
+  FileText, Receipt, Send, Megaphone,
 } from "lucide-react";
 import { toast } from "sonner";
 import { api, fr, formatMinutes } from "@/lib/api";
@@ -13,8 +14,10 @@ const subNav = [
   { to: "/management", label: "Vue d'ensemble", icon: BarChart3, end: true },
   { to: "/management/planning", label: "Plannings", icon: ClipboardList },
   { to: "/management/demandes", label: "Demandes", icon: Inbox },
-  { to: "/management/attributions", label: "Attributions RTT/CP", icon: Gift },
+  { to: "/management/attributions", label: "RTT / CP", icon: Gift },
   { to: "/management/actualites", label: "Actualités", icon: Newspaper },
+  { to: "/management/documents", label: "Documents RH", icon: FileText },
+  { to: "/management/fil", label: "Fil MS Park", icon: Megaphone },
 ];
 
 const isoDate = (d) =>
@@ -87,6 +90,8 @@ export default function ManagementShell() {
         <Route path="demandes" element={<RequestsManager />} />
         <Route path="attributions" element={<LeaveGrantManager />} />
         <Route path="actualites" element={<NewsManager />} />
+        <Route path="documents" element={<DocumentsManager />} />
+        <Route path="fil" element={<BroadcastManager />} />
         <Route path="*" element={<Navigate to="/management" replace />} />
       </Routes>
     </div>
@@ -1261,6 +1266,360 @@ function LeaveGrantManager() {
               </button>
             );
           })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+// ───────────────────────────────────────── Documents RH manager
+
+function DocumentsManager() {
+  const [employees, setEmployees] = useState([]);
+  const [docs, setDocs] = useState([]);
+  const [form, setForm] = useState({
+    name: "",
+    category: "Contrats",
+    url: "",
+    target_employee_id: "all",
+    description: "",
+    size_kb: 100,
+  });
+  const [payslipForm, setPayslipForm] = useState({
+    employee_id: "",
+    year: new Date().getFullYear(),
+    month: new Date().getMonth() + 1,
+  });
+
+  const loadDocs = () => api.get("/documents").then((r) => setDocs(r.data));
+  useEffect(() => {
+    api.get("/admin/employees").then((r) => {
+      setEmployees(r.data);
+      if (r.data[0]) setPayslipForm((p) => ({ ...p, employee_id: r.data[0].id }));
+    });
+    loadDocs();
+  }, []);
+
+  const submit = async () => {
+    if (!form.name.trim() || !form.category) return;
+    try {
+      await api.post("/admin/documents", {
+        ...form,
+        target_employee_id: form.target_employee_id === "all" ? null : form.target_employee_id,
+      });
+      toast.success("Document publié");
+      setForm({ name: "", category: "Contrats", url: "", target_employee_id: "all", description: "", size_kb: 100 });
+      loadDocs();
+    } catch {
+      toast.error("Erreur de publication");
+    }
+  };
+
+  const genPayslip = async () => {
+    if (!payslipForm.employee_id) return;
+    try {
+      await api.post("/admin/documents/payslip", payslipForm);
+      toast.success("Fiche de paie générée");
+      loadDocs();
+    } catch (err) {
+      toast.error("Erreur de génération", { description: err.response?.data?.detail });
+    }
+  };
+
+  const remove = async (d) => {
+    if (!window.confirm(`Supprimer "${d.name}" ?`)) return;
+    try {
+      await api.delete(`/admin/documents/${d.id}`);
+      toast.success("Document supprimé");
+      loadDocs();
+    } catch {
+      toast.error("Erreur");
+    }
+  };
+
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-5 gap-5">
+      <div className="lg:col-span-2 space-y-4">
+        <div className="ms-card p-5">
+          <h3 className="text-lg font-bold text-[#071B34] mb-3">Ajouter un document</h3>
+          <div className="space-y-3">
+            <div>
+              <label className="ms-overline">Titre</label>
+              <input
+                value={form.name}
+                onChange={(e) => setForm({ ...form, name: e.target.value })}
+                data-testid="doc-name"
+                placeholder="Ex. Avenant contrat mars 2026"
+                className="ms-input mt-2"
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="ms-overline">Catégorie</label>
+                <select
+                  value={form.category}
+                  onChange={(e) => setForm({ ...form, category: e.target.value })}
+                  className="ms-input mt-2"
+                >
+                  {["Paie", "Contrats", "Règlements", "Sécurité", "Planning", "Attestations", "Autre"].map((c) => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="ms-overline">Destinataire</label>
+                <select
+                  value={form.target_employee_id}
+                  onChange={(e) => setForm({ ...form, target_employee_id: e.target.value })}
+                  data-testid="doc-target"
+                  className="ms-input mt-2"
+                >
+                  <option value="all">Tous les employés</option>
+                  {employees.map((e) => (
+                    <option key={e.id} value={e.id}>
+                      {e.first_name} {e.last_name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div>
+              <label className="ms-overline">URL du fichier</label>
+              <input
+                value={form.url}
+                onChange={(e) => setForm({ ...form, url: e.target.value })}
+                data-testid="doc-url"
+                placeholder="https://exemple.com/fichier.pdf"
+                className="ms-input mt-2"
+              />
+            </div>
+            <div>
+              <label className="ms-overline">Description (facultatif)</label>
+              <textarea
+                value={form.description}
+                onChange={(e) => setForm({ ...form, description: e.target.value })}
+                rows={2}
+                className="ms-input mt-2 resize-none"
+              />
+            </div>
+            <button
+              onClick={submit}
+              data-testid="publish-doc"
+              disabled={!form.name.trim()}
+              className="ms-btn-primary w-full disabled:opacity-40"
+            >
+              <FileText className="h-4 w-4" /> Publier
+            </button>
+          </div>
+        </div>
+
+        <div className="ms-card p-5">
+          <h3 className="text-lg font-bold text-[#071B34] mb-1 flex items-center gap-2">
+            <Receipt className="h-5 w-5 text-[#3BA4FF]" /> Générer une fiche de paie
+          </h3>
+          <p className="text-xs text-[#475569] mb-3">
+            Bulletin de salaire réaliste conforme au modèle simplifié français.
+          </p>
+          <div className="space-y-3">
+            <div>
+              <label className="ms-overline">Employé</label>
+              <select
+                value={payslipForm.employee_id}
+                onChange={(e) => setPayslipForm({ ...payslipForm, employee_id: e.target.value })}
+                data-testid="payslip-emp"
+                className="ms-input mt-2"
+              >
+                {employees.map((e) => (
+                  <option key={e.id} value={e.id}>
+                    {e.first_name} {e.last_name} ({e.contract_hours_weekly || 35}h/sem)
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="ms-overline">Année</label>
+                <input
+                  type="number"
+                  min="2020" max="2100"
+                  value={payslipForm.year}
+                  onChange={(e) => setPayslipForm({ ...payslipForm, year: Number(e.target.value) })}
+                  className="ms-input mt-2"
+                />
+              </div>
+              <div>
+                <label className="ms-overline">Mois</label>
+                <select
+                  value={payslipForm.month}
+                  onChange={(e) => setPayslipForm({ ...payslipForm, month: Number(e.target.value) })}
+                  className="ms-input mt-2"
+                >
+                  {["Janvier","Février","Mars","Avril","Mai","Juin","Juillet","Août","Septembre","Octobre","Novembre","Décembre"].map((m, i) => (
+                    <option key={m} value={i + 1}>{m}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <button
+              onClick={genPayslip}
+              data-testid="gen-payslip"
+              className="ms-btn-primary w-full"
+            >
+              <Receipt className="h-4 w-4" /> Générer et envoyer
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div className="lg:col-span-3 ms-card p-5">
+        <h3 className="text-lg font-bold text-[#071B34] mb-3">Documents publiés ({docs.length})</h3>
+        <div className="space-y-2 max-h-[720px] overflow-y-auto pr-1">
+          {docs.map((d) => (
+            <div key={d.id} className="rounded-xl border border-[#071B34]/5 p-3 flex items-start gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#3BA4FF]/12 text-[#3BA4FF] shrink-0">
+                {d.is_payslip ? <Receipt className="h-4 w-4" /> : <FileText className="h-4 w-4" />}
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="font-semibold text-sm text-[#071B34] line-clamp-1">{d.name}</div>
+                  <span className="ms-chip bg-[#F4F7FA] text-[#475569]">{d.category}</span>
+                  {d.target_employee_id === "all" && (
+                    <span className="ms-chip bg-[#10B981]/12 text-[#059669]">Tous</span>
+                  )}
+                </div>
+                {d.description && (
+                  <div className="text-xs text-[#475569] mt-0.5 line-clamp-2">{d.description}</div>
+                )}
+                <div className="text-[10px] text-[#475569]/70 mt-1">
+                  {d.issued_at} · {d.size_kb} Ko
+                </div>
+              </div>
+              <button
+                onClick={() => remove(d)}
+                className="shrink-0 text-[10px] font-semibold rounded-md bg-[#FEE2E2] text-[#EF4444] hover:bg-[#EF4444]/20 px-2 py-1"
+              >
+                <Trash2 className="h-3 w-3 inline" />
+              </button>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+// ───────────────────────────────────────── Fil MS Park (broadcast admin)
+
+function BroadcastManager() {
+  const [content, setContent] = useState("");
+  const [channels, setChannels] = useState([]);
+  const [messages, setMessages] = useState([]);
+  const [channelId, setChannelId] = useState("ch-accueil");
+  const scrollRef = useRef(null);
+
+  useEffect(() => {
+    api.get("/channels").then((r) =>
+      setChannels(r.data.filter((c) => !c.is_dm && !c.archived))
+    );
+  }, []);
+
+  const loadMessages = () => {
+    api.get(`/channels/${channelId}/messages`).then((r) => {
+      setMessages(r.data);
+      requestAnimationFrame(() => {
+        if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+      });
+    });
+  };
+  useEffect(loadMessages, [channelId]);
+
+  const send = async () => {
+    if (!content.trim()) return;
+    try {
+      await api.post("/admin/broadcast", { content: content.trim(), channel_id: channelId });
+      toast.success("Message publié sur le fil");
+      setContent("");
+      loadMessages();
+    } catch {
+      toast.error("Erreur d'envoi");
+    }
+  };
+
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+      <div className="ms-card p-5 lg:col-span-1">
+        <h3 className="text-lg font-bold text-[#071B34] mb-3 flex items-center gap-2">
+          <Megaphone className="h-5 w-5 text-[#3BA4FF]" />
+          Publier sur le fil
+        </h3>
+        <p className="text-xs text-[#475569] mb-3">
+          Diffusez un message officiel dans un canal MS Park — visible par tous les membres.
+        </p>
+        <div className="space-y-3">
+          <div>
+            <label className="ms-overline">Canal cible</label>
+            <select
+              value={channelId}
+              onChange={(e) => setChannelId(e.target.value)}
+              data-testid="broadcast-channel"
+              className="ms-input mt-2"
+            >
+              {channels.map((c) => (
+                <option key={c.id} value={c.id}>
+                  #{c.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="ms-overline">Message</label>
+            <textarea
+              value={content}
+              onChange={(e) => setContent(e.target.value)}
+              data-testid="broadcast-content"
+              rows={6}
+              placeholder="Bonjour à tous — rappel important…"
+              className="ms-input mt-2 resize-none"
+            />
+          </div>
+          <button
+            onClick={send}
+            data-testid="broadcast-send"
+            disabled={!content.trim()}
+            className="ms-btn-primary w-full disabled:opacity-40"
+          >
+            <Send className="h-4 w-4" /> Publier
+          </button>
+        </div>
+      </div>
+
+      <div className="lg:col-span-2 ms-card p-0 flex flex-col overflow-hidden max-h-[720px]">
+        <div className="px-5 py-3 border-b border-[#071B34]/5 shrink-0">
+          <h3 className="text-sm font-bold text-[#071B34]">Aperçu — #{channels.find(c => c.id === channelId)?.name || channelId}</h3>
+        </div>
+        <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-3 min-h-0 bg-[#F8FAFC]">
+          {messages.length === 0 && (
+            <div className="text-center text-sm text-[#475569] py-12">Pas encore de message.</div>
+          )}
+          {messages.map((m) => (
+            <div key={m.id} className="rounded-2xl bg-white border border-[#071B34]/5 px-4 py-3 shadow-sm">
+              <div className="flex items-center gap-2 mb-1">
+                <span className="text-xs font-bold text-[#071B34]">
+                  {m.is_admin_broadcast && "📣 "}
+                  {m.author_id === "emp-marcus-simeo" ? "Marcus SIMÉO" : m.author_id}
+                </span>
+                <span className="text-[10px] text-[#475569]">
+                  {new Date(m.ts).toLocaleString("fr-FR", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}
+                </span>
+                {m.is_admin_broadcast && (
+                  <span className="ms-chip bg-[#3BA4FF]/12 text-[#1D70B8]">Annonce officielle</span>
+                )}
+              </div>
+              <div className="text-sm text-[#071B34] whitespace-pre-wrap break-words">{m.content}</div>
+            </div>
+          ))}
         </div>
       </div>
     </div>
