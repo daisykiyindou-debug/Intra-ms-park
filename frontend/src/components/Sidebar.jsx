@@ -18,8 +18,6 @@ import {
   ClipboardList,
   Inbox,
   BarChart3,
-  Gift,
-  FileText,
   Megaphone,
 } from "lucide-react";
 import { useApp } from "@/contexts/AppContext";
