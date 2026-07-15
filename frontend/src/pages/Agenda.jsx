@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Calendar as CalIcon, ChevronLeft, ChevronRight, MapPin, Clock, X, ExternalLink, Users } from "lucide-react";
 import { api, fr, formatDateFr } from "@/lib/api";
+import useLiveData from "@/hooks/useLiveData";
 
 const typeColor = {
   event: { bg: "#A78BFA22", color: "#7C3AED", label: "Événement" },
@@ -17,9 +18,10 @@ export default function Agenda() {
   const [events, setEvents] = useState([]);
   const [selected, setSelected] = useState(null);
 
-  useEffect(() => {
-    api.get("/events").then((r) => setEvents(r.data));
-  }, []);
+  useLiveData(
+    () => api.get("/events").then((r) => setEvents(r.data)),
+    ["events"]
+  );
 
   const grid = useMemo(() => {
     const first = new Date(month.y, month.m, 1);
@@ -177,59 +179,113 @@ export default function Agenda() {
           <div
             onClick={(e) => e.stopPropagation()}
             data-testid="event-detail-modal"
-            className="ms-card max-w-lg w-full p-6"
+            className="ms-card max-w-2xl w-full max-h-[90vh] overflow-y-auto"
           >
-            <div className="flex items-start justify-between mb-4">
-              <div>
-                <span
-                  className="ms-chip"
-                  style={{
-                    background: typeColor[selected.type].bg,
-                    color: typeColor[selected.type].color,
-                  }}
-                >
-                  {typeColor[selected.type].label}
-                </span>
-                <h3 className="mt-2 text-2xl font-bold text-[#071B34]">{selected.title}</h3>
-              </div>
-              <button
-                onClick={() => setSelected(null)}
-                className="flex h-9 w-9 items-center justify-center rounded-xl hover:bg-[#071B34]/5"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
-              <Info icon={CalIcon} label="Date">
-                {formatDateFr(selected.date)}
-              </Info>
-              <Info icon={Clock} label="Heure">{selected.time}</Info>
-              <Info icon={MapPin} label="Lieu">{selected.location}</Info>
-            </div>
-
-            <p className="text-sm text-[#475569] leading-relaxed">{selected.description}</p>
-
-            <div className="mt-5 flex flex-col sm:flex-row gap-2">
-              {selected.needs_registration ? (
-                <a
-                  href={`mailto:rh@mspark.fr?subject=Inscription : ${encodeURIComponent(selected.title)}`}
-                  data-testid="event-register"
-                  className="ms-btn-primary flex-1"
-                >
-                  <Users className="h-4 w-4" /> S'inscrire à cet événement
-                </a>
-              ) : (
-                <div className="flex-1 rounded-xl bg-[#F4F7FA] px-4 py-2.5 text-xs text-[#475569] text-center">
-                  Aucune inscription requise
+            {selected.image && (
+              <img
+                src={selected.image}
+                alt=""
+                data-testid="event-image"
+                className="w-full h-56 object-cover"
+              />
+            )}
+            <div className="p-6">
+              <div className="flex items-start justify-between mb-4">
+                <div>
+                  <span
+                    className="ms-chip"
+                    style={{
+                      background: typeColor[selected.type].bg,
+                      color: typeColor[selected.type].color,
+                    }}
+                  >
+                    {typeColor[selected.type].label}
+                  </span>
+                  <h3 className="mt-2 text-2xl font-bold text-[#071B34]">{selected.title}</h3>
+                  {selected.intro_text && (
+                    <p className="mt-1 text-sm text-[#475569] italic">{selected.intro_text}</p>
+                  )}
                 </div>
+                <button
+                  onClick={() => setSelected(null)}
+                  className="flex h-9 w-9 items-center justify-center rounded-xl hover:bg-[#071B34]/5 shrink-0"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
+                <Info icon={CalIcon} label={selected.end_date && selected.end_date !== selected.date ? "Du" : "Date"}>
+                  {formatDateFr(selected.date)}
+                  {selected.end_date && selected.end_date !== selected.date && (
+                    <span className="block text-xs text-[#475569] font-normal mt-0.5">
+                      au {formatDateFr(selected.end_date)}
+                    </span>
+                  )}
+                </Info>
+                <Info icon={Clock} label="Horaires">
+                  {(selected.start_time || selected.time) || "—"}
+                  {selected.end_time && <> → {selected.end_time}</>}
+                </Info>
+                {selected.location && (
+                  <Info icon={MapPin} label="Lieu">{selected.location}</Info>
+                )}
+              </div>
+
+              {selected.description && (
+                <p className="text-sm text-[#475569] leading-relaxed whitespace-pre-wrap">
+                  {selected.description}
+                </p>
               )}
-              <button
-                onClick={() => setSelected(null)}
-                className="ms-btn-outline"
-              >
-                Fermer
-              </button>
+
+              <div className="mt-5 flex flex-col sm:flex-row gap-2">
+                {(selected.signup_enabled || selected.needs_registration) ? (
+                  selected.signup_url ? (
+                    <a
+                      href={selected.signup_url}
+                      target="_blank"
+                      rel="noreferrer"
+                      data-testid="event-register"
+                      className="ms-btn-primary flex-1"
+                    >
+                      <Users className="h-4 w-4" /> S'inscrire à cet événement
+                    </a>
+                  ) : (
+                    <a
+                      href={`mailto:rh@mspark.fr?subject=Inscription : ${encodeURIComponent(selected.title)}`}
+                      data-testid="event-register"
+                      className="ms-btn-primary flex-1"
+                    >
+                      <Users className="h-4 w-4" /> S'inscrire à cet événement
+                    </a>
+                  )
+                ) : (
+                  <div className="flex-1 rounded-xl bg-[#F4F7FA] px-4 py-2.5 text-xs text-[#475569] text-center">
+                    Aucune inscription requise
+                  </div>
+                )}
+                {selected.linked_news_id && (
+                  <a href={`/actualites/${selected.linked_news_id}`} className="ms-btn-outline">
+                    Voir l'actualité liée <ExternalLink className="h-3.5 w-3.5" />
+                  </a>
+                )}
+                {selected.external_link && (
+                  <a
+                    href={selected.external_link}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="ms-btn-outline"
+                  >
+                    Ouvrir le lien <ExternalLink className="h-3.5 w-3.5" />
+                  </a>
+                )}
+                <button
+                  onClick={() => setSelected(null)}
+                  className="ms-btn-outline"
+                >
+                  Fermer
+                </button>
+              </div>
             </div>
           </div>
         </div>

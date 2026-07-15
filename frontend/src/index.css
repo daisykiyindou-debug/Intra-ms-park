@@ -145,3 +145,27 @@
   to { opacity: 1; transform: translateY(0); }
 }
 .ms-fade-up { animation: ms-fade-up 0.5s cubic-bezier(0.16, 1, 0.3, 1) both; }
+
+
+/* Rich text editor placeholder + prose */
+.ms-rte:empty::before {
+  content: attr(data-placeholder);
+  color: #94A3B8;
+  pointer-events: none;
+}
+.ms-rte h2 { font-size: 1.15rem; font-weight: 700; margin: 0.4rem 0; color: #071B34; }
+.ms-rte h3 { font-size: 1rem; font-weight: 600; margin: 0.35rem 0; color: #071B34; }
+.ms-rte ul { list-style: disc; padding-left: 1.4rem; margin: 0.3rem 0; }
+.ms-rte ol { list-style: decimal; padding-left: 1.4rem; margin: 0.3rem 0; }
+.ms-rte a { color: #3BA4FF; text-decoration: underline; }
+.ms-rte p { margin: 0.3rem 0; }
+
+/* Prose renderer used to display formatted news content in read-only pages */
+.ms-prose h2 { font-size: 1.25rem; font-weight: 700; margin: 0.75rem 0 0.35rem; color: #071B34; }
+.ms-prose h3 { font-size: 1.05rem; font-weight: 600; margin: 0.6rem 0 0.3rem; color: #071B34; }
+.ms-prose ul { list-style: disc; padding-left: 1.4rem; margin: 0.4rem 0; }
+.ms-prose ol { list-style: decimal; padding-left: 1.4rem; margin: 0.4rem 0; }
+.ms-prose a { color: #3BA4FF; text-decoration: underline; }
+.ms-prose p { margin: 0.4rem 0; }
+.ms-prose strong { font-weight: 700; }
+.ms-prose em { font-style: italic; }

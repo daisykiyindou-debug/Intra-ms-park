@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { FileText, Download, Eye, Search, X, Receipt } from "lucide-react";
 import { Link } from "react-router-dom";
 import { api, formatDateFr } from "@/lib/api";
+import useLiveData from "@/hooks/useLiveData";
 
 const CATEGORIES = [
   { k: "all", l: "Tous" },
@@ -19,9 +20,10 @@ export default function Documents() {
   const [q, setQ] = useState("");
   const [preview, setPreview] = useState(null);
 
-  useEffect(() => {
-    api.get("/documents").then((r) => setDocs(r.data));
-  }, []);
+  useLiveData(
+    () => api.get("/documents").then((r) => setDocs(r.data)),
+    ["documents"]
+  );
 
   const filtered = useMemo(() => {
     return docs.filter((d) => {

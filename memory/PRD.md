@@ -47,6 +47,15 @@ Intranet premium pour employés du parc MS Park + espace administrateur pour le 
 - `/app/frontend/src/lib/api.js` — interceptor axios ajoutant `X-Employee-Id` depuis localStorage
 
 ## Changelog
+### 2026-08 — Titres, redirections, image agenda, rich text & sync globale
+- **Titre obligatoire** sur les publications du fil (`PostCreate.title` requis backend, input dédié composer max 140 car).
+- **Redirection par ID unique** : `NewsDetail` (`/actualites/:id`) résout news → fallback post automatique. Le lien reste valide même si le titre change.
+- **TargetPicker fusionné** dans carrousel + agenda : liste combinée news + posts avec recherche par titre, ID affiché.
+- **Image dans modal Agenda** + `end_date` (multi-jours), `intro_text`, boutons S'inscrire/Voir l'actualité liée/Lien externe.
+- **RichTextEditor** custom (contentEditable + toolbar : gras/italique/souligné, H2/H3, listes puces/num, alignements, liens, emoji picker). CSS `.ms-rte` / `.ms-prose`.
+- **Rendu HTML** via `dangerouslySetInnerHTML` avec classes `ms-prose` sur le fil + NewsDetail.
+- **Synchronisation globale** : hook `useLiveData` + `notifyLiveRefresh` → toute mutation admin/comm rafraîchit instantanément les pages actualités/posts/carrousel/agenda/documents/plannings/notifications sur toutes les vues (same-tab + cross-tab via localStorage).
+
 ### 2026-08 — Chargée de communication + validation Sync CP
 - **Sync CP/RTT confirmée** (bug déjà résolu dans une itération antérieure) : approbation d'un congé → planning employé ET planning admin affichent immédiatement "CONGÉ" sur les jours concernés (verified via curl + admin PlanningManager screenshot pour Marcus semaine 20-24 juil). Ajout du badge RTT dans typeStyles (Planning.jsx) et typeMeta (Management.jsx EntryCard) pour robustesse.
 - **Nouveau compte "Chargée de communication"** — Léa DUBOIS (`emp-lea-comm`) — `lea.dubois@mspark.fr` / `MSPark@Comm2026!`. Flag `can_manage_communication: true`, `is_admin: false`.

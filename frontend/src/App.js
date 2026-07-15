@@ -5,6 +5,7 @@ import { Toaster } from "@/components/ui/sonner";
 import Layout from "@/components/Layout";
 import { AppContext } from "@/contexts/AppContext";
 import { api } from "@/lib/api";
+import useLiveData from "@/hooks/useLiveData";
 
 import LoginPage from "@/pages/LoginPage";
 import Dashboard from "@/pages/Dashboard";
@@ -53,6 +54,12 @@ function App() {
     refreshEmployees();
     refreshNotifications();
   }, []);
+
+  // Global live sync: when any mutation fires notifyLiveRefresh(["me"|"notifications"...])
+  // the AppContext-level data reloads instantly, on this tab and other tabs.
+  useLiveData(refreshMe, ["me"]);
+  useLiveData(refreshEmployees, ["employees", "me"]);
+  useLiveData(refreshNotifications, ["notifications"]);
 
   const findEmployee = (id) => employees.find((e) => e.id === id);
 

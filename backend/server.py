@@ -180,14 +180,15 @@ class Order(BaseModel):
 
 
 class PostCreate(BaseModel):
-    content: str
+    title: str  # Required — used to identify the post in carousel/agenda link pickers
+    content: str  # HTML from the rich-text editor (or plain text)
     category: Optional[str] = "annonce"
-    image: Optional[str] = None  # legacy single image
-    images: Optional[List[str]] = None  # multiple photos
-    attachments: Optional[List[dict]] = None  # [{name, url, type}]
+    image: Optional[str] = None
+    images: Optional[List[str]] = None
+    attachments: Optional[List[dict]] = None
     links: Optional[List[str]] = None
     hashtags: List[str] = []
-    posted_as: Optional[str] = "personal"  # "personal" | "official"
+    posted_as: Optional[str] = "personal"
 
 
 class Comment(BaseModel):
@@ -792,8 +793,9 @@ async def _seed_once() -> None:
         {
             "id": _id(),
             "author_id": "emp-pierre",
+            "title": "Bilan mensuel — satisfaction client au top 🎯",
             "category": "Direction",
-            "content": "Très fière de l'équipe pour le mois écoulé ! Notre taux de satisfaction client atteint 96%, un record absolu. Bravo à toutes et tous.",
+            "content": "<p>Très fière de l'équipe pour le mois écoulé ! Notre taux de satisfaction client atteint <strong>96%</strong>, un record absolu. Bravo à toutes et tous.</p>",
             "image": "https://images.unsplash.com/photo-1556761175-5973dc0f32e7?w=1200&h=600&fit=crop",
             "hashtags": ["#TeamMSPark", "#Excellence", "#FierEquipe"],
             "likes": ["emp-sophie", "emp-thomas", CURRENT_EMPLOYEE_ID, "emp-emma", "emp-karim"],
@@ -810,8 +812,9 @@ async def _seed_once() -> None:
         {
             "id": _id(),
             "author_id": "emp-julie",
+            "title": "Nouveau Bao Dog au Soccer Bar 🥟",
             "category": "Restauration",
-            "content": "🎉 Lancement officiel du nouveau Bao Dog au Soccer Bar dès lundi prochain ! Venez tester en avant-première mercredi.",
+            "content": "<p>🎉 <strong>Lancement officiel</strong> du nouveau Bao Dog au Soccer Bar dès lundi prochain !</p><p>Venez tester en avant-première <em>mercredi</em>.</p>",
             "image": "https://images.unsplash.com/photo-1626202373052-9b8aa5edfaef?w=1200&h=600&fit=crop",
             "hashtags": ["#NouveauMenu", "#SoccerBar"],
             "likes": ["emp-emma", "emp-leila", "emp-thomas"],
@@ -821,8 +824,9 @@ async def _seed_once() -> None:
         {
             "id": _id(),
             "author_id": "emp-sophie",
+            "title": "Roller Party VIP — samedi 21h",
             "category": "Événement",
-            "content": "Roller Party VIP samedi 21h-01h. Tenue blanche obligatoire ! Inscrivez-vous via l'agenda interne avant vendredi.",
+            "content": "<p><strong>Roller Party VIP</strong> samedi 21h-01h.</p><ul><li>Tenue <em>blanche</em> obligatoire</li><li>Inscrivez-vous via l'agenda interne avant vendredi</li></ul>",
             "image": "https://images.unsplash.com/photo-1571266028243-d220bc77b97a?w=1200&h=600&fit=crop",
             "hashtags": ["#RollerParty", "#WhiteNight"],
             "likes": [CURRENT_EMPLOYEE_ID, "emp-karim", "emp-amelie", "emp-noah"],
@@ -835,8 +839,9 @@ async def _seed_once() -> None:
         {
             "id": _id(),
             "author_id": "emp-thomas",
+            "title": "Rappel points repas — à consommer le jour même",
             "category": "RH",
-            "content": "Rappel : les points repas sont valables UNIQUEMENT le jour même. Pensez à les utiliser avant minuit !",
+            "content": "<p>Rappel : les points repas sont valables <strong>UNIQUEMENT le jour même</strong>. Pensez à les utiliser avant minuit !</p>",
             "image": None,
             "hashtags": ["#PointsRepas", "#RH"],
             "likes": ["emp-emma", "emp-lucas"],
@@ -1632,6 +1637,7 @@ async def create_post(payload: PostCreate):
     p = {
         "id": _id(),
         "author_id": current_user(),
+        "title": payload.title.strip() or "Sans titre",
         "category": payload.category or "annonce",
         "content": payload.content,
         "image": payload.image,
@@ -1646,6 +1652,15 @@ async def create_post(payload: PostCreate):
     }
     await db.posts.insert_one(p.copy())
     return await _strip(p)
+
+
+@api.get("/posts/{post_id}")
+async def get_post(post_id: str):
+    """Public read of a single post — used by `/actualites/:id` detail page."""
+    p = await db.posts.find_one({"id": post_id}, {"_id": 0})
+    if not p:
+        raise HTTPException(404, "Publication introuvable")
+    return p
 
 
 @api.delete("/posts/{post_id}")
@@ -2049,7 +2064,8 @@ class EventPayload(BaseModel):
     title: str
     description: Optional[str] = None
     intro_text: Optional[str] = None
-    date: str  # YYYY-MM-DD
+    date: str  # YYYY-MM-DD (start date)
+    end_date: Optional[str] = None  # YYYY-MM-DD (optional multi-day event)
     start_time: Optional[str] = None
     end_time: Optional[str] = None
     location: Optional[str] = None

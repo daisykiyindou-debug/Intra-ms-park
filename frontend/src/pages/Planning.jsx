@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight, Clock, MapPin, User, X, CalendarClock } from "lucide-react";
 import { api, fr, formatDateFr } from "@/lib/api";
 import { useApp } from "@/contexts/AppContext";
+import useLiveData from "@/hooks/useLiveData";
 
 const typeStyles = {
   shift: { bg: "#3BA4FF15", color: "#1D70B8", label: "Shift" },
@@ -20,21 +21,15 @@ export default function Planning() {
   const [view, setView] = useState("month");
   const [data, setData] = useState([]);
   const [selected, setSelected] = useState(null);
-  // Manual reload trigger — bumped by refresh() so external mutations (approvals in
-  // another tab, RTT allocations, etc.) can be reflected without leaving the page.
-  const [reloadKey, setReloadKey] = useState(0);
-
-  useEffect(() => {
-    const ym = `${month.y}-${String(month.m + 1).padStart(2, "0")}`;
-    api.get(`/schedule?month=${ym}`).then((r) => setData(r.data));
-  }, [month, reloadKey]);
-
-  // Refetch whenever the tab regains focus — makes admin approvals visible instantly
-  useEffect(() => {
-    const handler = () => setReloadKey((k) => k + 1);
-    window.addEventListener("focus", handler);
-    return () => window.removeEventListener("focus", handler);
-  }, []);
+  // Live sync: refetch on mount, month change, window focus, and admin mutations
+  useLiveData(
+    () => {
+      const ym = `${month.y}-${String(month.m + 1).padStart(2, "0")}`;
+      return api.get(`/schedule?month=${ym}`).then((r) => setData(r.data));
+    },
+    ["schedule", "me"],
+    [month]
+  );
 
   const grid = useMemo(() => {
     const first = new Date(month.y, month.m, 1);

@@ -21,6 +21,7 @@ import {
 import { api, fr, formatMinutes } from "@/lib/api";
 import { useApp } from "@/contexts/AppContext";
 import NewsCarousel from "@/components/NewsCarousel";
+import useLiveData from "@/hooks/useLiveData";
 
 const eventColor = {
   event: { bg: "#A78BFA22", color: "#7C3AED", label: "Événement" },
@@ -38,15 +39,21 @@ export default function Dashboard() {
   const [points, setPoints] = useState(null);
   const [now, setNow] = useState(new Date());
 
+  useLiveData(
+    () => {
+      api.get("/dashboard").then((r) => setData(r.data));
+      api.get("/carousel").then((r) => {
+        // If admin didn't feature anything, fall back to latest news
+        if (r.data && r.data.length) setNews(r.data);
+        else api.get("/news").then((n) => setNews(n.data));
+      });
+      api.get("/events").then((r) => setEvents(r.data));
+      api.get("/meal-points/today").then((r) => setPoints(r.data));
+    },
+    ["carousel", "news", "events", "schedule", "me"]
+  );
+
   useEffect(() => {
-    api.get("/dashboard").then((r) => setData(r.data));
-    api.get("/carousel").then((r) => {
-      // If admin didn't feature anything, fall back to latest news
-      if (r.data && r.data.length) setNews(r.data);
-      else api.get("/news").then((n) => setNews(n.data));
-    });
-    api.get("/events").then((r) => setEvents(r.data));
-    api.get("/meal-points/today").then((r) => setPoints(r.data));
     const t = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(t);
   }, []);

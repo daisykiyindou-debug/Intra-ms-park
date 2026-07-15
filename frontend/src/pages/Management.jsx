@@ -9,6 +9,7 @@ import {
 import { toast } from "sonner";
 import { api, fr, formatMinutes } from "@/lib/api";
 import { useApp } from "@/contexts/AppContext";
+import { notifyLiveRefresh } from "@/hooks/useLiveData";
 
 const subNav = [
   { to: "/management", label: "Vue d'ensemble", icon: BarChart3, end: true },
@@ -314,6 +315,7 @@ function PlanningManager() {
       toast.success("Planning enregistré");
       setEditEntry(null);
       loadWeek();
+      notifyLiveRefresh(["schedule", "me"]);
     } catch (err) {
       toast.error("Erreur d'enregistrement", {
         description: err.response?.data?.detail || "Vérifiez les horaires",
@@ -328,6 +330,7 @@ function PlanningManager() {
       await api.delete(`/admin/schedule/${entry.id}`);
       toast.success("Entrée supprimée");
       loadWeek();
+      notifyLiveRefresh(["schedule", "me"]);
     } catch {
       toast.error("Suppression impossible");
     }
@@ -707,10 +710,9 @@ function RequestsManager() {
       { description: `${req.employee_name} sera notifié·e` }
     );
     load();
-    // Refresh current user (balance may have changed if I approved my own CP)
-    // and the employees list so the Planning admin view shows fresh balances.
     refreshMe?.();
     refreshEmployees?.();
+    notifyLiveRefresh(["requests", "schedule", "me", "notifications"]);
   };
 
   const submitInfo = async () => {
@@ -888,13 +890,31 @@ function NewsManager() {
     target_type: "news", target_id: "",
   });
   const [news, setNews] = useState([]);
+  const [posts, setPosts] = useState([]);
   const [events, setEvents] = useState([]);
   const [editing, setEditing] = useState(null);
   const load = () => {
     api.get("/news").then((r) => setNews(r.data));
+    api.get("/posts").then((r) => setPosts(r.data));
     api.get("/events").then((r) => setEvents(r.data));
   };
   useEffect(() => { load(); }, []);
+
+  // Merge news + posts into a single title-searchable list — the redirection
+  // page (`/actualites/:id`) auto-resolves either kind by ID.
+  const actualiteChoices = useMemo(() => {
+    const asChoice = (o, kind) => ({
+      id: o.id,
+      title: o.title || "(sans titre)",
+      kind,
+      date: (o.date || o.created_at || "").slice(0, 10),
+    });
+    const list = [
+      ...news.map((n) => asChoice(n, "news")),
+      ...posts.map((p) => asChoice(p, "post")),
+    ];
+    return list.sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+  }, [news, posts]);
 
   const publish = async () => {
     if (!form.title.trim() || !form.content.trim()) return;
@@ -908,6 +928,7 @@ function NewsManager() {
         target_type: "news", target_id: "",
       });
       load();
+      notifyLiveRefresh(["news", "carousel"]);
     } catch {
       toast.error("Impossible de publier");
     }
@@ -918,6 +939,7 @@ function NewsManager() {
       await api.put(`/admin/news/${n.id}`, { [field]: !n[field] });
       toast.success("Actualité mise à jour");
       load();
+      notifyLiveRefresh(["news", "carousel"]);
     } catch {
       toast.error("Erreur");
     }
@@ -927,6 +949,7 @@ function NewsManager() {
     try {
       await api.put(`/admin/news/${n.id}`, { order: (n.order || 100) + delta });
       load();
+      notifyLiveRefresh(["news", "carousel"]);
     } catch {
       toast.error("Erreur");
     }
@@ -938,6 +961,7 @@ function NewsManager() {
       await api.delete(`/admin/news/${n.id}`);
       toast.success("Actualité supprimée");
       load();
+      notifyLiveRefresh(["news", "carousel"]);
     } catch {
       toast.error("Erreur");
     }
@@ -1009,7 +1033,7 @@ function NewsManager() {
           <TargetPicker
             value={{ target_type: form.target_type, target_id: form.target_id, cta_url: form.cta_url }}
             onChange={(v) => setForm({ ...form, ...v })}
-            news={news}
+            news={actualiteChoices}
             events={events}
           />
           <div className="grid grid-cols-3 gap-2 pt-2">
@@ -1150,7 +1174,7 @@ function NewsManager() {
       {editing && (
         <SlideEditor
           slide={editing}
-          news={news}
+          news={actualiteChoices}
           events={events}
           onClose={() => setEditing(null)}
           onSaved={() => {
@@ -1166,6 +1190,10 @@ function NewsManager() {
 
 function TargetPicker({ value, onChange, news, events }) {
   const type = value.target_type || "news";
+  const [search, setSearch] = useState("");
+  const filtered = news
+    .filter((n) => n.title?.toLowerCase().includes(search.toLowerCase()))
+    .slice(0, 100);
   return (
     <div>
       <label className="ms-overline">Destination du bouton</label>
@@ -1192,21 +1220,38 @@ function TargetPicker({ value, onChange, news, events }) {
           </button>
         ))}
       </div>
-      <div className="mt-2">
+      <div className="mt-2 space-y-2">
         {type === "news" && (
-          <select
-            value={value.target_id || ""}
-            onChange={(e) => onChange({ target_id: e.target.value })}
-            data-testid="target-news-select"
-            className="ms-input"
-          >
-            <option value="">— Choisir une actualité —</option>
-            {news.map((n) => (
-              <option key={n.id} value={n.id}>
-                {n.title}
-              </option>
-            ))}
-          </select>
+          <>
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="🔍 Rechercher une actualité par titre…"
+              className="ms-input"
+            />
+            <select
+              value={value.target_id || ""}
+              onChange={(e) => onChange({ target_id: e.target.value })}
+              data-testid="target-news-select"
+              className="ms-input"
+              size={Math.min(6, Math.max(3, filtered.length + 1))}
+            >
+              <option value="">— Choisir une actualité —</option>
+              {filtered.map((n) => (
+                <option key={n.id} value={n.id}>
+                  {n.title}
+                  {n.kind === "post" ? " · Fil" : n.kind === "news" ? " · Carrousel" : ""}
+                  {n.date ? ` — ${n.date}` : ""}
+                </option>
+              ))}
+            </select>
+            {value.target_id && (
+              <div className="text-[10px] text-[#475569] px-2">
+                ID enregistré : <code className="text-[#3BA4FF]">{value.target_id}</code> —
+                la redirection ira toujours vers cette actualité même si son titre change.
+              </div>
+            )}
+          </>
         )}
         {type === "event" && (
           <select
@@ -1272,6 +1317,7 @@ function SlideEditor({ slide, news, events, onClose, onSaved }) {
     try {
       await api.put(`/admin/news/${slide.id}`, form);
       toast.success("Slide mise à jour");
+      notifyLiveRefresh(["news", "carousel"]);
       onSaved();
     } catch (err) {
       toast.error("Erreur de sauvegarde", { description: err.response?.data?.detail });
@@ -1410,6 +1456,7 @@ function LeaveGrantManager() {
       setSelected([]);
       setDays(1);
       reload();
+      notifyLiveRefresh(["me", "notifications"]);
     } catch {
       toast.error("Erreur d'attribution");
     }
@@ -1421,6 +1468,7 @@ function LeaveGrantManager() {
       const { data } = await api.post("/admin/leave/accrue-monthly");
       toast.success(`+2,5 jours CP crédités à ${data.accrued_count} employé(s) (mois ${data.month})`);
       reload();
+      notifyLiveRefresh(["me", "notifications"]);
     } catch {
       toast.error("Erreur d'acquisition mensuelle");
     } finally {
@@ -1584,6 +1632,7 @@ function DocumentsManager() {
       toast.success("Document publié");
       setForm({ name: "", category: "Contrats", url: "", target_employee_id: "all", description: "", size_kb: 100 });
       loadDocs();
+      notifyLiveRefresh(["documents", "notifications"]);
     } catch {
       toast.error("Erreur de publication");
     }
@@ -1595,6 +1644,7 @@ function DocumentsManager() {
       await api.post("/admin/documents/payslip", payslipForm);
       toast.success("Fiche de paie générée");
       loadDocs();
+      notifyLiveRefresh(["documents", "notifications"]);
     } catch (err) {
       toast.error("Erreur de génération", { description: err.response?.data?.detail });
     }
@@ -1606,6 +1656,7 @@ function DocumentsManager() {
       await api.delete(`/admin/documents/${d.id}`);
       toast.success("Document supprimé");
       loadDocs();
+      notifyLiveRefresh(["documents"]);
     } catch {
       toast.error("Erreur");
     }
@@ -1803,14 +1854,25 @@ const GROUP_OPTIONS = [
 function AgendaManager() {
   const [events, setEvents] = useState([]);
   const [news, setNews] = useState([]);
+  const [posts, setPosts] = useState([]);
   const [editing, setEditing] = useState(null);
   const [creating, setCreating] = useState(false);
 
   const load = () => {
     api.get("/admin/events").then((r) => setEvents(r.data)).catch(() => setEvents([]));
     api.get("/news").then((r) => setNews(r.data)).catch(() => setNews([]));
+    api.get("/posts").then((r) => setPosts(r.data)).catch(() => setPosts([]));
   };
   useEffect(() => { load(); }, []);
+
+  // Same merge as NewsManager — pickers show news + posts by title
+  const actualiteChoices = useMemo(() => {
+    const list = [
+      ...news.map((n) => ({ id: n.id, title: n.title || "(sans titre)", kind: "news", date: (n.date || "").slice(0, 10) })),
+      ...posts.map((p) => ({ id: p.id, title: p.title || "(sans titre)", kind: "post", date: (p.created_at || "").slice(0, 10) })),
+    ];
+    return list.sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+  }, [news, posts]);
 
   const remove = async (ev) => {
     if (!window.confirm(`Supprimer l'événement "${ev.title}" ?`)) return;
@@ -1818,6 +1880,7 @@ function AgendaManager() {
       await api.delete(`/admin/events/${ev.id}`);
       toast.success("Événement supprimé");
       load();
+      notifyLiveRefresh(["events", "notifications"]);
     } catch {
       toast.error("Impossible de supprimer");
     }
@@ -1884,7 +1947,7 @@ function AgendaManager() {
       {(editing || creating) && (
         <EventEditor
           event={editing}
-          news={news}
+          news={actualiteChoices}
           onClose={() => { setEditing(null); setCreating(false); }}
           onSaved={() => { setEditing(null); setCreating(false); load(); }}
         />
@@ -1964,7 +2027,9 @@ function EventEditor({ event, news, onClose, onSaved }) {
   const [form, setForm] = useState({
     title: event?.title || "",
     description: event?.description || "",
+    intro_text: event?.intro_text || "",
     date: event?.date || today,
+    end_date: event?.end_date || "",
     start_time: event?.start_time || event?.time || "09:00",
     end_time: event?.end_time || "",
     location: event?.location || "",
@@ -2019,6 +2084,7 @@ function EventEditor({ event, news, onClose, onSaved }) {
         await api.put(`/admin/events/${event.id}`, form);
         toast.success("Événement mis à jour");
       }
+      notifyLiveRefresh(["events", "notifications"]);
       onSaved();
     } catch (err) {
       toast.error("Erreur", { description: err.response?.data?.detail });
@@ -2083,9 +2149,9 @@ function EventEditor({ event, news, onClose, onSaved }) {
             </div>
           </div>
 
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-2 gap-2">
             <div>
-              <label className="ms-overline">Date</label>
+              <label className="ms-overline">Date de début</label>
               <input
                 type="date"
                 value={form.date}
@@ -2094,6 +2160,20 @@ function EventEditor({ event, news, onClose, onSaved }) {
                 className="ms-input mt-2"
               />
             </div>
+            <div>
+              <label className="ms-overline">Date de fin (optionnel)</label>
+              <input
+                type="date"
+                value={form.end_date}
+                onChange={(e) => setForm({ ...form, end_date: e.target.value })}
+                data-testid="event-end-date"
+                min={form.date}
+                className="ms-input mt-2"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
             <div>
               <label className="ms-overline">Début</label>
               <input
@@ -2113,6 +2193,16 @@ function EventEditor({ event, news, onClose, onSaved }) {
                 className="ms-input mt-2"
               />
             </div>
+          </div>
+
+          <div>
+            <label className="ms-overline">Sous-titre / accroche</label>
+            <input
+              value={form.intro_text}
+              onChange={(e) => setForm({ ...form, intro_text: e.target.value })}
+              placeholder="Ex. Un moment de partage entre équipes"
+              className="ms-input mt-2"
+            />
           </div>
 
           <div>
@@ -2220,12 +2310,21 @@ function EventEditor({ event, news, onClose, onSaved }) {
               value={form.linked_news_id}
               onChange={(e) => setForm({ ...form, linked_news_id: e.target.value })}
               className="ms-input mt-2"
+              data-testid="event-linked-news"
             >
               <option value="">— Aucune —</option>
               {news.map((n) => (
-                <option key={n.id} value={n.id}>{n.title}</option>
+                <option key={n.id} value={n.id}>
+                  {n.title}
+                  {n.kind === "post" ? " · Fil" : n.kind === "news" ? " · Carrousel" : ""}
+                </option>
               ))}
             </select>
+            {form.linked_news_id && (
+              <div className="mt-1 text-[10px] text-[#475569]">
+                Le bouton "Voir l'actualité" ouvrira directement cette publication.
+              </div>
+            )}
           </div>
 
           <div>
@@ -2287,6 +2386,7 @@ function BroadcastManager() {
       toast.success("Message publié sur le fil");
       setContent("");
       loadMessages();
+      notifyLiveRefresh(["messages", "notifications"]);
     } catch {
       toast.error("Erreur d'envoi");
     }

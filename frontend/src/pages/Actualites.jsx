@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import {
   Heart, MessageCircle, Send, Filter, Eye, EyeOff,
   Image as ImageIcon, Paperclip, Link2, Smile, Sparkles, Trash2, X,
@@ -7,6 +8,8 @@ import {
 import { toast } from "sonner";
 import { api, formatDateFr } from "@/lib/api";
 import { useApp } from "@/contexts/AppContext";
+import useLiveData, { notifyLiveRefresh } from "@/hooks/useLiveData";
+import RichTextEditor from "@/components/RichTextEditor";
 
 const FILTERS = [
   { k: "all", l: "Toutes" },
@@ -67,7 +70,7 @@ export default function Actualites() {
   const [filter, setFilter] = useState("all");
 
   const refresh = () => api.get("/posts").then((r) => setPosts(r.data));
-  useEffect(() => { refresh(); }, []);
+  useLiveData(refresh, ["posts", "news"]);
 
   const like = async (id) => {
     await api.post(`/posts/${id}/like`);
@@ -140,6 +143,7 @@ export default function Actualites() {
 function AdminComposer({ me, onPublished }) {
   const isCommOnly = !me?.is_admin && !!me?.can_manage_communication;
   const [open, setOpen] = useState(false);
+  const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
   const [category, setCategory] = useState("Direction");
   const [images, setImages] = useState([]);
@@ -155,11 +159,21 @@ function AdminComposer({ me, onPublished }) {
   const textareaRef = useRef(null);
 
   const publish = async () => {
-    if (!content.trim()) return;
+    if (!title.trim()) {
+      toast.error("Un titre est requis pour votre publication");
+      return;
+    }
+    // Strip HTML tags to check the content has real substance
+    const plain = content.replace(/<[^>]+>/g, "").trim();
+    if (!plain) {
+      toast.error("Le contenu ne peut pas être vide");
+      return;
+    }
     setPublishing(true);
     try {
       await api.post("/posts", {
-        content: content.trim(),
+        title: title.trim(),
+        content, // HTML from the rich-text editor
         category,
         images,
         attachments,
@@ -167,6 +181,7 @@ function AdminComposer({ me, onPublished }) {
         posted_as: postedAs,
       });
       toast.success("Publication mise en ligne !");
+      setTitle("");
       setContent("");
       setImages([]);
       setAttachments([]);
@@ -177,6 +192,7 @@ function AdminComposer({ me, onPublished }) {
       setShowEmojis(false);
       setOpen(false);
       onPublished();
+      notifyLiveRefresh(["posts", "news"]);
     } catch (err) {
       toast.error("Erreur de publication", { description: err.response?.data?.detail });
     } finally {
@@ -319,15 +335,26 @@ function AdminComposer({ me, onPublished }) {
         </select>
       </div>
 
-      <textarea
-        ref={textareaRef}
+      <div>
+        <label className="text-[10px] uppercase tracking-wider text-[#475569] font-semibold mb-1.5 block">
+          Titre <span className="text-[#EF4444]">*</span>
+        </label>
+        <input
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          maxLength={140}
+          placeholder="Ex. Séminaire MS Park 2026"
+          data-testid="composer-title"
+          className="ms-input w-full text-[15px] font-semibold"
+        />
+        <div className="mt-1 text-[10px] text-[#475569] text-right">{title.length}/140</div>
+      </div>
+
+      <RichTextEditor
         value={content}
-        onChange={(e) => setContent(e.target.value)}
-        rows={4}
-        autoFocus
+        onChange={setContent}
         placeholder="Partagez une actualité, un événement ou une note de service…"
-        data-testid="composer-content"
-        className="ms-input w-full resize-none text-[15px]"
+        testId="composer-content"
       />
 
       {/* Preview images */}
@@ -603,6 +630,7 @@ function PostCard({ post, me, onLike, findEmployee, refresh }) {
                 await api.delete(`/posts/${post.id}`);
                 toast.success("Publication supprimée");
                 refresh();
+                notifyLiveRefresh(["posts"]);
               }}
               data-testid={`delete-post-${post.id}`}
               className="flex h-8 w-8 items-center justify-center rounded-lg hover:bg-[#FEE2E2] text-[#EF4444]"
@@ -613,10 +641,21 @@ function PostCard({ post, me, onLike, findEmployee, refresh }) {
           )}
         </div>
 
+        {post.title && (
+          <Link
+            to={`/actualites/${post.id}`}
+            data-testid={`post-title-${post.id}`}
+            className="mt-3 block text-lg font-bold text-[#071B34] hover:text-[#3BA4FF] transition-colors leading-snug"
+          >
+            {post.title}
+          </Link>
+        )}
+
         {post.content && (
-          <p className="mt-3 text-[15px] leading-relaxed text-[#071B34] whitespace-pre-wrap break-words">
-            {post.content}
-          </p>
+          <div
+            className="mt-2 ms-prose text-[15px] leading-relaxed text-[#071B34] break-words"
+            dangerouslySetInnerHTML={{ __html: post.content }}
+          />
         )}
 
         {post.hashtags?.length > 0 && (

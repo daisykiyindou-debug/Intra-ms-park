@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import {
   Plus, FileText, Calendar as CalIcon, Banknote, Stethoscope, ArrowLeftRight, Package,
   X, Clock, CheckCircle2, XCircle, Info, Paperclip, Sun,
@@ -6,6 +6,7 @@ import {
 import { toast } from "sonner";
 import { api, formatDateFr } from "@/lib/api";
 import { useApp } from "@/contexts/AppContext";
+import useLiveData, { notifyLiveRefresh } from "@/hooks/useLiveData";
 
 const TYPES = [
   { k: "conge", l: "Congé", icon: CalIcon, color: "#3BA4FF" },
@@ -52,7 +53,7 @@ export default function Demandes() {
     refreshMe?.();
   };
 
-  useEffect(refresh, [statusFilter]);
+  useLiveData(refresh, ["requests", "me"], [statusFilter]);
 
   const submit = async (e) => {
     e.preventDefault();
@@ -70,6 +71,7 @@ export default function Demandes() {
     setOpen(false);
     setForm({ type: "conge", start_date: "", end_date: "", comment: "", amount: "", attachment_name: "" });
     refresh();
+    notifyLiveRefresh(["requests", "notifications"]);
   };
 
   const balance = me?.leave_balance || { cp_n_1: 0, cp_n: 0, rtt: 0 };
