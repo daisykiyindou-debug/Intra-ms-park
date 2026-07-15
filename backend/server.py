@@ -13,6 +13,7 @@ import uuid
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import Any, List, Optional
+from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
 from fastapi import APIRouter, FastAPI, HTTPException, Request
@@ -1276,19 +1277,125 @@ async def get_schedule_day(day: str):
 
 
 # ─── Badging
+PARIS_TZ = ZoneInfo("Europe/Paris")
+
+
+def _now_paris() -> datetime:
+    """Current time in Europe/Paris — the reference timezone for MS Park."""
+    return datetime.now(PARIS_TZ)
+
+
+def _hm_to_minutes(hm: Optional[str]) -> Optional[int]:
+    if not hm or ":" not in hm:
+        return None
+    h, m = hm.split(":")
+    return int(h) * 60 + int(m)
+
+
+def _minutes_to_hm(mins: int) -> str:
+    return f"{mins // 60:02d}:{mins % 60:02d}"
+
+
+def _compute_today_badging(sched: dict, employee_id: str) -> Optional[dict]:
+    """Build a live badging entry for today based on the planned shift and
+    the current Paris time. Fields fill progressively as the day progresses:
+    clock_in → pause_out → pause_in → clock_out. Returns None if the day
+    is not a shift or the shift hasn't started yet."""
+    if not sched or sched.get("type") != "shift":
+        return None
+    start_m = _hm_to_minutes(sched.get("start"))
+    end_m = _hm_to_minutes(sched.get("end"))
+    if start_m is None or end_m is None:
+        return None
+    pause_start_m = _hm_to_minutes(sched.get("pause_start"))
+    pause_end_m = _hm_to_minutes(sched.get("pause_end"))
+
+    now = _now_paris()
+    now_m = now.hour * 60 + now.minute
+
+    if now_m < start_m:
+        # Shift hasn't started yet
+        return {
+            "id": f"live-{sched.get('day')}",
+            "employee_id": employee_id,
+            "day": sched.get("day"),
+            "clock_in": None,
+            "pause_out": None,
+            "pause_in": None,
+            "clock_out": None,
+            "worked_minutes": 0,
+            "break_minutes": sched.get("break_minutes", 0),
+            "anomaly": None,
+            "note": "En attente",
+            "live": True,
+        }
+
+    clock_in = sched["start"]
+    pause_out = sched.get("pause_start") if pause_start_m is not None and now_m >= pause_start_m else None
+    pause_in = sched.get("pause_end") if pause_end_m is not None and now_m >= pause_end_m else None
+    clock_out = sched["end"] if now_m >= end_m else None
+
+    # Worked minutes = (min(now, end) - start) − pause overlap already elapsed
+    effective_end = min(now_m, end_m)
+    worked = effective_end - start_m
+    if pause_start_m is not None and pause_end_m is not None:
+        overlap_start = max(pause_start_m, start_m)
+        overlap_end = min(pause_end_m, effective_end)
+        if overlap_end > overlap_start:
+            worked -= (overlap_end - overlap_start)
+    worked = max(0, worked)
+
+    if clock_out:
+        note = "Journée terminée"
+    elif pause_in:
+        note = "Reprise après pause"
+    elif pause_out:
+        note = "En pause"
+    else:
+        note = "En service"
+
+    return {
+        "id": f"live-{sched.get('day')}",
+        "employee_id": employee_id,
+        "day": sched.get("day"),
+        "clock_in": clock_in,
+        "pause_out": pause_out,
+        "pause_in": pause_in,
+        "clock_out": clock_out,
+        "worked_minutes": worked,
+        "break_minutes": sched.get("break_minutes", 0),
+        "anomaly": None,
+        "note": note,
+        "live": True,
+    }
+
+
 @api.get("/badging")
 async def get_badging(filter_range: str = "month"):
-    today_d = date.today()
+    today_d = _now_paris().date()
     if filter_range == "day":
         start = today_d
     elif filter_range == "week":
         start = today_d - timedelta(days=today_d.weekday())
     else:
         start = today_d.replace(day=1)
+
+    # Historical entries — exclude today (rebuilt live from planning)
     items = await db.badging.find(
-        {"employee_id": current_user(), "day": {"$gte": start.isoformat()}},
+        {
+            "employee_id": current_user(),
+            "day": {"$gte": start.isoformat(), "$lt": today_d.isoformat()},
+        },
         {"_id": 0},
     ).sort("day", -1).to_list(100)
+
+    # Live entry for today, computed from today's planning
+    today_sched = await db.schedules.find_one(
+        {"employee_id": current_user(), "day": today_d.isoformat()}, {"_id": 0}
+    )
+    live = _compute_today_badging(today_sched, current_user()) if today_sched else None
+    if live:
+        items = [live] + items
     return items
 
 

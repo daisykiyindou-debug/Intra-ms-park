@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Fingerprint, AlertTriangle, Info, CreditCard, ShieldAlert, X, Calendar, MapPin, Phone } from "lucide-react";
+import { Fingerprint, AlertTriangle, Info, CreditCard, ShieldAlert, X, Calendar, MapPin, Phone, Play, Coffee, LogOut, LogIn, CheckCircle2, Clock } from "lucide-react";
 import { toast } from "sonner";
 import { api, formatDateFr, formatMinutes } from "@/lib/api";
 import { useApp } from "@/contexts/AppContext";
@@ -20,18 +20,24 @@ export default function Badgeage() {
   const [lostForm, setLostForm] = useState({ reason: "", last_seen_location: "", contact_phone: "" });
 
   useEffect(() => {
-    api.get(`/badging?filter_range=${range}`).then((r) => setData(r.data));
+    const load = () => api.get(`/badging?filter_range=${range}`).then((r) => setData(r.data));
+    load();
+    // Auto-refresh every minute so the live "today" entry stays in sync
+    const t = setInterval(load, 60_000);
+    return () => clearInterval(t);
   }, [range]);
 
   const filtered = useMemo(() => {
-    if (statusFilter === "anomaly") return data.filter((d) => d.anomaly);
-    if (statusFilter === "ok") return data.filter((d) => !d.anomaly);
-    return data;
+    // Live "today" entry is rendered in the hero card, hide it from the table
+    const base = data.filter((d) => !d.live);
+    if (statusFilter === "anomaly") return base.filter((d) => d.anomaly);
+    if (statusFilter === "ok") return base.filter((d) => !d.anomaly);
+    return base;
   }, [data, statusFilter]);
 
-  const totalMins = data.reduce((s, d) => s + (d.worked_minutes || 0), 0);
-  const anomalies = data.filter((d) => d.anomaly).length;
-  const days = data.length;
+  const totalMins = data.filter((d) => !d.live).reduce((s, d) => s + (d.worked_minutes || 0), 0);
+  const anomalies = data.filter((d) => d.anomaly && !d.live).length;
+  const days = data.filter((d) => !d.live).length;
 
   const submitLost = async (e) => {
     e.preventDefault();
@@ -120,6 +126,9 @@ export default function Badgeage() {
           </div>
         </div>
       )}
+
+      {/* Live today — automatic badging based on planning */}
+      <LiveTodayCard entry={data.find((d) => d.live)} />
 
       {/* Stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -317,6 +326,137 @@ function StatCard({ label, value, icon, color }) {
         style={{ color: color || "#071B34" }}
       >
         {value}
+      </div>
+    </div>
+  );
+}
+
+function LiveTodayCard({ entry }) {
+  if (!entry) {
+    return (
+      <div className="ms-card p-5 border border-[#071B34]/5">
+        <div className="flex items-center gap-3">
+          <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[#F1F5F9] text-[#475569]">
+            <Fingerprint className="h-5 w-5" />
+          </div>
+          <div>
+            <div className="ms-overline text-[#475569]">Aujourd'hui</div>
+            <h3 className="text-lg font-bold text-[#071B34] mt-0.5">Pas de service planifié</h3>
+            <p className="text-xs text-[#475569] mt-1">
+              Vous n'avez pas de shift programmé aujourd'hui.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const steps = [
+    { key: "clock_in", label: "Badge d'entrée", value: entry.clock_in, icon: LogIn, color: "#10B981" },
+    { key: "pause_out", label: "Sortie pause", value: entry.pause_out, icon: Coffee, color: "#F59E0B" },
+    { key: "pause_in", label: "Reprise", value: entry.pause_in, icon: Play, color: "#3BA4FF" },
+    { key: "clock_out", label: "Badge de sortie", value: entry.clock_out, icon: LogOut, color: "#7C3AED" },
+  ];
+
+  const completed = steps.filter((s) => s.value).length;
+  const progressPct = entry.clock_out ? 100 : Math.round((completed / 4) * 100);
+
+  const noteMeta = {
+    "En attente": { color: "#475569", bg: "#F1F5F9" },
+    "En service": { color: "#059669", bg: "#D1FAE5" },
+    "En pause": { color: "#B45309", bg: "#FEF3C7" },
+    "Reprise après pause": { color: "#1D70B8", bg: "#DBEAFE" },
+    "Journée terminée": { color: "#6D28D9", bg: "#EDE9FE" },
+  };
+  const nm = noteMeta[entry.note] || noteMeta["En service"];
+
+  return (
+    <div
+      className="ms-card p-6 border border-[#3BA4FF]/25 bg-gradient-to-br from-white to-[#3BA4FF]/5"
+      data-testid="live-today-card"
+    >
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div className="flex items-center gap-3">
+          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[#3BA4FF]/15 text-[#3BA4FF]">
+            <Fingerprint className="h-5 w-5" />
+          </div>
+          <div>
+            <div className="ms-overline text-[#3BA4FF]">Badgeage intelligent · Aujourd'hui</div>
+            <h3 className="text-lg font-bold text-[#071B34] mt-0.5">
+              Reconstitution automatique de la journée
+            </h3>
+            <p className="text-xs text-[#475569] mt-0.5">
+              Basée sur votre planning — se complète au fur et à mesure de la journée.
+            </p>
+          </div>
+        </div>
+        <span
+          className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-bold"
+          style={{ background: nm.bg, color: nm.color }}
+          data-testid="live-status"
+        >
+          <span className="h-1.5 w-1.5 rounded-full animate-pulse" style={{ background: nm.color }} />
+          {entry.note}
+        </span>
+      </div>
+
+      {/* Progress bar */}
+      <div className="mt-5">
+        <div className="h-1.5 rounded-full bg-[#F1F5F9] overflow-hidden">
+          <div
+            className="h-full bg-gradient-to-r from-[#3BA4FF] to-[#1D70B8] transition-all duration-500"
+            style={{ width: `${progressPct}%` }}
+          />
+        </div>
+      </div>
+
+      {/* 4 steps */}
+      <div className="mt-5 grid grid-cols-2 md:grid-cols-4 gap-3">
+        {steps.map((s) => {
+          const Icon = s.icon;
+          const done = !!s.value;
+          return (
+            <div
+              key={s.key}
+              data-testid={`live-step-${s.key}`}
+              className={`rounded-2xl p-4 border transition-all ${
+                done
+                  ? "bg-white border-[#071B34]/5 shadow-sm"
+                  : "bg-[#F4F7FA]/60 border-dashed border-[#071B34]/10 opacity-60"
+              }`}
+            >
+              <div className="flex items-center justify-between">
+                <div
+                  className="flex h-9 w-9 items-center justify-center rounded-xl"
+                  style={{
+                    background: done ? `${s.color}22` : "#F1F5F9",
+                    color: done ? s.color : "#94A3B8",
+                  }}
+                >
+                  <Icon className="h-4 w-4" />
+                </div>
+                {done && <CheckCircle2 className="h-4 w-4 text-[#10B981]" />}
+              </div>
+              <div className="ms-overline mt-3 text-[#475569]">{s.label}</div>
+              <div
+                className="mt-1 font-mono text-xl font-bold tracking-tight"
+                style={{ color: done ? "#071B34" : "#94A3B8" }}
+              >
+                {s.value || "—:—"}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="mt-4 flex items-center justify-between text-xs text-[#475569] flex-wrap gap-2">
+        <div className="inline-flex items-center gap-1.5">
+          <Clock className="h-3 w-3" />
+          Temps travaillé aujourd'hui : <strong className="text-[#071B34]">{formatMinutes(entry.worked_minutes || 0)}</strong>
+        </div>
+        <div className="text-[10px] uppercase tracking-wider">
+          Mise à jour automatique toutes les minutes
+        </div>
       </div>
     </div>
   );
