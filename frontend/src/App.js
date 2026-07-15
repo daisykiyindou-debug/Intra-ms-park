@@ -62,6 +62,8 @@ function App() {
         me,
         employees,
         notifications,
+        refreshMe,
+        refreshEmployees,
         refreshNotifications,
         findEmployee,
       }}

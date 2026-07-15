@@ -684,6 +684,7 @@ function EntryEditor({ entry, employeeName, onClose, onSave }) {
 // ───────────────────────────────────────── Demandes manager
 
 function RequestsManager() {
+  const { refreshMe, refreshEmployees } = useApp();
   const [items, setItems] = useState([]);
   const [filter, setFilter] = useState("pending");
   const [infoModal, setInfoModal] = useState(null);
@@ -706,6 +707,10 @@ function RequestsManager() {
       { description: `${req.employee_name} sera notifié·e` }
     );
     load();
+    // Refresh current user (balance may have changed if I approved my own CP)
+    // and the employees list so the Planning admin view shows fresh balances.
+    refreshMe?.();
+    refreshEmployees?.();
   };
 
   const submitInfo = async () => {
@@ -797,7 +802,13 @@ function RequestsManager() {
 function RequestRow({ req, onDecide }) {
   const typeLabel = {
     cp: "Congé payé",
+    conge: "Congé payé",
     rtt: "RTT",
+    absence: "Absence",
+    echange: "Échange horaires",
+    acompte: "Acompte",
+    materiel: "Matériel",
+    maladie: "Arrêt maladie",
     sick: "Arrêt maladie",
     badge_lost: "Badge perdu",
     other: "Demande",
@@ -1368,6 +1379,7 @@ function SlideEditor({ slide, news, events, onClose, onSaved }) {
 // ───────────────────────────────────────── RTT / CP allocation (bonus)
 
 function LeaveGrantManager() {
+  const { refreshMe } = useApp();
   const [employees, setEmployees] = useState([]);
   const [selected, setSelected] = useState([]);
   const [type, setType] = useState("rtt");
@@ -1378,7 +1390,10 @@ function LeaveGrantManager() {
     api.get("/admin/employees").then((r) => setEmployees(r.data));
   }, []);
 
-  const reload = () => api.get("/admin/employees").then((r) => setEmployees(r.data));
+  const reload = () => {
+    api.get("/admin/employees").then((r) => setEmployees(r.data));
+    refreshMe?.();
+  };
 
   const toggle = (id) =>
     setSelected((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));

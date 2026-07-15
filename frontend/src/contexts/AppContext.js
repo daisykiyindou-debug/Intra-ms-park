@@ -4,6 +4,8 @@ export const AppContext = createContext({
   me: null,
   employees: [],
   notifications: [],
+  refreshMe: () => {},
+  refreshEmployees: () => {},
   refreshNotifications: () => {},
   findEmployee: () => null,
 });

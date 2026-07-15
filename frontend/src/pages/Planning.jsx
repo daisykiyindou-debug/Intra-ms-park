@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight, Clock, MapPin, User, X, CalendarClock } from "lucide-react";
 import { api, fr, formatDateFr } from "@/lib/api";
+import { useApp } from "@/contexts/AppContext";
 
 const typeStyles = {
   shift: { bg: "#3BA4FF15", color: "#1D70B8", label: "Shift" },
@@ -12,17 +13,28 @@ const typeStyles = {
 };
 
 export default function Planning() {
+  const { me } = useApp();
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const [month, setMonth] = useState({ y: today.getFullYear(), m: today.getMonth() });
   const [view, setView] = useState("month");
   const [data, setData] = useState([]);
   const [selected, setSelected] = useState(null);
+  // Manual reload trigger — bumped by refresh() so external mutations (approvals in
+  // another tab, RTT allocations, etc.) can be reflected without leaving the page.
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     const ym = `${month.y}-${String(month.m + 1).padStart(2, "0")}`;
     api.get(`/schedule?month=${ym}`).then((r) => setData(r.data));
-  }, [month]);
+  }, [month, reloadKey]);
+
+  // Refetch whenever the tab regains focus — makes admin approvals visible instantly
+  useEffect(() => {
+    const handler = () => setReloadKey((k) => k + 1);
+    window.addEventListener("focus", handler);
+    return () => window.removeEventListener("focus", handler);
+  }, []);
 
   const grid = useMemo(() => {
     const first = new Date(month.y, month.m, 1);
@@ -93,7 +105,10 @@ export default function Planning() {
           <div className="ms-overline">Mon Coin RH</div>
           <h1 className="text-3xl md:text-4xl font-bold tracking-tight text-[#071B34] mt-1">Mon planning</h1>
           <p className="text-sm text-[#475569] mt-2">
-            Contrat 24h/semaine · 45 min de pause par shift · Mer → Dim
+            {me?.contract_hours_weekly
+              ? `Contrat ${me.contract_hours_weekly}h/semaine`
+              : "Mon planning hebdomadaire"}
+            {me?.role ? ` · ${me.role}` : ""}
           </p>
         </div>
       </div>

@@ -2661,7 +2661,11 @@ async def admin_approve_request(rid: str, payload: RequestDecision):
         {"$set": {"status": "approved", "decided_at": _now(), "decision_note": payload.note}},
     )
     # Auto-sync: leave requests inject entries into the planning + decrement counters
-    if req.get("type") in ("cp", "rtt") and req.get("start_date"):
+    # Accept both semantic aliases: "cp"/"conge" (paid leave) and "rtt" (comp time).
+    req_type = req.get("type")
+    is_paid_leave = req_type in ("cp", "conge")
+    is_rtt = req_type == "rtt"
+    if (is_paid_leave or is_rtt) and req.get("start_date"):
         emp_id = req["employee_id"]
         start = date.fromisoformat(req["start_date"])
         end = date.fromisoformat(req.get("end_date") or req["start_date"])
@@ -2670,8 +2674,8 @@ async def admin_approve_request(rid: str, payload: RequestDecision):
         await _ensure_range(emp_id, start, end)
         # Load the employee once — needed for pattern lookup beyond the horizon
         emp_doc = await db.employees.find_one({"id": emp_id}, {"_id": 0})
-        new_type = "leave" if req["type"] == "cp" else "rtt"
-        note = "Congé payé (validé)" if req["type"] == "cp" else "RTT (validé)"
+        new_type = "leave" if is_paid_leave else "rtt"
+        note = "Congé payé (validé)" if is_paid_leave else "RTT (validé)"
         d = start
         days_consumed = 0  # only working-days that are actually converted
         while d <= end:
@@ -2731,14 +2735,14 @@ async def admin_approve_request(rid: str, payload: RequestDecision):
         emp = await db.employees.find_one({"id": emp_id}, {"_id": 0})
         if emp and days_consumed > 0:
             bal = dict(emp.get("leave_balance") or {})
-            if req["type"] == "cp":
+            if is_paid_leave:
                 remaining = days_consumed
                 take_n1 = min(remaining, float(bal.get("cp_n_1", 0)))
                 bal["cp_n_1"] = round(float(bal.get("cp_n_1", 0)) - take_n1, 1)
                 remaining -= take_n1
                 if remaining > 0:
                     bal["cp_n"] = round(max(0, float(bal.get("cp_n", 0)) - remaining), 1)
-            elif req["type"] == "rtt":
+            elif is_rtt:
                 bal["rtt"] = round(max(0, float(bal.get("rtt", 0)) - days_consumed), 1)
             await db.employees.update_one({"id": emp_id}, {"$set": {"leave_balance": bal}})
 

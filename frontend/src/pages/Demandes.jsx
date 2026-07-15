@@ -30,7 +30,7 @@ const statusMeta = {
 };
 
 export default function Demandes() {
-  const { me } = useApp();
+  const { me, refreshMe } = useApp();
   const [items, setItems] = useState([]);
   const [statusFilter, setStatusFilter] = useState("all");
   const [open, setOpen] = useState(false);
@@ -47,6 +47,9 @@ export default function Demandes() {
   const refresh = () => {
     const q = statusFilter === "all" ? "" : `?status=${statusFilter}`;
     api.get(`/requests${q}`).then((r) => setItems(r.data));
+    // Always refetch /me so leave balance reflects the latest server state
+    // (e.g. after an admin approved a request in another tab/window).
+    refreshMe?.();
   };
 
   useEffect(refresh, [statusFilter]);
