@@ -1848,13 +1848,139 @@ async def post_message(cid: str, payload: MessageCreate):
 # ─── Events
 @api.get("/events")
 async def list_events():
-    return await db.events.find({}, {"_id": 0}).sort("date", 1).to_list(100)
+    """Return events visible to the current user based on group_targets."""
+    emp = await db.employees.find_one({"id": current_user()}, {"_id": 0})
+    role_category = emp.get("role_category") if emp else "employe"
+    is_admin = bool(emp and emp.get("is_admin"))
+    dept = emp.get("department") if emp else None
+
+    items = await db.events.find({}, {"_id": 0}).sort("date", 1).to_list(200)
+    visible = []
+    for e in items:
+        groups = e.get("group_targets") or ["all"]
+        emp_ids = e.get("employee_targets") or []
+        # Broad group targeting
+        if "all" in groups:
+            visible.append(e)
+            continue
+        if is_admin and "admin" in groups:
+            visible.append(e)
+            continue
+        if role_category == "encadrement" and ("managers" in groups or "encadrement" in groups):
+            visible.append(e)
+            continue
+        if role_category == "employe" and "ops" in groups:
+            visible.append(e)
+            continue
+        if role_category == "restauration" and "restauration" in groups:
+            visible.append(e)
+            continue
+        if dept and dept in groups:
+            visible.append(e)
+            continue
+        # Fine-grained targeting
+        if current_user() in emp_ids:
+            visible.append(e)
+            continue
+    return visible
+
+
+# ─── Admin Events CRUD
+
+class EventPayload(BaseModel):
+    title: str
+    description: Optional[str] = None
+    intro_text: Optional[str] = None
+    date: str  # YYYY-MM-DD
+    start_time: Optional[str] = None
+    end_time: Optional[str] = None
+    location: Optional[str] = None
+    image: Optional[str] = None
+    signup_enabled: Optional[bool] = False
+    signup_url: Optional[str] = None
+    linked_news_id: Optional[str] = None
+    external_link: Optional[str] = None
+    internal_page: Optional[str] = None
+    group_targets: Optional[List[str]] = None  # ["all", "admin", "managers", "ops", "restauration", "encadrement", ...]
+    employee_targets: Optional[List[str]] = None
+    category: Optional[str] = "event"
+
+
+def _normalize_event(ev: dict) -> dict:
+    """Keep legacy `type`/`time`/`needs_registration` fields in sync
+    with the new `category`/`start_time`/`signup_enabled` schema so the
+    employee Agenda continues to render events properly."""
+    if ev.get("category") and not ev.get("type"):
+        ev["type"] = ev["category"]
+    if ev.get("type") and not ev.get("category"):
+        ev["category"] = ev["type"]
+    if ev.get("start_time") and not ev.get("time"):
+        ev["time"] = ev["start_time"]
+    if ev.get("time") and not ev.get("start_time"):
+        ev["start_time"] = ev["time"]
+    if "signup_enabled" in ev and "needs_registration" not in ev:
+        ev["needs_registration"] = bool(ev.get("signup_enabled"))
+    return ev
+
+
+@api.post("/admin/events")
+async def admin_create_event(payload: EventPayload):
+    await require_admin()
+    ev = payload.model_dump()
+    ev["id"] = _id()
+    if not ev.get("group_targets"):
+        ev["group_targets"] = ["all"]
+    ev = _normalize_event(ev)
+    await db.events.insert_one(ev.copy())
+    return ev
+
+
+@api.put("/admin/events/{eid}")
+async def admin_update_event(eid: str, payload: EventPayload):
+    await require_admin()
+    updates = payload.model_dump()
+    updates.pop("id", None)
+    updates = _normalize_event(updates)
+    await db.events.update_one({"id": eid}, {"$set": updates})
+    item = await db.events.find_one({"id": eid}, {"_id": 0})
+    if not item:
+        raise HTTPException(404, "Événement introuvable")
+    return item
+
+
+@api.delete("/admin/events/{eid}")
+async def admin_delete_event(eid: str):
+    await require_admin()
+    await db.events.delete_one({"id": eid})
+    return {"ok": True}
+
+
+@api.get("/admin/events")
+async def admin_list_events():
+    await require_admin()
+    return await db.events.find({}, {"_id": 0}).sort("date", 1).to_list(500)
 
 
 # ─── News
 @api.get("/news")
 async def list_news():
     return await db.news.find({}, {"_id": 0}).sort("date", -1).to_list(20)
+
+
+@api.get("/news/{nid}")
+async def get_news(nid: str):
+    item = await db.news.find_one({"id": nid}, {"_id": 0})
+    if not item:
+        raise HTTPException(404, "Actualité introuvable")
+    return item
+
+
+@api.get("/events/{eid}")
+async def get_event(eid: str):
+    item = await db.events.find_one({"id": eid}, {"_id": 0})
+    if not item:
+        raise HTTPException(404, "Événement introuvable")
+    return item
 
 
 # ─── Profile update
@@ -2594,13 +2720,16 @@ class NewsCreate(BaseModel):
     image: Optional[str] = None
     pinned: Optional[bool] = False
     images: Optional[List[str]] = None
-    documents: Optional[List[dict]] = None  # [{name, url}]
+    documents: Optional[List[dict]] = None
     external_link: Optional[str] = None
-    featured: Optional[bool] = False  # show in home carousel
+    featured: Optional[bool] = False
     active: Optional[bool] = True
     order: Optional[int] = 100
     cta_text: Optional[str] = None
     cta_url: Optional[str] = None
+    # Enhanced button targeting: "news" | "event" | "internal" | "external" | "document"
+    target_type: Optional[str] = None
+    target_id: Optional[str] = None  # e.g. news id or event id
 
 
 @api.post("/admin/news")
@@ -2620,6 +2749,8 @@ async def admin_publish_news(payload: NewsCreate):
         "order": payload.order if payload.order is not None else 100,
         "cta_text": payload.cta_text,
         "cta_url": payload.cta_url,
+        "target_type": payload.target_type,
+        "target_id": payload.target_id,
         "pinned": bool(payload.pinned),
         "date": _now(),
         "author_id": me["id"],
@@ -2645,6 +2776,8 @@ class NewsUpdate(BaseModel):
     cta_text: Optional[str] = None
     cta_url: Optional[str] = None
     pinned: Optional[bool] = None
+    target_type: Optional[str] = None
+    target_id: Optional[str] = None
 
 
 @api.put("/admin/news/{nid}")

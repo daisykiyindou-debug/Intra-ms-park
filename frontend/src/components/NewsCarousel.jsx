@@ -11,6 +11,31 @@ const categoryColor = {
   Alerte: "bg-[#EF4444]/15 text-[#B91C1C]",
 };
 
+/** Determine the CTA target of a carousel slide based on target_type/target_id. */
+function ctaTarget(n) {
+  const label = n.cta_text || "En savoir plus";
+  if (n.target_type === "news" && n.target_id) {
+    return { external: false, href: `/actualites/${n.target_id}`, label };
+  }
+  if (n.target_type === "event" && n.target_id) {
+    return { external: false, href: `/agenda/event/${n.target_id}`, label };
+  }
+  if (n.target_type === "document" && n.cta_url) {
+    return { external: true, href: n.cta_url, label };
+  }
+  if (n.target_type === "external" && n.cta_url) {
+    return { external: true, href: n.cta_url, label };
+  }
+  if (n.target_type === "internal" && n.cta_url) {
+    return { external: false, href: n.cta_url, label };
+  }
+  // Legacy behaviour
+  if (n.cta_url && n.cta_url.startsWith("http")) {
+    return { external: true, href: n.cta_url, label };
+  }
+  return { external: false, href: n.cta_url || "/actualites", label };
+}
+
 export default function NewsCarousel({ items = [] }) {
   const [emblaRef, emblaApi] = useEmblaCarousel({ loop: true, align: "start" });
   const [selected, setSelected] = useState(0);
@@ -54,25 +79,31 @@ export default function NewsCarousel({ items = [] }) {
                     {n.summary || n.content}
                   </p>
                   <div className="mt-4 flex items-center gap-4">
-                    {n.cta_url && n.cta_url.startsWith("http") ? (
-                      <a
-                        href={n.cta_url}
-                        target="_blank"
-                        rel="noreferrer"
-                        data-testid={`news-cta-${n.id}`}
-                        className="ms-btn-primary"
-                      >
-                        {n.cta_text || "En savoir plus"} <ArrowUpRight className="h-4 w-4" />
-                      </a>
-                    ) : (
-                      <Link
-                        to={n.cta_url || "/actualites"}
-                        data-testid={`news-cta-${n.id}`}
-                        className="ms-btn-primary"
-                      >
-                        {n.cta_text || "Lire l'actualité"} <ArrowUpRight className="h-4 w-4" />
-                      </Link>
-                    )}
+                    {(() => {
+                      const target = ctaTarget(n);
+                      if (target.external) {
+                        return (
+                          <a
+                            href={target.href}
+                            target="_blank"
+                            rel="noreferrer"
+                            data-testid={`news-cta-${n.id}`}
+                            className="ms-btn-primary"
+                          >
+                            {target.label} <ArrowUpRight className="h-4 w-4" />
+                          </a>
+                        );
+                      }
+                      return (
+                        <Link
+                          to={target.href}
+                          data-testid={`news-cta-${n.id}`}
+                          className="ms-btn-primary"
+                        >
+                          {target.label} <ArrowUpRight className="h-4 w-4" />
+                        </Link>
+                      );
+                    })()}
                     <span className="text-xs text-white/60">{formatDateFr(n.date)}</span>
                   </div>
                 </div>

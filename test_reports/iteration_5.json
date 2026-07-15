@@ -1,0 +1,40 @@
+{
+  "summary": "Iter5 focused on Agenda Admin CRUD, Carousel target routing, and Event visibility by role. Backend: 10/10 pytest pass. Admin can create/update/delete events, category↔type + start_time↔time + signup_enabled↔needs_registration normalization confirmed. Employee (role_category=employe) correctly sees events with group_targets=['all','ops'] and does NOT see events with group_targets=['admin']. Carousel slides can be created with target_type=event/news and target_id. Frontend: /management/agenda no longer crashes ('Can't find variable: AgendaManager' fixed), lists the 6 seed events under À venir, agenda-create + event-title/date/start/group-ops/save data-testids all work, event creation toast 'Événement créé' fires, new event appears in list AND in Idriss's Agenda 'Prochains événements'. /management/carrousel exposes news-title form, all 5 target picker options (news/event/internal/external/document), 6 edit-slide buttons. Employee /agenda page loads without crash; clicking an event opens modal with Date/Heure/Lieu/description ('Aucune inscription requise' button). NewsCarousel component correctly builds hrefs /agenda/event/{id} for target_type=event and /actualites/{id} for target_type=news (code inspected). BLOCKER for password: employee login with password 'demo' returns 401 — backend rejects it, use 'Idriss2026!' as documented in /app/memory/test_credentials.md. Main agent request said 'demo' but that no longer works after iter4 auth fix.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/auth/login", "issue": "Employee password 'demo' is rejected with 401. Iter4 hardened auth (good) but request assumed 'demo' still works. Frontend LoginPage does not display the toast/error on 401 either. Consider adding a fallback shared 'demo' password OR update the demo-employee prefill button to fill 'Idriss2026!'."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {"flow": "Employee login with 'demo'", "issue": "401 returned by backend; no visible error toast on /login. User stays on /login without feedback.", "affected_selectors": ["[data-testid='login-btn']"]}
+    ],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_mspark_iter5.py",
+    "/app/test_reports/pytest/pytest_iter5.xml"
+  ],
+  "action_items": [
+    "Login UX: surface 401 as toast on LoginPage (iter4 open item, still not fixed) — user gets no feedback when password wrong.",
+    "Decide password strategy for demos: either restore a universal 'demo' fallback (dev-only, env-gated) or update the '👤 Démo employé' button to prefill the real password (Idriss2026!). Current mismatch between doc + request + backend is confusing.",
+    "Consider adding data-testid='event-detail-modal' on the employee Agenda modal so the modal can be asserted from tests (today identified only by [role='dialog'])."
+  ],
+  "critical_code_review_comments": [
+    "server.py:1909 _normalize_event is called on updates; if payload contains only category, only category→type sync applies. Good. But EventPayload uses model_dump() which fills every field with None → on PUT, None values overwrite existing fields (e.g. sending a partial update with only title still zeroes out description, location, image, etc.). Consider using exclude_unset=True on PUT or a dedicated EventUpdate model like NewsUpdate.",
+    "AgendaManager EventEditor should default group_targets to ['all'] and prevent an empty selection saving (empty list currently would be replaced by ['all'] server-side, OK, but UI hint missing).",
+    "/api/events filtering rebuilds role logic from scratch — extract into helper is_event_visible(emp, ev) for testability and consistency with /api/carousel + notifications when added."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_mspark_iter5.py"
+  ],
+  "success_rate": {"backend": "100% (10/10)", "frontend": "95% (all requested Agenda + Carrousel + employee Agenda flows verified; employee 'demo' pwd blocked by hardened auth)"},
+  "test_credentials": "Admin marcus.simeo@mspark.fr / MSPark@Admin2026! (works). Employee idriss.malonga@gmail.com / Idriss2026! (works). 'demo' pwd for the employee is REJECTED (401) since iter4 auth fix.",
+  "seed_data_creation": "Backend pytest created and deleted 3 events (TEST_iter5 ops/admin/all) + 2 slides (TEST_iter5 slide event/news). UI test created TEST_ui iter5 Reunion event — CLEANED UP post-run. No residual test data expected.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "AgendaManager crash is FIXED. Backend CRUD /api/admin/events works with dual field sync. Employee visibility filter behaves per spec. Carousel target routing hrefs verified in NewsCarousel.jsx ctaTarget(). NewsDetail.jsx and full /agenda/event/{id} landing page render were NOT navigated to in UI (would require slide click), only routing logic reviewed in code. Employee pwd 'demo' does NOT work anymore — use 'Idriss2026!'. Test file: /app/backend/tests/test_mspark_iter5.py.",
+  "rca_of_the_issue": "Original 'Can't find variable: AgendaManager' — main agent added <Route> to AgendaManager in ManagementShell but forgot to define the component. Fix confirmed: component now exists (Management.jsx ~ line 1752). Backend normalization was needed because seeded events use legacy keys (type/time/needs_registration) while EventPayload uses new keys (category/start_time/signup_enabled); _normalize_event bridges both directions."
+}

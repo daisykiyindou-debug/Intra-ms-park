@@ -16,6 +16,7 @@ const subNav = [
   { to: "/management/demandes", label: "Demandes", icon: Inbox },
   { to: "/management/attributions", label: "RTT / CP", icon: Gift },
   { to: "/management/carrousel", label: "Carrousel accueil", icon: Newspaper },
+  { to: "/management/agenda", label: "Agenda", icon: CalendarDays },
   { to: "/management/documents", label: "Documents RH", icon: FileText },
 ];
 
@@ -89,6 +90,7 @@ export default function ManagementShell() {
         <Route path="demandes" element={<RequestsManager />} />
         <Route path="attributions" element={<LeaveGrantManager />} />
         <Route path="carrousel" element={<NewsManager />} />
+        <Route path="agenda" element={<AgendaManager />} />
         <Route path="actualites" element={<Navigate to="/management/carrousel" replace />} />
         <Route path="documents" element={<DocumentsManager />} />
         <Route path="fil" element={<Navigate to="/actualites" replace />} />
@@ -854,10 +856,16 @@ function NewsManager() {
   const [form, setForm] = useState({
     title: "", content: "", category: "info",
     pinned: false, featured: false, active: true, order: 100,
-    image: "", cta_text: "", cta_url: "",
+    image: "", cta_text: "En savoir plus", cta_url: "",
+    target_type: "news", target_id: "",
   });
   const [news, setNews] = useState([]);
-  const load = () => api.get("/news").then((r) => setNews(r.data));
+  const [events, setEvents] = useState([]);
+  const [editing, setEditing] = useState(null);
+  const load = () => {
+    api.get("/news").then((r) => setNews(r.data));
+    api.get("/events").then((r) => setEvents(r.data));
+  };
   useEffect(() => { load(); }, []);
 
   const publish = async () => {
@@ -868,7 +876,8 @@ function NewsManager() {
       setForm({
         title: "", content: "", category: "info",
         pinned: false, featured: false, active: true, order: 100,
-        image: "", cta_text: "", cta_url: "",
+        image: "", cta_text: "En savoir plus", cta_url: "",
+        target_type: "news", target_id: "",
       });
       load();
     } catch {
@@ -960,26 +969,21 @@ function NewsManager() {
               className="ms-input mt-2 resize-none"
             />
           </div>
-          <div className="grid grid-cols-2 gap-2">
-            <div>
-              <label className="ms-overline">Texte bouton</label>
-              <input
-                value={form.cta_text}
-                onChange={(e) => setForm({ ...form, cta_text: e.target.value })}
-                placeholder="En savoir plus"
-                className="ms-input mt-2"
-              />
-            </div>
-            <div>
-              <label className="ms-overline">Lien bouton</label>
-              <input
-                value={form.cta_url}
-                onChange={(e) => setForm({ ...form, cta_url: e.target.value })}
-                placeholder="/actualites ou https://…"
-                className="ms-input mt-2"
-              />
-            </div>
+          <div>
+            <label className="ms-overline">Texte du bouton</label>
+            <input
+              value={form.cta_text}
+              onChange={(e) => setForm({ ...form, cta_text: e.target.value })}
+              placeholder="En savoir plus"
+              className="ms-input mt-2"
+            />
           </div>
+          <TargetPicker
+            value={{ target_type: form.target_type, target_id: form.target_id, cta_url: form.cta_url }}
+            onChange={(v) => setForm({ ...form, ...v })}
+            news={news}
+            events={events}
+          />
           <div className="grid grid-cols-3 gap-2 pt-2">
             <label className="flex items-center gap-2 text-xs">
               <input
@@ -1076,6 +1080,13 @@ function NewsManager() {
                     </button>
                   </div>
                   <button
+                    onClick={() => setEditing(n)}
+                    data-testid={`edit-slide-${n.id}`}
+                    className="text-[10px] font-bold rounded-md px-2 py-1 bg-[#3BA4FF]/12 text-[#1D70B8] hover:bg-[#3BA4FF]/25"
+                  >
+                    Modifier
+                  </button>
+                  <button
                     onClick={() => toggleField(n, "featured")}
                     data-testid={`toggle-featured-${n.id}`}
                     className={`text-[10px] font-bold rounded-md px-2 py-1 ${
@@ -1105,6 +1116,232 @@ function NewsManager() {
                 </div>
               </div>
             ))}
+        </div>
+      </div>
+
+      {editing && (
+        <SlideEditor
+          slide={editing}
+          news={news}
+          events={events}
+          onClose={() => setEditing(null)}
+          onSaved={() => {
+            setEditing(null);
+            load();
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+
+function TargetPicker({ value, onChange, news, events }) {
+  const type = value.target_type || "news";
+  return (
+    <div>
+      <label className="ms-overline">Destination du bouton</label>
+      <div className="grid grid-cols-5 gap-1 mt-2">
+        {[
+          ["news", "Actualité"],
+          ["event", "Événement"],
+          ["internal", "Page interne"],
+          ["external", "Lien externe"],
+          ["document", "Document"],
+        ].map(([v, l]) => (
+          <button
+            key={v}
+            type="button"
+            onClick={() => onChange({ target_type: v, target_id: "", cta_url: "" })}
+            data-testid={`target-${v}`}
+            className={`text-[10px] font-semibold rounded-lg py-1.5 transition-colors ${
+              type === v
+                ? "bg-[#071B34] text-white"
+                : "bg-[#F4F7FA] text-[#475569] hover:bg-[#071B34]/5"
+            }`}
+          >
+            {l}
+          </button>
+        ))}
+      </div>
+      <div className="mt-2">
+        {type === "news" && (
+          <select
+            value={value.target_id || ""}
+            onChange={(e) => onChange({ target_id: e.target.value })}
+            data-testid="target-news-select"
+            className="ms-input"
+          >
+            <option value="">— Choisir une actualité —</option>
+            {news.map((n) => (
+              <option key={n.id} value={n.id}>
+                {n.title}
+              </option>
+            ))}
+          </select>
+        )}
+        {type === "event" && (
+          <select
+            value={value.target_id || ""}
+            onChange={(e) => onChange({ target_id: e.target.value })}
+            data-testid="target-event-select"
+            className="ms-input"
+          >
+            <option value="">— Choisir un événement —</option>
+            {events.map((e) => (
+              <option key={e.id} value={e.id}>
+                {e.title} — {e.date}
+              </option>
+            ))}
+          </select>
+        )}
+        {type === "internal" && (
+          <input
+            value={value.cta_url || ""}
+            onChange={(e) => onChange({ cta_url: e.target.value })}
+            placeholder="Ex. /restaurant ou /rh/planning"
+            className="ms-input"
+          />
+        )}
+        {type === "external" && (
+          <input
+            value={value.cta_url || ""}
+            onChange={(e) => onChange({ cta_url: e.target.value })}
+            placeholder="https://exemple.com"
+            className="ms-input"
+          />
+        )}
+        {type === "document" && (
+          <input
+            value={value.cta_url || ""}
+            onChange={(e) => onChange({ cta_url: e.target.value })}
+            placeholder="URL du document (PDF, docx…)"
+            className="ms-input"
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+
+function SlideEditor({ slide, news, events, onClose, onSaved }) {
+  const [form, setForm] = useState({
+    title: slide.title || "",
+    content: slide.content || "",
+    image: slide.image || "",
+    category: slide.category || "info",
+    cta_text: slide.cta_text || "En savoir plus",
+    cta_url: slide.cta_url || "",
+    target_type: slide.target_type || (slide.cta_url?.startsWith("http") ? "external" : "internal"),
+    target_id: slide.target_id || "",
+    featured: slide.featured ?? false,
+    active: slide.active ?? true,
+    pinned: slide.pinned ?? false,
+    order: slide.order ?? 100,
+  });
+  const save = async () => {
+    try {
+      await api.put(`/admin/news/${slide.id}`, form);
+      toast.success("Slide mise à jour");
+      onSaved();
+    } catch (err) {
+      toast.error("Erreur de sauvegarde", { description: err.response?.data?.detail });
+    }
+  };
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      onClick={onClose}
+      className="fixed inset-0 z-50 bg-black/40 backdrop-blur-md flex items-center justify-center p-4"
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="ms-card max-w-2xl w-full p-6 max-h-[90vh] overflow-y-auto"
+        data-testid="slide-editor"
+      >
+        <div className="flex items-start justify-between mb-4">
+          <div>
+            <div className="ms-overline">Modifier la slide</div>
+            <h3 className="text-xl font-bold text-[#071B34] mt-1">{slide.title}</h3>
+          </div>
+          <button onClick={onClose} className="flex h-9 w-9 items-center justify-center rounded-xl hover:bg-[#071B34]/5">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="space-y-3">
+          <div>
+            <label className="ms-overline">Titre</label>
+            <input
+              value={form.title}
+              onChange={(e) => setForm({ ...form, title: e.target.value })}
+              className="ms-input mt-2"
+            />
+          </div>
+          <div>
+            <label className="ms-overline">Image (URL)</label>
+            <input
+              value={form.image}
+              onChange={(e) => setForm({ ...form, image: e.target.value })}
+              className="ms-input mt-2"
+            />
+            {form.image && (
+              <img src={form.image} alt="" className="mt-2 w-full h-40 rounded-lg object-cover" />
+            )}
+          </div>
+          <div>
+            <label className="ms-overline">Contenu</label>
+            <textarea
+              value={form.content}
+              onChange={(e) => setForm({ ...form, content: e.target.value })}
+              rows={4}
+              className="ms-input mt-2 resize-none"
+            />
+          </div>
+          <div>
+            <label className="ms-overline">Texte du bouton</label>
+            <input
+              value={form.cta_text}
+              onChange={(e) => setForm({ ...form, cta_text: e.target.value })}
+              className="ms-input mt-2"
+            />
+          </div>
+          <TargetPicker
+            value={{ target_type: form.target_type, target_id: form.target_id, cta_url: form.cta_url }}
+            onChange={(v) => setForm({ ...form, ...v })}
+            news={news}
+            events={events}
+          />
+          <div>
+            <label className="ms-overline">Ordre d'affichage</label>
+            <input
+              type="number"
+              value={form.order}
+              onChange={(e) => setForm({ ...form, order: Number(e.target.value) })}
+              className="ms-input mt-2"
+            />
+          </div>
+          <div className="grid grid-cols-3 gap-2">
+            <label className="flex items-center gap-2 text-xs">
+              <input type="checkbox" checked={form.pinned} onChange={(e) => setForm({ ...form, pinned: e.target.checked })} className="h-4 w-4 accent-[#3BA4FF]" />
+              Épinglée
+            </label>
+            <label className="flex items-center gap-2 text-xs">
+              <input type="checkbox" checked={form.featured} onChange={(e) => setForm({ ...form, featured: e.target.checked })} className="h-4 w-4 accent-[#F59E0B]" />
+              Carrousel
+            </label>
+            <label className="flex items-center gap-2 text-xs">
+              <input type="checkbox" checked={form.active} onChange={(e) => setForm({ ...form, active: e.target.checked })} className="h-4 w-4 accent-[#10B981]" />
+              Active
+            </label>
+          </div>
+          <div className="flex gap-2 pt-3">
+            <button onClick={onClose} className="ms-btn-outline flex-1">Annuler</button>
+            <button onClick={save} data-testid="save-slide" className="ms-btn-primary flex-1">
+              <Save className="h-4 w-4" /> Enregistrer
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -1512,6 +1749,478 @@ function DocumentsManager() {
     </div>
   );
 }
+
+// ───────────────────────────────────────── Agenda Manager (Admin)
+
+const EVENT_CATEGORIES = [
+  { v: "event", label: "Événement", bg: "#A78BFA22", color: "#7C3AED" },
+  { v: "training", label: "Formation", bg: "#FEF3C7", color: "#B45309" },
+  { v: "meeting", label: "Réunion", bg: "#3BA4FF22", color: "#1D70B8" },
+  { v: "birthday", label: "Anniversaire", bg: "#FCE7F3", color: "#BE185D" },
+  { v: "maintenance", label: "Maintenance", bg: "#F1F5F9", color: "#475569" },
+];
+
+const GROUP_OPTIONS = [
+  { v: "all", label: "Tous les employés" },
+  { v: "admin", label: "Admins" },
+  { v: "managers", label: "Managers / Encadrement" },
+  { v: "ops", label: "Opérations" },
+  { v: "restauration", label: "Restauration" },
+];
+
+function AgendaManager() {
+  const [events, setEvents] = useState([]);
+  const [news, setNews] = useState([]);
+  const [editing, setEditing] = useState(null);
+  const [creating, setCreating] = useState(false);
+
+  const load = () => {
+    api.get("/admin/events").then((r) => setEvents(r.data)).catch(() => setEvents([]));
+    api.get("/news").then((r) => setNews(r.data)).catch(() => setNews([]));
+  };
+  useEffect(() => { load(); }, []);
+
+  const remove = async (ev) => {
+    if (!window.confirm(`Supprimer l'événement "${ev.title}" ?`)) return;
+    try {
+      await api.delete(`/admin/events/${ev.id}`);
+      toast.success("Événement supprimé");
+      load();
+    } catch {
+      toast.error("Impossible de supprimer");
+    }
+  };
+
+  const upcoming = events.filter((e) => e.date >= new Date().toISOString().slice(0, 10));
+  const past = events.filter((e) => e.date < new Date().toISOString().slice(0, 10));
+
+  return (
+    <div className="space-y-5">
+      <div className="ms-card p-5 flex items-center justify-between">
+        <div>
+          <div className="ms-overline">Agenda</div>
+          <h3 className="text-lg font-bold text-[#071B34] mt-1">Événements & temps forts du parc</h3>
+          <p className="text-xs text-[#475569] mt-1">
+            Créez, ciblez et publiez les événements visibles sur l'Agenda des employés.
+          </p>
+        </div>
+        <button
+          onClick={() => setCreating(true)}
+          data-testid="agenda-create"
+          className="ms-btn-primary"
+        >
+          <Plus className="h-4 w-4" /> Nouvel événement
+        </button>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        <div className="ms-card p-5">
+          <div className="flex items-center justify-between mb-3">
+            <h4 className="text-sm font-bold text-[#071B34]">À venir</h4>
+            <span className="text-[10px] uppercase tracking-wider text-[#475569]">
+              {upcoming.length} événement{upcoming.length > 1 ? "s" : ""}
+            </span>
+          </div>
+          <div className="space-y-2 max-h-[600px] overflow-y-auto pr-1">
+            {upcoming.length === 0 && (
+              <div className="text-center py-8 text-sm text-[#475569]">Aucun événement planifié.</div>
+            )}
+            {upcoming.map((e) => (
+              <EventRow key={e.id} ev={e} onEdit={() => setEditing(e)} onDelete={() => remove(e)} />
+            ))}
+          </div>
+        </div>
+
+        <div className="ms-card p-5">
+          <div className="flex items-center justify-between mb-3">
+            <h4 className="text-sm font-bold text-[#071B34]">Passés</h4>
+            <span className="text-[10px] uppercase tracking-wider text-[#475569]">
+              {past.length} archivé{past.length > 1 ? "s" : ""}
+            </span>
+          </div>
+          <div className="space-y-2 max-h-[600px] overflow-y-auto pr-1 opacity-70">
+            {past.length === 0 && (
+              <div className="text-center py-8 text-sm text-[#475569]">Aucun événement passé.</div>
+            )}
+            {past.map((e) => (
+              <EventRow key={e.id} ev={e} onEdit={() => setEditing(e)} onDelete={() => remove(e)} />
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {(editing || creating) && (
+        <EventEditor
+          event={editing}
+          news={news}
+          onClose={() => { setEditing(null); setCreating(false); }}
+          onSaved={() => { setEditing(null); setCreating(false); load(); }}
+        />
+      )}
+    </div>
+  );
+}
+
+function EventRow({ ev, onEdit, onDelete }) {
+  const cat = EVENT_CATEGORIES.find((c) => c.v === (ev.category || ev.type)) || EVENT_CATEGORIES[0];
+  const groups = ev.group_targets || ["all"];
+  return (
+    <div className="rounded-xl border border-[#071B34]/5 p-3 flex gap-3 items-start" data-testid={`event-row-${ev.id}`}>
+      <div
+        className="flex h-12 w-12 shrink-0 flex-col items-center justify-center rounded-xl"
+        style={{ background: cat.bg, color: cat.color }}
+      >
+        <CalendarDays className="h-3.5 w-3.5" />
+        <div className="text-[10px] font-bold mt-0.5">
+          {new Date(ev.date).getDate()}
+        </div>
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <span className="font-semibold text-sm text-[#071B34] line-clamp-1">{ev.title}</span>
+          <span className="ms-chip" style={{ background: cat.bg, color: cat.color }}>
+            {cat.label}
+          </span>
+        </div>
+        <div className="text-[11px] text-[#475569] mt-0.5">
+          <Clock className="inline h-3 w-3 mr-1" />
+          {(ev.start_time || ev.time) || "—"}
+          {ev.location ? ` · ${ev.location}` : ""}
+        </div>
+        <div className="mt-1 flex flex-wrap gap-1">
+          {groups.map((g) => {
+            const meta = GROUP_OPTIONS.find((x) => x.v === g);
+            return (
+              <span
+                key={g}
+                className="text-[9px] uppercase tracking-wider font-semibold rounded-md bg-[#F4F7FA] text-[#475569] px-1.5 py-0.5"
+              >
+                {meta ? meta.label : g}
+              </span>
+            );
+          })}
+          {(ev.employee_targets || []).length > 0 && (
+            <span className="text-[9px] uppercase tracking-wider font-semibold rounded-md bg-[#3BA4FF]/12 text-[#1D70B8] px-1.5 py-0.5">
+              +{ev.employee_targets.length} pers.
+            </span>
+          )}
+        </div>
+      </div>
+      <div className="flex flex-col gap-1 shrink-0">
+        <button
+          onClick={onEdit}
+          data-testid={`event-edit-${ev.id}`}
+          className="text-[10px] font-bold rounded-md px-2 py-1 bg-[#3BA4FF]/12 text-[#1D70B8] hover:bg-[#3BA4FF]/25"
+        >
+          Modifier
+        </button>
+        <button
+          onClick={onDelete}
+          data-testid={`event-delete-${ev.id}`}
+          className="text-[10px] font-semibold rounded-md bg-[#FEE2E2] text-[#EF4444] hover:bg-[#EF4444]/20 px-2 py-1"
+        >
+          <Trash2 className="h-3 w-3 inline" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function EventEditor({ event, news, onClose, onSaved }) {
+  const isNew = !event;
+  const today = new Date().toISOString().slice(0, 10);
+  const [form, setForm] = useState({
+    title: event?.title || "",
+    description: event?.description || "",
+    date: event?.date || today,
+    start_time: event?.start_time || event?.time || "09:00",
+    end_time: event?.end_time || "",
+    location: event?.location || "",
+    image: event?.image || "",
+    category: event?.category || event?.type || "event",
+    signup_enabled: event?.signup_enabled ?? event?.needs_registration ?? false,
+    signup_url: event?.signup_url || "",
+    linked_news_id: event?.linked_news_id || "",
+    external_link: event?.external_link || "",
+    group_targets: event?.group_targets || ["all"],
+    employee_targets: event?.employee_targets || [],
+  });
+
+  const [employees, setEmployees] = useState([]);
+  useEffect(() => {
+    api.get("/employees").then((r) => setEmployees(r.data)).catch(() => setEmployees([]));
+  }, []);
+
+  const toggleGroup = (g) => {
+    setForm((f) => {
+      const has = f.group_targets.includes(g);
+      let next;
+      if (g === "all") {
+        next = has ? [] : ["all"];
+      } else {
+        next = has ? f.group_targets.filter((x) => x !== g) : [...f.group_targets.filter((x) => x !== "all"), g];
+      }
+      if (next.length === 0) next = ["all"];
+      return { ...f, group_targets: next };
+    });
+  };
+
+  const toggleEmployee = (id) => {
+    setForm((f) => ({
+      ...f,
+      employee_targets: f.employee_targets.includes(id)
+        ? f.employee_targets.filter((x) => x !== id)
+        : [...f.employee_targets, id],
+    }));
+  };
+
+  const save = async () => {
+    if (!form.title.trim() || !form.date) {
+      toast.error("Titre et date requis");
+      return;
+    }
+    try {
+      if (isNew) {
+        await api.post("/admin/events", form);
+        toast.success("Événement créé");
+      } else {
+        await api.put(`/admin/events/${event.id}`, form);
+        toast.success("Événement mis à jour");
+      }
+      onSaved();
+    } catch (err) {
+      toast.error("Erreur", { description: err.response?.data?.detail });
+    }
+  };
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      onClick={onClose}
+      className="fixed inset-0 z-50 bg-black/40 backdrop-blur-md flex items-center justify-center p-4"
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="ms-card max-w-2xl w-full p-6 max-h-[90vh] overflow-y-auto"
+        data-testid="event-editor"
+      >
+        <div className="flex items-start justify-between mb-4">
+          <div>
+            <div className="ms-overline">{isNew ? "Nouvel événement" : "Modifier l'événement"}</div>
+            <h3 className="text-xl font-bold text-[#071B34] mt-1">
+              {isNew ? "Créer un événement" : event.title}
+            </h3>
+          </div>
+          <button onClick={onClose} className="flex h-9 w-9 items-center justify-center rounded-xl hover:bg-[#071B34]/5">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="space-y-3">
+          <div>
+            <label className="ms-overline">Titre</label>
+            <input
+              value={form.title}
+              onChange={(e) => setForm({ ...form, title: e.target.value })}
+              data-testid="event-title"
+              placeholder="Ex. Tournoi Karting Inter-équipes"
+              className="ms-input mt-2"
+            />
+          </div>
+
+          <div>
+            <label className="ms-overline">Catégorie</label>
+            <div className="grid grid-cols-5 gap-1 mt-2">
+              {EVENT_CATEGORIES.map((c) => (
+                <button
+                  key={c.v}
+                  type="button"
+                  onClick={() => setForm({ ...form, category: c.v })}
+                  className={`text-[10px] font-semibold rounded-lg py-1.5 transition-colors ${
+                    form.category === c.v ? "text-white" : "text-[#475569] hover:opacity-80"
+                  }`}
+                  style={{
+                    background: form.category === c.v ? c.color : c.bg,
+                    color: form.category === c.v ? "#fff" : c.color,
+                  }}
+                >
+                  {c.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-3 gap-2">
+            <div>
+              <label className="ms-overline">Date</label>
+              <input
+                type="date"
+                value={form.date}
+                onChange={(e) => setForm({ ...form, date: e.target.value })}
+                data-testid="event-date"
+                className="ms-input mt-2"
+              />
+            </div>
+            <div>
+              <label className="ms-overline">Début</label>
+              <input
+                type="time"
+                value={form.start_time}
+                onChange={(e) => setForm({ ...form, start_time: e.target.value })}
+                data-testid="event-start"
+                className="ms-input mt-2"
+              />
+            </div>
+            <div>
+              <label className="ms-overline">Fin (optionnel)</label>
+              <input
+                type="time"
+                value={form.end_time}
+                onChange={(e) => setForm({ ...form, end_time: e.target.value })}
+                className="ms-input mt-2"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="ms-overline">Lieu</label>
+            <input
+              value={form.location}
+              onChange={(e) => setForm({ ...form, location: e.target.value })}
+              placeholder="Ex. Salle Atlas"
+              className="ms-input mt-2"
+            />
+          </div>
+
+          <div>
+            <label className="ms-overline">Image (URL, optionnel)</label>
+            <input
+              value={form.image}
+              onChange={(e) => setForm({ ...form, image: e.target.value })}
+              placeholder="https://…"
+              className="ms-input mt-2"
+            />
+          </div>
+
+          <div>
+            <label className="ms-overline">Description</label>
+            <textarea
+              value={form.description}
+              onChange={(e) => setForm({ ...form, description: e.target.value })}
+              rows={4}
+              placeholder="Détails de l'événement…"
+              className="ms-input mt-2 resize-none"
+            />
+          </div>
+
+          <div>
+            <label className="ms-overline">Groupes cibles</label>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mt-2">
+              {GROUP_OPTIONS.map((g) => {
+                const active = form.group_targets.includes(g.v);
+                return (
+                  <button
+                    key={g.v}
+                    type="button"
+                    onClick={() => toggleGroup(g.v)}
+                    data-testid={`event-group-${g.v}`}
+                    className={`text-[11px] font-semibold rounded-lg py-2 px-2 transition-colors ${
+                      active
+                        ? "bg-[#071B34] text-white"
+                        : "bg-[#F4F7FA] text-[#475569] hover:bg-[#071B34]/5"
+                    }`}
+                  >
+                    {g.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <details className="rounded-xl bg-[#F4F7FA] p-3">
+            <summary className="cursor-pointer text-xs font-semibold text-[#475569] flex items-center gap-1.5">
+              <UsersIcon className="h-3.5 w-3.5" />
+              Cibler des employés spécifiques ({form.employee_targets.length})
+            </summary>
+            <div className="mt-3 max-h-40 overflow-y-auto space-y-1">
+              {employees.map((emp) => (
+                <label
+                  key={emp.id}
+                  className="flex items-center gap-2 text-xs py-1 px-2 rounded hover:bg-white cursor-pointer"
+                >
+                  <input
+                    type="checkbox"
+                    checked={form.employee_targets.includes(emp.id)}
+                    onChange={() => toggleEmployee(emp.id)}
+                    className="h-3.5 w-3.5 accent-[#3BA4FF]"
+                  />
+                  {emp.first_name} {emp.last_name} — <span className="text-[#475569]">{emp.role}</span>
+                </label>
+              ))}
+            </div>
+          </details>
+
+          <div className="rounded-xl border border-[#071B34]/5 p-3 space-y-2">
+            <label className="flex items-center gap-2 text-xs font-semibold text-[#071B34]">
+              <input
+                type="checkbox"
+                checked={form.signup_enabled}
+                onChange={(e) => setForm({ ...form, signup_enabled: e.target.checked })}
+                data-testid="event-signup-toggle"
+                className="h-4 w-4 accent-[#3BA4FF]"
+              />
+              Inscription requise
+            </label>
+            {form.signup_enabled && (
+              <input
+                value={form.signup_url}
+                onChange={(e) => setForm({ ...form, signup_url: e.target.value })}
+                placeholder="URL d'inscription ou mailto:… (facultatif)"
+                className="ms-input"
+              />
+            )}
+          </div>
+
+          <div>
+            <label className="ms-overline">Actualité liée (optionnel)</label>
+            <select
+              value={form.linked_news_id}
+              onChange={(e) => setForm({ ...form, linked_news_id: e.target.value })}
+              className="ms-input mt-2"
+            >
+              <option value="">— Aucune —</option>
+              {news.map((n) => (
+                <option key={n.id} value={n.id}>{n.title}</option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="ms-overline">Lien externe (optionnel)</label>
+            <input
+              value={form.external_link}
+              onChange={(e) => setForm({ ...form, external_link: e.target.value })}
+              placeholder="https://…"
+              className="ms-input mt-2"
+            />
+          </div>
+
+          <div className="flex gap-2 pt-3">
+            <button onClick={onClose} className="ms-btn-outline flex-1">Annuler</button>
+            <button onClick={save} data-testid="event-save" className="ms-btn-primary flex-1">
+              <Save className="h-4 w-4" />
+              {isNew ? "Créer l'événement" : "Enregistrer"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+
 
 
 // ───────────────────────────────────────── Fil MS Park (broadcast admin)
