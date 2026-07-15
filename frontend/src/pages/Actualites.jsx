@@ -88,11 +88,13 @@ export default function Actualites() {
         <p className="text-sm text-[#475569] mt-2">
           {me?.is_admin
             ? "Publiez des annonces, photos, documents pour toute l'équipe. Vous choisissez de poster en votre nom ou au nom de MS Park."
+            : me?.can_manage_communication
+            ? "Publiez, modifiez et supprimez les actualités officielles au nom de MS Park."
             : "Annonces, événements et communication officielle."}
         </p>
       </div>
 
-      {me?.is_admin && <AdminComposer me={me} onPublished={refresh} />}
+      {(me?.is_admin || me?.can_manage_communication) && <AdminComposer me={me} onPublished={refresh} />}
 
       <div className="ms-card p-3 flex flex-wrap items-center gap-1.5">
         <Filter className="h-4 w-4 text-[#475569] mx-1" />
@@ -136,6 +138,7 @@ export default function Actualites() {
 // ────────────────────── Composer
 
 function AdminComposer({ me, onPublished }) {
+  const isCommOnly = !me?.is_admin && !!me?.can_manage_communication;
   const [open, setOpen] = useState(false);
   const [content, setContent] = useState("");
   const [category, setCategory] = useState("Direction");
@@ -143,7 +146,7 @@ function AdminComposer({ me, onPublished }) {
   const [attachments, setAttachments] = useState([]);
   const [links, setLinks] = useState([]);
   const [linkDraft, setLinkDraft] = useState("");
-  const [postedAs, setPostedAs] = useState("personal");
+  const [postedAs, setPostedAs] = useState(isCommOnly ? "official" : "personal");
   const [publishing, setPublishing] = useState(false);
   const [showGallery, setShowGallery] = useState(false);
   const [showAttachments, setShowAttachments] = useState(false);
@@ -227,8 +230,8 @@ function AdminComposer({ me, onPublished }) {
         <span className="text-sm text-[#475569] flex-1">
           Quoi de neuf, <strong className="text-[#071B34]">{me.first_name}</strong> ? Publiez sur le fil MS Park…
         </span>
-        <span className="ms-chip bg-[#A78BFA]/15 text-[#7C3AED]">
-          <Sparkles className="h-3 w-3" /> Admin
+        <span className={`ms-chip ${isCommOnly ? "bg-[#F59E0B]/15 text-[#B45309]" : "bg-[#A78BFA]/15 text-[#7C3AED]"}`}>
+          <Sparkles className="h-3 w-3" /> {isCommOnly ? "Communication" : "Admin"}
         </span>
       </button>
     );
@@ -257,38 +260,46 @@ function AdminComposer({ me, onPublished }) {
         </button>
       </div>
 
-      {/* Publier en tant que */}
-      <div>
-        <div className="text-[10px] uppercase tracking-wider text-[#475569] font-semibold mb-1.5">
-          Publier en tant que
+      {/* Publier en tant que — masqué pour les comm editors (toujours au nom MS Park) */}
+      {!isCommOnly && (
+        <div>
+          <div className="text-[10px] uppercase tracking-wider text-[#475569] font-semibold mb-1.5">
+            Publier en tant que
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              onClick={() => setPostedAs("personal")}
+              data-testid="posted-as-personal"
+              className={`flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold border transition-all ${
+                postedAs === "personal"
+                  ? "bg-[#3BA4FF]/10 border-[#3BA4FF] text-[#1D70B8]"
+                  : "bg-white border-[#071B34]/10 text-[#475569] hover:border-[#3BA4FF]/40"
+              }`}
+            >
+              <UserIcon className="h-3.5 w-3.5" />
+              <span className="truncate">Mon compte ({me.first_name})</span>
+            </button>
+            <button
+              onClick={() => setPostedAs("official")}
+              data-testid="posted-as-official"
+              className={`flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold border transition-all ${
+                postedAs === "official"
+                  ? "bg-[#071B34] border-[#071B34] text-white"
+                  : "bg-white border-[#071B34]/10 text-[#475569] hover:border-[#071B34]/40"
+              }`}
+            >
+              <Building2 className="h-3.5 w-3.5" />
+              MS Park (officiel)
+            </button>
+          </div>
         </div>
-        <div className="grid grid-cols-2 gap-2">
-          <button
-            onClick={() => setPostedAs("personal")}
-            data-testid="posted-as-personal"
-            className={`flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold border transition-all ${
-              postedAs === "personal"
-                ? "bg-[#3BA4FF]/10 border-[#3BA4FF] text-[#1D70B8]"
-                : "bg-white border-[#071B34]/10 text-[#475569] hover:border-[#3BA4FF]/40"
-            }`}
-          >
-            <UserIcon className="h-3.5 w-3.5" />
-            <span className="truncate">Mon compte ({me.first_name})</span>
-          </button>
-          <button
-            onClick={() => setPostedAs("official")}
-            data-testid="posted-as-official"
-            className={`flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold border transition-all ${
-              postedAs === "official"
-                ? "bg-[#071B34] border-[#071B34] text-white"
-                : "bg-white border-[#071B34]/10 text-[#475569] hover:border-[#071B34]/40"
-            }`}
-          >
-            <Building2 className="h-3.5 w-3.5" />
-            MS Park (officiel)
-          </button>
+      )}
+      {isCommOnly && (
+        <div className="rounded-xl bg-[#071B34]/5 border border-[#071B34]/10 px-3 py-2 text-xs text-[#475569] flex items-center gap-2">
+          <Building2 className="h-3.5 w-3.5 text-[#071B34]" />
+          Publication au nom officiel de <strong className="text-[#071B34]">MS Park</strong>.
         </div>
-      </div>
+      )}
 
       <div>
         <label className="text-[10px] uppercase tracking-wider text-[#475569] font-semibold mb-1.5 block">
@@ -585,7 +596,7 @@ function PostCard({ post, me, onLike, findEmployee, refresh }) {
               {author.role} · {formatDateFr(post.created_at.slice(0, 10))}
             </div>
           </div>
-          {me?.is_admin && (
+          {(me?.is_admin || me?.can_manage_communication) && (
             <button
               onClick={async () => {
                 if (!window.confirm("Supprimer cette publication ?")) return;

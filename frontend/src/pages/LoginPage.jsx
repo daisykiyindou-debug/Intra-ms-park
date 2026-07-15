@@ -40,6 +40,10 @@ export default function LoginPage() {
     setEmail("idriss.malonga@gmail.com");
     setPassword("Idriss2026!");
   };
+  const fillComm = () => {
+    setEmail("lea.dubois@mspark.fr");
+    setPassword("MSPark@Comm2026!");
+  };
 
   return (
     <div className="min-h-screen flex flex-col md:flex-row bg-[#F4F7FA]">
@@ -93,22 +97,30 @@ export default function LoginPage() {
             Connectez-vous avec votre identifiant MS Park pour accéder à l'intranet.
           </p>
 
-          <div className="mt-6 grid grid-cols-2 gap-2">
+          <div className="mt-6 grid grid-cols-3 gap-2">
             <button
               type="button"
               onClick={fillEmployee}
               data-testid="quickfill-employee"
-              className="text-[11px] font-semibold text-[#3BA4FF] bg-[#3BA4FF]/10 hover:bg-[#3BA4FF]/20 rounded-lg px-3 py-2 transition-colors"
+              className="text-[10px] font-semibold text-[#3BA4FF] bg-[#3BA4FF]/10 hover:bg-[#3BA4FF]/20 rounded-lg px-2 py-2 transition-colors"
             >
               👤 Démo employé
             </button>
             <button
               type="button"
+              onClick={fillComm}
+              data-testid="quickfill-comm"
+              className="text-[10px] font-semibold text-[#B45309] bg-[#F59E0B]/10 hover:bg-[#F59E0B]/20 rounded-lg px-2 py-2 transition-colors inline-flex items-center justify-center gap-1"
+            >
+              📢 Démo com'
+            </button>
+            <button
+              type="button"
               onClick={fillAdmin}
               data-testid="quickfill-admin"
-              className="text-[11px] font-semibold text-[#7C3AED] bg-[#A78BFA]/10 hover:bg-[#A78BFA]/20 rounded-lg px-3 py-2 transition-colors inline-flex items-center justify-center gap-1.5"
+              className="text-[10px] font-semibold text-[#7C3AED] bg-[#A78BFA]/10 hover:bg-[#A78BFA]/20 rounded-lg px-2 py-2 transition-colors inline-flex items-center justify-center gap-1"
             >
-              <ShieldCheck className="h-3 w-3" /> Démo administrateur
+              <ShieldCheck className="h-3 w-3" /> Admin
             </button>
           </div>
 

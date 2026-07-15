@@ -6,6 +6,7 @@ const typeStyles = {
   shift: { bg: "#3BA4FF15", color: "#1D70B8", label: "Shift" },
   off: { bg: "#F1F5F9", color: "#64748B", label: "OFF" },
   leave: { bg: "#EDE9FE", color: "#7C3AED", label: "Congé" },
+  rtt: { bg: "#DBEAFE", color: "#1D70B8", label: "RTT" },
   training: { bg: "#FEF3C7", color: "#B45309", label: "Formation" },
   meeting: { bg: "#FCE7F3", color: "#BE185D", label: "Réunion" },
 };

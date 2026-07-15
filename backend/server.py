@@ -62,6 +62,17 @@ async def require_admin() -> dict:
         raise HTTPException(403, "Accès administrateur requis")
     return emp
 
+
+async def require_communication_editor() -> dict:
+    """Allow admins OR employees flagged can_manage_communication=True.
+    Used for news, carousel slides, events (agenda) and MS Park broadcasts."""
+    emp = await db.employees.find_one({"id": current_user()}, {"_id": 0})
+    if not emp:
+        raise HTTPException(403, "Accès refusé")
+    if emp.get("is_admin") or emp.get("can_manage_communication"):
+        return emp
+    raise HTTPException(403, "Accès communication requis")
+
 # ───────────────────────────────── Models ────────────────────────────────────
 
 def _id() -> str:
@@ -308,6 +319,43 @@ async def _seed_once() -> None:
             },
             "is_admin": True,
             "can_post": True,
+        },
+        {
+            "id": "emp-lea-comm",
+            "first_name": "Léa",
+            "last_name": "DUBOIS",
+            "role": "Chargée de communication",
+            "role_category": "encadrement",
+            "department": "Communication interne",
+            "avatar": "https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=400&h=400&fit=crop&crop=faces",
+            "email": "lea.dubois@mspark.fr",
+            "personal_email": "lea.dubois.comm@gmail.com",
+            "phone": "+33 6 77 88 99 00",
+            "birth_date": "1994-03-18",
+            "hire_date": "2023-06-01",
+            "address": "12 rue des Cerisiers · 75011 Paris",
+            "available": True,
+            "seniority_months": 20,
+            "skills": ["Communication", "Content creation", "Community management", "Design graphique"],
+            "manager": "Marcus SIMÉO",
+            "location": "MS Park — Bureau communication",
+            "badge_number": "MSP-1108",
+            "badge_expiry": "2027-06-01",
+            "badge_active": True,
+            "leave_balance": {"cp_n_1": 3, "cp_n": 15, "rtt": 4},
+            "contract_hours_weekly": 35,
+            "weekly_pattern": {
+                "0": {"type": "shift", "start": "09:30", "end": "17:30", "pause_start": "12:30", "pause_end": "13:30"},
+                "1": {"type": "shift", "start": "09:30", "end": "17:30", "pause_start": "12:30", "pause_end": "13:30"},
+                "2": {"type": "shift", "start": "09:30", "end": "17:30", "pause_start": "12:30", "pause_end": "13:30"},
+                "3": {"type": "shift", "start": "09:30", "end": "17:30", "pause_start": "12:30", "pause_end": "13:30"},
+                "4": {"type": "shift", "start": "09:30", "end": "17:30", "pause_start": "12:30", "pause_end": "13:30"},
+                "5": {"type": "off"},
+                "6": {"type": "off"},
+            },
+            "is_admin": False,
+            "can_post": True,
+            "can_manage_communication": True,
         },
         {
             "id": "emp-sophie",
@@ -1574,10 +1622,13 @@ async def list_posts():
 
 @api.post("/posts")
 async def create_post(payload: PostCreate):
-    # Only admins can publish to the internal feed
     me = await db.employees.find_one({"id": current_user()}, {"_id": 0})
-    if not me or not me.get("is_admin"):
-        raise HTTPException(403, "Seuls les administrateurs peuvent publier sur le fil")
+    if not me or not (me.get("is_admin") or me.get("can_manage_communication")):
+        raise HTTPException(403, "Seuls les administrateurs et responsables communication peuvent publier sur le fil")
+    # Communication editors always post under the official MS Park identity
+    posted_as = payload.posted_as or "personal"
+    if not me.get("is_admin") and me.get("can_manage_communication"):
+        posted_as = "official"
     p = {
         "id": _id(),
         "author_id": current_user(),
@@ -1588,7 +1639,7 @@ async def create_post(payload: PostCreate):
         "attachments": payload.attachments or [],
         "links": payload.links or [],
         "hashtags": payload.hashtags or [],
-        "posted_as": payload.posted_as or "personal",
+        "posted_as": posted_as,
         "likes": [],
         "comments": [],
         "created_at": _now(),
@@ -1600,8 +1651,8 @@ async def create_post(payload: PostCreate):
 @api.delete("/posts/{post_id}")
 async def delete_post(post_id: str):
     me = await db.employees.find_one({"id": current_user()}, {"_id": 0})
-    if not me or not me.get("is_admin"):
-        raise HTTPException(403, "Seuls les administrateurs peuvent supprimer")
+    if not me or not (me.get("is_admin") or me.get("can_manage_communication")):
+        raise HTTPException(403, "Seuls les administrateurs et responsables communication peuvent supprimer")
     await db.posts.delete_one({"id": post_id})
     return {"ok": True}
 
@@ -1880,7 +1931,7 @@ class ChannelBroadcast(BaseModel):
 
 @api.post("/admin/broadcast")
 async def admin_broadcast(payload: ChannelBroadcast):
-    me = await require_admin()
+    me = await require_communication_editor()
     ch = await db.channels.find_one({"id": payload.channel_id}, {"_id": 0})
     if not ch:
         raise HTTPException(404, "Canal introuvable")
@@ -2032,7 +2083,7 @@ def _normalize_event(ev: dict) -> dict:
 
 @api.post("/admin/events")
 async def admin_create_event(payload: EventPayload):
-    await require_admin()
+    await require_communication_editor()
     ev = payload.model_dump()
     ev["id"] = _id()
     if not ev.get("group_targets"):
@@ -2044,11 +2095,7 @@ async def admin_create_event(payload: EventPayload):
 
 @api.put("/admin/events/{eid}")
 async def admin_update_event(eid: str, payload: EventPayload):
-    await require_admin()
-    # exclude_unset would require frontend to omit unchanged fields.
-    # The current UI always sends the full form, so keep model_dump().
-    # We simply drop `None` values to avoid overwriting existing data
-    # when a future caller does a partial update.
+    await require_communication_editor()
     updates = {k: v for k, v in payload.model_dump().items() if v is not None}
     updates.pop("id", None)
     updates = _normalize_event(updates)
@@ -2061,14 +2108,14 @@ async def admin_update_event(eid: str, payload: EventPayload):
 
 @api.delete("/admin/events/{eid}")
 async def admin_delete_event(eid: str):
-    await require_admin()
+    await require_communication_editor()
     await db.events.delete_one({"id": eid})
     return {"ok": True}
 
 
 @api.get("/admin/events")
 async def admin_list_events():
-    await require_admin()
+    await require_communication_editor()
     return await db.events.find({}, {"_id": 0}).sort("date", 1).to_list(500)
 
 
@@ -2277,23 +2324,28 @@ _LOGIN_CREDENTIALS = {
     "idriss.malonga@mspark.fr": ("Idriss2026!", "emp-idriss-malonga"),
     "marcus.simeo@mspark.fr": ("MSPark@Admin2026!", ADMIN_EMPLOYEE_ID),
     "marcus.simeo@gmail.com": ("MSPark@Admin2026!", ADMIN_EMPLOYEE_ID),
+    "lea.dubois@mspark.fr": ("MSPark@Comm2026!", "emp-lea-comm"),
+    "lea.dubois.comm@gmail.com": ("MSPark@Comm2026!", "emp-lea-comm"),
 }
 
 
 @api.post("/auth/login")
 async def auth_login(payload: LoginRequest):
     creds = _LOGIN_CREDENTIALS.get(payload.email.lower().strip())
-    # Mock auth: also accept "any password" for the demo (legacy), but if a known
-    # email is provided with the documented password, prefer matching.
     if creds:
         expected_pwd, eid = creds
         if payload.password != expected_pwd:
             raise HTTPException(401, "Mot de passe incorrect")
         emp = await db.employees.find_one({"id": eid}, {"_id": 0})
         if emp:
-            return {"employee_id": eid, "is_admin": emp.get("is_admin", False),
-                    "first_name": emp["first_name"], "last_name": emp["last_name"]}
-    raise HTTPException(401, "Identifiants inconnus. Essayez idriss.malonga@gmail.com ou marcus.simeo@mspark.fr.")
+            return {
+                "employee_id": eid,
+                "is_admin": emp.get("is_admin", False),
+                "can_manage_communication": emp.get("can_manage_communication", False),
+                "first_name": emp["first_name"],
+                "last_name": emp["last_name"],
+            }
+    raise HTTPException(401, "Identifiants inconnus. Essayez idriss.malonga@gmail.com, marcus.simeo@mspark.fr ou lea.dubois@mspark.fr.")
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -2845,7 +2897,10 @@ class NewsCreate(BaseModel):
 
 @api.post("/admin/news")
 async def admin_publish_news(payload: NewsCreate):
-    me = await require_admin()
+    me = await require_communication_editor()
+    # Comm editors publish under the official "MS Park" identity by default.
+    is_official = not me.get("is_admin") and me.get("can_manage_communication")
+    author_name = "MS Park" if is_official else f"{me['first_name']} {me['last_name']}"
     item = {
         "id": _id(),
         "title": payload.title,
@@ -2865,7 +2920,8 @@ async def admin_publish_news(payload: NewsCreate):
         "pinned": bool(payload.pinned),
         "date": _now(),
         "author_id": me["id"],
-        "author_name": f"{me['first_name']} {me['last_name']}",
+        "author_name": author_name,
+        "posted_as": "official",
         "likes": [],
         "comments": [],
     }
@@ -2893,7 +2949,7 @@ class NewsUpdate(BaseModel):
 
 @api.put("/admin/news/{nid}")
 async def admin_update_news(nid: str, payload: NewsUpdate):
-    await require_admin()
+    await require_communication_editor()
     updates = {k: v for k, v in payload.model_dump().items() if v is not None}
     if updates:
         await db.news.update_one({"id": nid}, {"$set": updates})
@@ -2905,7 +2961,7 @@ async def admin_update_news(nid: str, payload: NewsUpdate):
 
 @api.delete("/admin/news/{nid}")
 async def admin_delete_news(nid: str):
-    await require_admin()
+    await require_communication_editor()
     await db.news.delete_one({"id": nid})
     return {"ok": True}
 

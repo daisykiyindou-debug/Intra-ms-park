@@ -37,8 +37,11 @@ const addDays = (d, n) => {
 export default function ManagementShell() {
   const { me } = useApp();
 
-  // Block non-admin
-  if (me && !me.is_admin) {
+  const isAdmin = !!me?.is_admin;
+  const isComm = !!me?.can_manage_communication;
+
+  // Block users with neither admin nor communication rights
+  if (me && !isAdmin && !isComm) {
     return (
       <div className="ms-card p-12 text-center">
         <ShieldCheck className="mx-auto h-12 w-12 text-[#EF4444]" />
@@ -51,22 +54,33 @@ export default function ManagementShell() {
   }
   if (!me) return <div className="ms-card p-8 animate-pulse h-64" />;
 
+  // Comm editor gets a restricted tab set (Communication only)
+  const commSubNav = [
+    { to: "/management/carrousel", label: "Carrousel accueil", icon: Newspaper },
+    { to: "/management/agenda", label: "Agenda", icon: CalendarDays },
+  ];
+  const tabs = isAdmin ? subNav : commSubNav;
+  const headerAccent = isAdmin ? "#7C3AED" : "#F59E0B";
+  const headerBg = isAdmin ? "bg-[#A78BFA]/15 text-[#7C3AED]" : "bg-[#F59E0B]/15 text-[#B45309]";
+  const headerOverline = isAdmin ? "Espace Management" : "Espace Communication";
+  const headerTitle = isAdmin ? "Pilotage opérationnel" : "Gestion de la communication interne";
+
   return (
     <div className="space-y-5 ms-fade-up">
       <div className="flex items-center gap-3">
-        <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[#A78BFA]/15 text-[#7C3AED]">
+        <div className={`flex h-12 w-12 items-center justify-center rounded-2xl ${headerBg}`}>
           <ShieldCheck className="h-5 w-5" />
         </div>
         <div>
-          <div className="ms-overline text-[#7C3AED]">Espace Management</div>
+          <div className="ms-overline" style={{ color: headerAccent }}>{headerOverline}</div>
           <h1 className="text-2xl md:text-3xl font-bold tracking-tight text-[#071B34]">
-            Pilotage opérationnel
+            {headerTitle}
           </h1>
         </div>
       </div>
 
       <div className="flex gap-1 overflow-x-auto rounded-xl bg-white border border-[#071B34]/8 p-1">
-        {subNav.map((s) => (
+        {tabs.map((s) => (
           <NavLink
             key={s.to}
             to={s.to}
@@ -85,16 +99,18 @@ export default function ManagementShell() {
       </div>
 
       <Routes>
-        <Route index element={<Overview />} />
-        <Route path="planning" element={<PlanningManager />} />
-        <Route path="demandes" element={<RequestsManager />} />
-        <Route path="attributions" element={<LeaveGrantManager />} />
+        {isAdmin && <Route index element={<Overview />} />}
+        {isAdmin && <Route path="planning" element={<PlanningManager />} />}
+        {isAdmin && <Route path="demandes" element={<RequestsManager />} />}
+        {isAdmin && <Route path="attributions" element={<LeaveGrantManager />} />}
         <Route path="carrousel" element={<NewsManager />} />
         <Route path="agenda" element={<AgendaManager />} />
         <Route path="actualites" element={<Navigate to="/management/carrousel" replace />} />
-        <Route path="documents" element={<DocumentsManager />} />
+        {isAdmin && <Route path="documents" element={<DocumentsManager />} />}
         <Route path="fil" element={<Navigate to="/actualites" replace />} />
-        <Route path="*" element={<Navigate to="/management" replace />} />
+        {/* Comm editor without admin lands on carrousel by default */}
+        {!isAdmin && <Route index element={<Navigate to="/management/carrousel" replace />} />}
+        <Route path="*" element={<Navigate to={isAdmin ? "/management" : "/management/carrousel"} replace />} />
       </Routes>
     </div>
   );
@@ -475,6 +491,7 @@ function EntryCard({ entry, onEdit, onDelete }) {
     shift: { color: "#3BA4FF", bg: "#3BA4FF1F", label: "Shift" },
     off: { color: "#64748B", bg: "#F1F5F9", label: "OFF" },
     leave: { color: "#7C3AED", bg: "#A78BFA22", label: "Congé" },
+    rtt: { color: "#1D70B8", bg: "#DBEAFE", label: "RTT" },
     training: { color: "#B45309", bg: "#FEF3C7", label: "Formation" },
   };
   const m = typeMeta[entry.type] || typeMeta.shift;

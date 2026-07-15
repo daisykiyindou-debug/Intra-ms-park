@@ -47,6 +47,16 @@ Intranet premium pour employés du parc MS Park + espace administrateur pour le 
 - `/app/frontend/src/lib/api.js` — interceptor axios ajoutant `X-Employee-Id` depuis localStorage
 
 ## Changelog
+### 2026-08 — Chargée de communication + validation Sync CP
+- **Sync CP/RTT confirmée** (bug déjà résolu dans une itération antérieure) : approbation d'un congé → planning employé ET planning admin affichent immédiatement "CONGÉ" sur les jours concernés (verified via curl + admin PlanningManager screenshot pour Marcus semaine 20-24 juil). Ajout du badge RTT dans typeStyles (Planning.jsx) et typeMeta (Management.jsx EntryCard) pour robustesse.
+- **Nouveau compte "Chargée de communication"** — Léa DUBOIS (`emp-lea-comm`) — `lea.dubois@mspark.fr` / `MSPark@Comm2026!`. Flag `can_manage_communication: true`, `is_admin: false`.
+- **Nouveau helper `require_communication_editor()`** côté backend qui autorise admins OU comm editors sur : `POST/PUT/DELETE /admin/news`, `POST/PUT/DELETE/GET /admin/events`, `POST /admin/broadcast`, `POST /posts`, `DELETE /posts/{id}`.
+- **News publiées par Léa** → `author_name: "MS Park"`, `posted_as: "official"` (au nom du compte officiel).
+- **Posts sur le fil par Léa** → forcés en `posted_as: "official"` côté backend, badge "Communication" orange dans le composer, toggle "Publier en tant que" masqué.
+- **Sidebar** : nouveau bloc "Communication" (orange, icône Megaphone) affiché à Léa avec 2 liens seulement (Carrousel accueil, Agenda). Léa n'a AUCUN accès aux blocs Management/RH.
+- **ManagementShell** : header adapté ("Espace Communication · Gestion de la communication interne" pour Léa vs "Espace Management · Pilotage opérationnel" pour admin). Routes admin gardées `is_admin`-only, routes `carrousel`/`agenda` ouvertes aux comm editors.
+- **LoginPage** : 3 boutons quickfill (Employé / Com' / Admin).
+
 ### 2026-08 — Agenda Admin + Carrousel v2
 - **Fix crash** `Can't find variable: AgendaManager` sur `/management/agenda` (composant manquant côté frontend)
 - **AgendaManager complet** ajouté à `Management.jsx` : CRUD événements, catégories (event/training/meeting/birthday/maintenance), ciblage multi-groupes (all/admin/managers/ops/restauration) + ciblage employés spécifiques, image, description, inscription optionnelle avec URL, actualité liée, lien externe

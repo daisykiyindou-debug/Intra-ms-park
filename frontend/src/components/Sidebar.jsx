@@ -47,13 +47,21 @@ const adminNav = [
   { to: "/management/demandes", label: "Validation demandes", icon: Inbox, key: "mgmt-demandes" },
   { to: "/management/attributions", label: "RTT / CP", icon: Gift, key: "mgmt-rtt" },
   { to: "/management/carrousel", label: "Carrousel accueil", icon: Newspaper, key: "mgmt-carrousel" },
+  { to: "/management/agenda", label: "Agenda", icon: Calendar, key: "mgmt-agenda" },
   { to: "/management/documents", label: "Documents RH", icon: FileText, key: "mgmt-docs" },
+];
+
+const commNav = [
+  { divider: "Communication", commBadge: true },
+  { to: "/management/carrousel", label: "Carrousel accueil", icon: Newspaper, key: "comm-carrousel" },
+  { to: "/management/agenda", label: "Agenda", icon: Calendar, key: "comm-agenda" },
 ];
 
 export default function Sidebar({ open, onClose }) {
   const { me } = useApp();
   const isAdmin = !!me?.is_admin;
-  const items = isAdmin ? [...nav, ...adminNav] : nav;
+  const isComm = !!me?.can_manage_communication;
+  const items = isAdmin ? [...nav, ...adminNav] : isComm ? [...nav, ...commNav] : nav;
 
   return (
     <>
@@ -88,10 +96,15 @@ export default function Sidebar({ open, onClose }) {
               <div
                 key={`d-${i}`}
                 className={`px-3 pt-5 pb-2 text-[10px] uppercase tracking-[0.2em] font-semibold flex items-center gap-1.5 ${
-                  item.adminBadge ? "text-[#A78BFA]" : "text-white/40"
+                  item.adminBadge
+                    ? "text-[#A78BFA]"
+                    : item.commBadge
+                    ? "text-[#F59E0B]"
+                    : "text-white/40"
                 }`}
               >
                 {item.adminBadge && <ShieldCheck className="h-3 w-3" />}
+                {item.commBadge && <Megaphone className="h-3 w-3" />}
                 {item.divider}
               </div>
             ) : (
@@ -145,13 +158,21 @@ export default function Sidebar({ open, onClose }) {
                     <ShieldCheck className="h-3 w-3 text-white" />
                   </span>
                 )}
+                {!isAdmin && isComm && (
+                  <span
+                    className="absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-[#F59E0B] ring-2 ring-[#071B34]"
+                    title="Chargée de communication"
+                  >
+                    <Megaphone className="h-3 w-3 text-white" />
+                  </span>
+                )}
               </div>
               <div className="min-w-0">
                 <div className="truncate text-sm font-semibold text-white">
                   {me.first_name} {me.last_name}
                 </div>
                 <div className="truncate text-xs text-white/50">
-                  {isAdmin ? "Administrateur · " : ""}
+                  {isAdmin ? "Administrateur · " : isComm ? "Communication · " : ""}
                   {me.role}
                 </div>
               </div>
