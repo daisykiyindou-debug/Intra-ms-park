@@ -1,15 +1,19 @@
-import { useEffect, useMemo, useState } from "react";
-import { Heart, MessageCircle, Send, Filter, Eye, EyeOff, Image as ImageIcon, Sparkles, Trash2, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  Heart, MessageCircle, Send, Filter, Eye, EyeOff,
+  Image as ImageIcon, Paperclip, Link2, Smile, Sparkles, Trash2, X,
+  FileText, User as UserIcon, Building2, ChevronDown,
+} from "lucide-react";
 import { toast } from "sonner";
 import { api, formatDateFr } from "@/lib/api";
 import { useApp } from "@/contexts/AppContext";
 
 const FILTERS = [
-  { k: "all", l: "Toutes", color: "#475569" },
-  { k: "Direction", l: "Direction", color: "#3BA4FF" },
-  { k: "RH", l: "RH", color: "#10B981" },
-  { k: "Événement", l: "Événements", color: "#A78BFA" },
-  { k: "Restauration", l: "Restauration", color: "#F59E0B" },
+  { k: "all", l: "Toutes" },
+  { k: "Direction", l: "Direction" },
+  { k: "RH", l: "RH" },
+  { k: "Événement", l: "Événements" },
+  { k: "Restauration", l: "Restauration" },
 ];
 
 const categoryColor = {
@@ -20,7 +24,6 @@ const categoryColor = {
   annonce: "bg-[#64748B]/15 text-[#475569]",
 };
 
-// Galerie d'images MS Park pré-sélectionnées
 const IMAGE_GALLERY = [
   "https://images.unsplash.com/photo-1533174072545-7a4b6ad7a6c3?w=1200",
   "https://images.unsplash.com/photo-1522860747422-1b3b0e7527ff?w=1200",
@@ -30,7 +33,33 @@ const IMAGE_GALLERY = [
   "https://images.unsplash.com/photo-1517649763962-0c623066013b?w=1200",
   "https://images.unsplash.com/photo-1519671482749-fd09be7ccebf?w=1200",
   "https://images.unsplash.com/photo-1526397751294-331021109fbd?w=1200",
+  "https://images.unsplash.com/photo-1560062330-3d1fce13f1a4?w=1200",
+  "https://images.unsplash.com/photo-1533642125100-b585daad1f22?w=1200",
+  "https://images.unsplash.com/photo-1503457574462-bd27054394c1?w=1200",
+  "https://images.unsplash.com/photo-1485827404703-89b55fcc595e?w=1200",
 ];
+
+const EMOJIS = [
+  "😀","😄","😊","😍","🤩","🥳","🎉","🎊","🎈","🎁","🏆","⭐",
+  "👏","🙌","👍","👌","💪","🔥","💯","✨","💡","💬","📣","📌",
+  "❤️","💙","💚","🧡","🤍","🌟","☀️","🌈","🎯","🚀","⚡","🎢",
+];
+
+const ATTACHMENTS_LIBRARY = [
+  { name: "Modèle contrat CDI.pdf", type: "pdf",
+    url: "https://www.africau.edu/images/default/sample.pdf" },
+  { name: "Fiche de paie type.pdf", type: "pdf",
+    url: "https://www.africau.edu/images/default/sample.pdf" },
+  { name: "Règlement intérieur 2026.pdf", type: "pdf",
+    url: "https://www.africau.edu/images/default/sample.pdf" },
+  { name: "Note de service.docx", type: "word",
+    url: "https://www.africau.edu/images/default/sample.pdf" },
+  { name: "Planning Q3 2026.xlsx", type: "excel",
+    url: "https://www.africau.edu/images/default/sample.pdf" },
+];
+
+const OFFICIAL_AVATAR =
+  "https://images.unsplash.com/photo-1533174072545-7a4b6ad7a6c3?w=200&h=200&fit=crop";
 
 export default function Actualites() {
   const { me, findEmployee } = useApp();
@@ -44,33 +73,35 @@ export default function Actualites() {
     await api.post(`/posts/${id}/like`);
     refresh();
   };
-
-  const filtered = useMemo(() => {
-    if (filter === "all") return posts;
-    return posts.filter((p) => p.category === filter);
-  }, [posts, filter]);
+  const filtered = useMemo(
+    () => (filter === "all" ? posts : posts.filter((p) => p.category === filter)),
+    [posts, filter]
+  );
 
   return (
-    <div className="space-y-6 ms-fade-up max-w-3xl mx-auto">
+    <div className="space-y-5 ms-fade-up max-w-2xl mx-auto">
       <div>
         <div className="ms-overline">Actualités entreprise</div>
         <h1 className="text-3xl md:text-4xl font-bold tracking-tight text-[#071B34] mt-1">
           Le fil de MS Park
         </h1>
         <p className="text-sm text-[#475569] mt-2">
-          Annonces, événements et communication officielle. Consultation uniquement.
+          {me?.is_admin
+            ? "Publiez des annonces, photos, documents pour toute l'équipe. Vous choisissez de poster en votre nom ou au nom de MS Park."
+            : "Annonces, événements et communication officielle."}
         </p>
       </div>
 
-      {/* Filters */}
-      <div className="ms-card p-4 flex flex-wrap items-center gap-2">
-        <Filter className="h-4 w-4 text-[#475569] mr-1" />
+      {me?.is_admin && <AdminComposer me={me} onPublished={refresh} />}
+
+      <div className="ms-card p-3 flex flex-wrap items-center gap-1.5">
+        <Filter className="h-4 w-4 text-[#475569] mx-1" />
         {FILTERS.map((f) => (
           <button
             key={f.k}
             onClick={() => setFilter(f.k)}
             data-testid={`filter-${f.k}`}
-            className={`rounded-full px-4 py-1.5 text-xs font-semibold transition-colors ${
+            className={`rounded-full px-3.5 py-1.5 text-xs font-semibold transition-colors ${
               filter === f.k
                 ? "bg-[#071B34] text-white"
                 : "bg-[#F4F7FA] text-[#475569] hover:bg-[#071B34]/5"
@@ -84,33 +115,63 @@ export default function Actualites() {
       <div className="space-y-4">
         {filtered.length === 0 && (
           <div className="ms-card p-8 text-center text-sm text-[#475569]">
-            Aucune actualité dans cette catégorie.
+            Aucune publication dans cette catégorie.
           </div>
         )}
         {filtered.map((p) => (
-          <PostCard key={p.id} post={p} me={me} onLike={() => like(p.id)} findEmployee={findEmployee} refresh={refresh} />
+          <PostCard
+            key={p.id}
+            post={p}
+            me={me}
+            onLike={() => like(p.id)}
+            findEmployee={findEmployee}
+            refresh={refresh}
+          />
         ))}
       </div>
     </div>
   );
 }
 
+// ────────────────────── Composer
+
 function AdminComposer({ me, onPublished }) {
   const [open, setOpen] = useState(false);
   const [content, setContent] = useState("");
   const [category, setCategory] = useState("Direction");
-  const [image, setImage] = useState(null);
-  const [showGallery, setShowGallery] = useState(false);
+  const [images, setImages] = useState([]);
+  const [attachments, setAttachments] = useState([]);
+  const [links, setLinks] = useState([]);
+  const [linkDraft, setLinkDraft] = useState("");
+  const [postedAs, setPostedAs] = useState("personal");
   const [publishing, setPublishing] = useState(false);
+  const [showGallery, setShowGallery] = useState(false);
+  const [showAttachments, setShowAttachments] = useState(false);
+  const [showEmojis, setShowEmojis] = useState(false);
+  const [showLinkInput, setShowLinkInput] = useState(false);
+  const textareaRef = useRef(null);
 
   const publish = async () => {
     if (!content.trim()) return;
     setPublishing(true);
     try {
-      await api.post("/posts", { content: content.trim(), category, image });
+      await api.post("/posts", {
+        content: content.trim(),
+        category,
+        images,
+        attachments,
+        links,
+        posted_as: postedAs,
+      });
       toast.success("Publication mise en ligne !");
       setContent("");
-      setImage(null);
+      setImages([]);
+      setAttachments([]);
+      setLinks([]);
+      setShowGallery(false);
+      setShowAttachments(false);
+      setShowLinkInput(false);
+      setShowEmojis(false);
       setOpen(false);
       onPublished();
     } catch (err) {
@@ -118,6 +179,41 @@ function AdminComposer({ me, onPublished }) {
     } finally {
       setPublishing(false);
     }
+  };
+
+  const insertEmoji = (emoji) => {
+    const t = textareaRef.current;
+    if (!t) {
+      setContent((c) => c + emoji);
+      return;
+    }
+    const start = t.selectionStart;
+    const end = t.selectionEnd;
+    setContent((c) => c.slice(0, start) + emoji + c.slice(end));
+    setTimeout(() => {
+      t.focus();
+      t.selectionStart = t.selectionEnd = start + emoji.length;
+    }, 0);
+  };
+
+  const toggleImage = (url) => {
+    setImages((imgs) => (imgs.includes(url) ? imgs.filter((x) => x !== url) : [...imgs, url]));
+  };
+
+  const toggleAttachment = (att) => {
+    setAttachments((a) =>
+      a.find((x) => x.url === att.url && x.name === att.name)
+        ? a.filter((x) => !(x.url === att.url && x.name === att.name))
+        : [...a, att]
+    );
+  };
+
+  const addLink = () => {
+    if (!linkDraft.trim()) return;
+    let url = linkDraft.trim();
+    if (!url.startsWith("http")) url = "https://" + url;
+    setLinks((l) => [...l, url]);
+    setLinkDraft("");
   };
 
   if (!open) {
@@ -138,40 +234,82 @@ function AdminComposer({ me, onPublished }) {
     );
   }
 
+  const authorAvatar = postedAs === "official" ? OFFICIAL_AVATAR : me.avatar;
+  const authorName = postedAs === "official" ? "MS Park" : `${me.first_name} ${me.last_name}`;
+  const authorRole = postedAs === "official"
+    ? "Communication officielle"
+    : me.role;
+
   return (
     <div className="ms-card p-5 space-y-3" data-testid="admin-composer">
+      {/* Header + author selector */}
       <div className="flex items-start gap-3">
-        <img src={me.avatar} alt="" className="h-10 w-10 rounded-full object-cover shrink-0" />
+        <img src={authorAvatar} alt="" className="h-11 w-11 rounded-full object-cover shrink-0" />
         <div className="flex-1 min-w-0">
-          <div className="text-sm font-semibold text-[#071B34]">
-            {me.first_name} {me.last_name}
-          </div>
-          <select
-            value={category}
-            onChange={(e) => setCategory(e.target.value)}
-            data-testid="composer-category"
-            className="text-xs mt-1 rounded-full bg-[#F4F7FA] px-3 py-1 border-0 outline-none"
-          >
-            {["Direction", "RH", "Événement", "Restauration", "annonce"].map((c) => (
-              <option key={c} value={c}>
-                {c === "annonce" ? "Annonce" : c}
-              </option>
-            ))}
-          </select>
+          <div className="text-sm font-bold text-[#071B34]">{authorName}</div>
+          <div className="text-xs text-[#475569]">{authorRole}</div>
         </div>
         <button
-          onClick={() => {
-            setOpen(false);
-            setContent("");
-            setImage(null);
-          }}
+          onClick={() => setOpen(false)}
           className="flex h-8 w-8 items-center justify-center rounded-lg hover:bg-[#071B34]/5"
         >
           <X className="h-4 w-4 text-[#475569]" />
         </button>
       </div>
 
+      {/* Publier en tant que */}
+      <div>
+        <div className="text-[10px] uppercase tracking-wider text-[#475569] font-semibold mb-1.5">
+          Publier en tant que
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            onClick={() => setPostedAs("personal")}
+            data-testid="posted-as-personal"
+            className={`flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold border transition-all ${
+              postedAs === "personal"
+                ? "bg-[#3BA4FF]/10 border-[#3BA4FF] text-[#1D70B8]"
+                : "bg-white border-[#071B34]/10 text-[#475569] hover:border-[#3BA4FF]/40"
+            }`}
+          >
+            <UserIcon className="h-3.5 w-3.5" />
+            <span className="truncate">Mon compte ({me.first_name})</span>
+          </button>
+          <button
+            onClick={() => setPostedAs("official")}
+            data-testid="posted-as-official"
+            className={`flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold border transition-all ${
+              postedAs === "official"
+                ? "bg-[#071B34] border-[#071B34] text-white"
+                : "bg-white border-[#071B34]/10 text-[#475569] hover:border-[#071B34]/40"
+            }`}
+          >
+            <Building2 className="h-3.5 w-3.5" />
+            MS Park (officiel)
+          </button>
+        </div>
+      </div>
+
+      <div>
+        <label className="text-[10px] uppercase tracking-wider text-[#475569] font-semibold mb-1.5 block">
+          Catégorie
+        </label>
+        <select
+          value={category}
+          onChange={(e) => setCategory(e.target.value)}
+          data-testid="composer-category"
+          className="text-sm rounded-lg bg-[#F4F7FA] px-3 py-2 border-0 outline-none w-full"
+        >
+          {["Direction", "RH", "Événement", "Restauration", "annonce"].map((c) => (
+            <option key={c} value={c}>
+              {c === "annonce" ? "Annonce générale" : c}
+            </option>
+          ))}
+        </select>
+      </div>
+
       <textarea
+        ref={textareaRef}
         value={content}
         onChange={(e) => setContent(e.target.value)}
         rows={4}
@@ -181,52 +319,176 @@ function AdminComposer({ me, onPublished }) {
         className="ms-input w-full resize-none text-[15px]"
       />
 
-      {image && (
-        <div className="relative rounded-2xl overflow-hidden">
-          <img src={image} alt="preview" className="w-full max-h-64 object-cover" />
-          <button
-            onClick={() => setImage(null)}
-            className="absolute top-2 right-2 flex h-8 w-8 items-center justify-center rounded-full bg-black/50 text-white hover:bg-black/70"
-          >
-            <X className="h-4 w-4" />
-          </button>
+      {/* Preview images */}
+      {images.length > 0 && (
+        <div>
+          <div className={`grid gap-2 ${images.length === 1 ? "grid-cols-1" : "grid-cols-2"}`}>
+            {images.map((url) => (
+              <div key={url} className="relative rounded-xl overflow-hidden">
+                <img src={url} alt="" className="w-full h-32 object-cover" />
+                <button
+                  onClick={() => toggleImage(url)}
+                  className="absolute top-1 right-1 flex h-6 w-6 items-center justify-center rounded-full bg-black/60 text-white hover:bg-black/80"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
+      {/* Preview attachments */}
+      {attachments.length > 0 && (
+        <div className="space-y-1.5">
+          {attachments.map((a, i) => (
+            <div
+              key={`${a.url}-${i}`}
+              className="flex items-center gap-2 rounded-lg bg-[#F4F7FA] px-3 py-2"
+            >
+              <FileText className="h-4 w-4 text-[#3BA4FF] shrink-0" />
+              <div className="flex-1 text-xs font-medium text-[#071B34] truncate">{a.name}</div>
+              <button
+                onClick={() => toggleAttachment(a)}
+                className="flex h-6 w-6 items-center justify-center rounded-md hover:bg-[#071B34]/5"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Preview links */}
+      {links.length > 0 && (
+        <div className="space-y-1">
+          {links.map((l, i) => (
+            <div
+              key={l + i}
+              className="flex items-center gap-2 rounded-lg bg-[#3BA4FF]/10 px-3 py-1.5"
+            >
+              <Link2 className="h-3.5 w-3.5 text-[#3BA4FF] shrink-0" />
+              <div className="flex-1 text-xs text-[#1D70B8] truncate">{l}</div>
+              <button
+                onClick={() => setLinks((ls) => ls.filter((_, idx) => idx !== i))}
+                className="flex h-5 w-5 items-center justify-center rounded-md hover:bg-white/50"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Gallery */}
       {showGallery && (
-        <div>
+        <div className="rounded-xl bg-[#F8FAFC] p-3">
           <div className="text-[10px] uppercase tracking-wider text-[#475569] font-semibold mb-2">
-            Choisir une image (galerie MS Park)
+            Galerie MS Park — {images.length} sélectionnée{images.length > 1 ? "s" : ""}
           </div>
           <div className="grid grid-cols-4 gap-2">
-            {IMAGE_GALLERY.map((url) => (
+            {IMAGE_GALLERY.map((url) => {
+              const sel = images.includes(url);
+              return (
+                <button
+                  key={url}
+                  onClick={() => toggleImage(url)}
+                  data-testid={`gallery-${url.slice(-30, -10)}`}
+                  className={`aspect-square rounded-lg overflow-hidden border-2 transition-all ${
+                    sel ? "border-[#3BA4FF] scale-95" : "border-transparent hover:border-[#3BA4FF]/40"
+                  }`}
+                >
+                  <img src={url} alt="" className="w-full h-full object-cover" />
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Attachments library */}
+      {showAttachments && (
+        <div className="rounded-xl bg-[#F8FAFC] p-3">
+          <div className="text-[10px] uppercase tracking-wider text-[#475569] font-semibold mb-2">
+            Documents ({attachments.length} joint{attachments.length > 1 ? "s" : ""})
+          </div>
+          <div className="space-y-1">
+            {ATTACHMENTS_LIBRARY.map((a, i) => {
+              const sel = attachments.find((x) => x.url === a.url && x.name === a.name);
+              return (
+                <button
+                  key={i}
+                  onClick={() => toggleAttachment(a)}
+                  className={`w-full flex items-center gap-2 rounded-lg px-3 py-2 text-left transition-colors ${
+                    sel ? "bg-[#3BA4FF]/15" : "bg-white hover:bg-[#F4F7FA]"
+                  }`}
+                >
+                  <FileText className="h-4 w-4 text-[#3BA4FF] shrink-0" />
+                  <div className="flex-1 text-xs font-medium text-[#071B34] truncate">{a.name}</div>
+                  <span className="text-[9px] uppercase font-bold text-[#475569]">{a.type}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Emojis */}
+      {showEmojis && (
+        <div className="rounded-xl bg-[#F8FAFC] p-3">
+          <div className="text-[10px] uppercase tracking-wider text-[#475569] font-semibold mb-2">
+            Emojis
+          </div>
+          <div className="grid grid-cols-12 gap-1">
+            {EMOJIS.map((e) => (
               <button
-                key={url}
-                onClick={() => {
-                  setImage(url);
-                  setShowGallery(false);
-                }}
-                data-testid={`gallery-${url.slice(-20)}`}
-                className={`aspect-square rounded-xl overflow-hidden border-2 transition-all ${
-                  image === url ? "border-[#3BA4FF] scale-95" : "border-transparent hover:border-[#3BA4FF]/40"
-                }`}
+                key={e}
+                onClick={() => insertEmoji(e)}
+                className="text-lg hover:bg-white rounded-md p-1 transition-colors"
               >
-                <img src={url} alt="" className="w-full h-full object-cover" />
+                {e}
               </button>
             ))}
           </div>
         </div>
       )}
 
+      {/* Link input */}
+      {showLinkInput && (
+        <div className="flex gap-2">
+          <input
+            value={linkDraft}
+            onChange={(e) => setLinkDraft(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addLink())}
+            placeholder="https://exemple.com"
+            className="ms-input flex-1 text-sm"
+          />
+          <button onClick={addLink} className="ms-btn-primary !px-4">
+            <Link2 className="h-4 w-4" />
+          </button>
+        </div>
+      )}
+
+      {/* Actions bar */}
       <div className="flex items-center justify-between gap-2 border-t border-[#071B34]/5 pt-3">
-        <button
-          onClick={() => setShowGallery((s) => !s)}
-          data-testid="toggle-gallery"
-          className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold text-[#3BA4FF] hover:bg-[#3BA4FF]/10"
-        >
-          <ImageIcon className="h-4 w-4" />
-          {showGallery ? "Fermer galerie" : "Ajouter une image"}
-        </button>
+        <div className="flex items-center gap-1">
+          <ToolBtn active={showGallery} onClick={() => setShowGallery((s) => !s)} testid="tool-photo">
+            <ImageIcon className="h-4 w-4" />
+            <span className="hidden sm:inline">Photos</span>
+          </ToolBtn>
+          <ToolBtn active={showAttachments} onClick={() => setShowAttachments((s) => !s)} testid="tool-attach">
+            <Paperclip className="h-4 w-4" />
+            <span className="hidden sm:inline">Documents</span>
+          </ToolBtn>
+          <ToolBtn active={showEmojis} onClick={() => setShowEmojis((s) => !s)} testid="tool-emoji">
+            <Smile className="h-4 w-4" />
+            <span className="hidden sm:inline">Emoji</span>
+          </ToolBtn>
+          <ToolBtn active={showLinkInput} onClick={() => setShowLinkInput((s) => !s)} testid="tool-link">
+            <Link2 className="h-4 w-4" />
+            <span className="hidden sm:inline">Lien</span>
+          </ToolBtn>
+        </div>
         <button
           onClick={publish}
           disabled={!content.trim() || publishing}
@@ -241,17 +503,45 @@ function AdminComposer({ me, onPublished }) {
   );
 }
 
+function ToolBtn({ active, onClick, testid, children }) {
+  return (
+    <button
+      onClick={onClick}
+      data-testid={testid}
+      className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors ${
+        active
+          ? "bg-[#3BA4FF]/15 text-[#1D70B8]"
+          : "text-[#475569] hover:bg-[#071B34]/5"
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
+
+// ────────────────────── Post card
 
 function PostCard({ post, me, onLike, findEmployee, refresh }) {
-  const author = findEmployee(post.author_id) || {
-    first_name: "Inconnu",
-    last_name: "",
-    role: "",
-    avatar: "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=200&h=200&fit=crop",
-  };
+  const authorFromDb = findEmployee(post.author_id);
+  const isOfficial = post.posted_as === "official";
+  const author = isOfficial
+    ? {
+        first_name: "MS",
+        last_name: "Park",
+        role: "Communication officielle",
+        avatar: OFFICIAL_AVATAR,
+      }
+    : authorFromDb || {
+        first_name: "Inconnu",
+        last_name: "",
+        role: "",
+        avatar: "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=200",
+      };
   const liked = me ? post.likes.includes(me.id) : false;
   const [showComments, setShowComments] = useState(false);
   const [commentDraft, setCommentDraft] = useState("");
+
+  const images = post.images?.length ? post.images : post.image ? [post.image] : [];
 
   const sendComment = async (e) => {
     e.preventDefault();
@@ -265,15 +555,27 @@ function PostCard({ post, me, onLike, findEmployee, refresh }) {
     <article className="ms-card overflow-hidden" data-testid={`post-${post.id}`}>
       <div className="p-5">
         <div className="flex items-start gap-3">
-          <img
-            src={author.avatar}
-            alt={author.first_name}
-            className="h-11 w-11 rounded-full object-cover ring-2 ring-white shadow-sm"
-          />
+          <div className="relative shrink-0">
+            <img
+              src={author.avatar}
+              alt=""
+              className={`h-11 w-11 rounded-full object-cover ${
+                isOfficial ? "ring-2 ring-[#071B34]" : "ring-2 ring-white shadow-sm"
+              }`}
+            />
+            {isOfficial && (
+              <span
+                className="absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-[#071B34] ring-2 ring-white"
+                title="Compte officiel"
+              >
+                <Building2 className="h-3 w-3 text-white" />
+              </span>
+            )}
+          </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-sm font-semibold text-[#071B34]">
-                {author.first_name} {author.last_name}
+              <span className="text-sm font-bold text-[#071B34]">
+                {isOfficial ? "MS Park" : `${author.first_name} ${author.last_name}`}
               </span>
               <span className={`ms-chip ${categoryColor[post.category] || categoryColor.annonce}`}>
                 {post.category}
@@ -299,7 +601,13 @@ function PostCard({ post, me, onLike, findEmployee, refresh }) {
             </button>
           )}
         </div>
-        <p className="mt-3 text-[15px] leading-relaxed text-[#071B34] whitespace-pre-wrap">{post.content}</p>
+
+        {post.content && (
+          <p className="mt-3 text-[15px] leading-relaxed text-[#071B34] whitespace-pre-wrap break-words">
+            {post.content}
+          </p>
+        )}
+
         {post.hashtags?.length > 0 && (
           <div className="mt-2 flex flex-wrap gap-1.5">
             {post.hashtags.map((h) => (
@@ -309,8 +617,56 @@ function PostCard({ post, me, onLike, findEmployee, refresh }) {
             ))}
           </div>
         )}
+
+        {post.links?.length > 0 && (
+          <div className="mt-3 space-y-1.5">
+            {post.links.map((l, i) => (
+              <a
+                key={l + i}
+                href={l}
+                target="_blank"
+                rel="noreferrer"
+                className="flex items-center gap-2 rounded-lg bg-[#3BA4FF]/10 hover:bg-[#3BA4FF]/20 px-3 py-2 text-sm text-[#1D70B8] truncate transition-colors"
+              >
+                <Link2 className="h-3.5 w-3.5 shrink-0" />
+                <span className="truncate">{l}</span>
+              </a>
+            ))}
+          </div>
+        )}
+
+        {post.attachments?.length > 0 && (
+          <div className="mt-3 space-y-1.5">
+            {post.attachments.map((a, i) => (
+              <a
+                key={`${a.url}-${i}`}
+                href={a.url}
+                target="_blank"
+                rel="noreferrer"
+                className="flex items-center gap-2 rounded-lg bg-[#F4F7FA] hover:bg-[#071B34]/5 px-3 py-2 text-sm text-[#071B34] transition-colors"
+              >
+                <FileText className="h-4 w-4 text-[#3BA4FF] shrink-0" />
+                <span className="flex-1 font-medium truncate">{a.name}</span>
+                <span className="text-[9px] uppercase font-bold text-[#475569]">{a.type}</span>
+              </a>
+            ))}
+          </div>
+        )}
       </div>
-      {post.image && <img src={post.image} alt="" className="w-full max-h-96 object-cover" />}
+
+      {images.length > 0 && (
+        <div className={`grid gap-1 ${images.length === 1 ? "grid-cols-1" : images.length === 2 ? "grid-cols-2" : "grid-cols-2"}`}>
+          {images.slice(0, 4).map((url, i) => (
+            <img
+              key={url + i}
+              src={url}
+              alt=""
+              className={`w-full object-cover ${images.length === 1 ? "max-h-96" : "h-48"}`}
+            />
+          ))}
+        </div>
+      )}
+
       <div className="px-5 py-3 border-t border-[#071B34]/5 flex items-center gap-4 text-xs text-[#475569]">
         <button
           onClick={onLike}
@@ -331,13 +687,14 @@ function PostCard({ post, me, onLike, findEmployee, refresh }) {
           {post.comments.length}
         </button>
       </div>
+
       {showComments && (
         <div className="px-5 pb-5 space-y-3">
           {post.comments.map((c) => {
             const ca = findEmployee(c.author_id) || { first_name: "?", avatar: "" };
             return (
               <div key={c.id} className="flex items-start gap-3">
-                <img src={ca.avatar} alt={ca.first_name} className="h-8 w-8 rounded-full object-cover" />
+                <img src={ca.avatar} alt="" className="h-8 w-8 rounded-full object-cover" />
                 <div className="flex-1 rounded-2xl bg-[#F4F7FA] px-4 py-2">
                   <div className="text-xs font-semibold text-[#071B34]">
                     {ca.first_name} {ca.last_name}
@@ -349,7 +706,7 @@ function PostCard({ post, me, onLike, findEmployee, refresh }) {
           })}
           {me && (
             <form onSubmit={sendComment} className="flex items-center gap-2">
-              <img src={me.avatar} alt="me" className="h-8 w-8 rounded-full object-cover" />
+              <img src={me.avatar} alt="" className="h-8 w-8 rounded-full object-cover" />
               <input
                 value={commentDraft}
                 onChange={(e) => setCommentDraft(e.target.value)}

@@ -170,8 +170,12 @@ class Order(BaseModel):
 class PostCreate(BaseModel):
     content: str
     category: Optional[str] = "annonce"
-    image: Optional[str] = None
+    image: Optional[str] = None  # legacy single image
+    images: Optional[List[str]] = None  # multiple photos
+    attachments: Optional[List[dict]] = None  # [{name, url, type}]
+    links: Optional[List[str]] = None
     hashtags: List[str] = []
+    posted_as: Optional[str] = "personal"  # "personal" | "official"
 
 
 class Comment(BaseModel):
@@ -449,7 +453,7 @@ async def _seed_once() -> None:
     schedule: list[dict] = []
     today = date.today()
     start_period = today - timedelta(days=28)
-    end_period = today + timedelta(days=365)
+    end_period = min(today + timedelta(days=365), SHIFT_HORIZON_CAP)
     cur = start_period
     # Rotation pattern for Idriss — TOTAL 24h/week, matches his contract exactly
     pattern = {
@@ -1054,7 +1058,10 @@ async def root():
 async def me():
     emp = await db.employees.find_one({"id": current_user()}, {"_id": 0})
     if not emp:
-        raise HTTPException(404, "Current employee not found")
+        # Fall back to the seed employee so a stale localStorage ID never breaks the UI
+        emp = await db.employees.find_one({"id": CURRENT_EMPLOYEE_ID}, {"_id": 0})
+        if not emp:
+            raise HTTPException(404, "Current employee not found")
     quota = ROLE_QUOTAS.get(emp.get("role_category", "employe"), 20)
     emp["daily_quota"] = quota
     return emp
@@ -1470,7 +1477,11 @@ async def create_post(payload: PostCreate):
         "category": payload.category or "annonce",
         "content": payload.content,
         "image": payload.image,
+        "images": payload.images or ([payload.image] if payload.image else []),
+        "attachments": payload.attachments or [],
+        "links": payload.links or [],
         "hashtags": payload.hashtags or [],
+        "posted_as": payload.posted_as or "personal",
         "likes": [],
         "comments": [],
         "created_at": _now(),
@@ -2144,9 +2155,20 @@ def _entry_from_pattern(emp: dict, day: date) -> dict:
     }
 
 
+# ─── Constants
+SHIFT_HORIZON_CAP = date(2026, 8, 1)
+"""Auto-generation of shifts stops at this date. Beyond this cap, the admin
+must build the planning manually — but validated leaves, RTT and exceptional
+events are still allowed and preserved."""
+
+
+def _shift_horizon_cap() -> date:
+    return SHIFT_HORIZON_CAP
+
+
 async def _ensure_range(employee_id: str, start: date, end: date) -> None:
     """Materialize any missing schedule days between [start, end] from the employee's pattern.
-    Idempotent — never overwrites existing entries."""
+    Only auto-generates up to SHIFT_HORIZON_CAP. Idempotent."""
     emp = await db.employees.find_one({"id": employee_id}, {"_id": 0})
     if not emp:
         return
@@ -2157,10 +2179,11 @@ async def _ensure_range(employee_id: str, start: date, end: date) -> None:
         {"_id": 0, "day": 1},
     ):
         existing_days.add(e["day"])
+    cap = _shift_horizon_cap()
     to_insert = []
     d = start
     while d <= end:
-        if d.isoformat() not in existing_days:
+        if d.isoformat() not in existing_days and d <= cap:
             to_insert.append(_entry_from_pattern(emp, d))
         d = d + timedelta(days=1)
     if to_insert:
@@ -2356,6 +2379,8 @@ async def admin_approve_request(rid: str, payload: RequestDecision):
         # STEP 1: Materialize any missing days from the employee's weekly pattern
         # so a CP request in a future/uncovered period still creates leave entries.
         await _ensure_range(emp_id, start, end)
+        # Load the employee once — needed for pattern lookup beyond the horizon
+        emp_doc = await db.employees.find_one({"id": emp_id}, {"_id": 0})
         new_type = "leave" if req["type"] == "cp" else "rtt"
         note = "Congé payé (validé)" if req["type"] == "cp" else "RTT (validé)"
         d = start
@@ -2364,30 +2389,53 @@ async def admin_approve_request(rid: str, payload: RequestDecision):
             existing = await db.schedules.find_one(
                 {"employee_id": emp_id, "day": d.isoformat()}, {"_id": 0}
             )
-            # Rule 1: OFF days → skip, no consumption (user is off anyway)
-            # Rule 2: already leave/rtt/training → skip
-            if not existing or existing.get("type") in ("off", "leave", "rtt", "training"):
-                d = d + timedelta(days=1)
-                continue
-            # Rule 3: shift day → convert to leave/rtt. Store the covered minutes so
-            # contract calc keeps working, but CLEAR start/end/pause so the UI doesn't show hours.
-            covered = _covered_minutes(existing)
-            await db.schedules.update_one(
-                {"employee_id": emp_id, "day": d.isoformat()},
-                {"$set": {
+            if existing:
+                # Rule 1: OFF/leave/rtt/training → skip
+                if existing.get("type") in ("off", "leave", "rtt", "training"):
+                    d = d + timedelta(days=1)
+                    continue
+                # Rule 2: shift day → convert to leave/rtt. Store the covered minutes so
+                # contract calc keeps working, but CLEAR start/end/pause so the UI doesn't show hours.
+                covered = _covered_minutes(existing)
+                await db.schedules.update_one(
+                    {"employee_id": emp_id, "day": d.isoformat()},
+                    {"$set": {
+                        "type": new_type,
+                        "note": note,
+                        "start": None,
+                        "end": None,
+                        "pause_start": None,
+                        "pause_end": None,
+                        "break_minutes": 0,
+                        "covered_minutes": covered,
+                    }},
+                )
+                await db.badging.delete_many({"employee_id": emp_id, "day": d.isoformat()})
+                days_consumed += 1
+            else:
+                # Rule 3: beyond auto-generation horizon (no existing entry).
+                # Use the weekly pattern to decide whether this is a working day.
+                pattern_entry = _entry_from_pattern(emp_doc, d) if emp_doc else {"type": "off"}
+                if pattern_entry.get("type") == "off":
+                    # Pattern says day-off → skip, no consumption
+                    d = d + timedelta(days=1)
+                    continue
+                # Create a leave/rtt entry directly, using pattern hours only for calc
+                covered = _covered_minutes(pattern_entry)
+                new_entry = {
+                    "id": _id(),
+                    "employee_id": emp_id,
+                    "day": d.isoformat(),
                     "type": new_type,
-                    "note": note,
-                    "start": None,
-                    "end": None,
-                    "pause_start": None,
-                    "pause_end": None,
+                    "start": None, "end": None,
+                    "pause_start": None, "pause_end": None,
                     "break_minutes": 0,
+                    "location": None, "manager": None, "service": None,
+                    "note": note,
                     "covered_minutes": covered,
-                }},
-            )
-            # Remove any real badging for that day (paid leave, not clocked-in)
-            await db.badging.delete_many({"employee_id": emp_id, "day": d.isoformat()})
-            days_consumed += 1
+                }
+                await db.schedules.insert_one(new_entry)
+                days_consumed += 1
             d = d + timedelta(days=1)
 
         # Decrement counter on employee (only for real working-days consumed)
@@ -2477,7 +2525,7 @@ class LeavePreview(BaseModel):
 @api.post("/leave/preview")
 async def leave_preview(payload: LeavePreview):
     """Return how many working-days a CP/RTT request would actually consume.
-    Off days, existing leaves/rtt, or days without a shift are excluded."""
+    Off days, existing leaves/rtt, or non-working days (via pattern) are excluded."""
     try:
         start = date.fromisoformat(payload.start_date)
         end = date.fromisoformat(payload.end_date)
@@ -2485,8 +2533,8 @@ async def leave_preview(payload: LeavePreview):
         raise HTTPException(400, "Dates invalides")
     if end < start:
         raise HTTPException(400, "La fin doit être postérieure au début")
-    # Materialize the range for accurate calc
     await _ensure_range(current_user(), start, end)
+    emp = await db.employees.find_one({"id": current_user()}, {"_id": 0})
     schs = await db.schedules.find(
         {"employee_id": current_user(),
          "day": {"$gte": start.isoformat(), "$lte": end.isoformat()}},
@@ -2501,20 +2549,32 @@ async def leave_preview(payload: LeavePreview):
     breakdown = []
     while d <= end:
         s = by_day.get(d.isoformat())
-        if not s:
-            unknown += 1
-            breakdown.append({"day": d.isoformat(), "type": "unknown", "consumed": False, "minutes": 0})
-        elif s.get("type") == "off":
-            off += 1
-            breakdown.append({"day": d.isoformat(), "type": "off", "consumed": False, "minutes": 0})
-        elif s.get("type") == "shift":
-            m = _covered_minutes(s)
-            total_minutes += m
-            working += 1
-            breakdown.append({"day": d.isoformat(), "type": "shift", "consumed": True, "minutes": m,
-                              "start": s.get("start"), "end": s.get("end")})
+        if s:
+            if s.get("type") == "off":
+                off += 1
+                breakdown.append({"day": d.isoformat(), "type": "off", "consumed": False, "minutes": 0})
+            elif s.get("type") == "shift":
+                m = _covered_minutes(s)
+                total_minutes += m
+                working += 1
+                breakdown.append({"day": d.isoformat(), "type": "shift", "consumed": True, "minutes": m,
+                                  "start": s.get("start"), "end": s.get("end")})
+            else:
+                breakdown.append({"day": d.isoformat(), "type": s.get("type"), "consumed": False, "minutes": 0})
         else:
-            breakdown.append({"day": d.isoformat(), "type": s.get("type"), "consumed": False, "minutes": 0})
+            # Beyond auto-generation horizon → use weekly pattern
+            pattern_entry = _entry_from_pattern(emp, d) if emp else {}
+            if pattern_entry.get("type") == "shift":
+                m = _covered_minutes(pattern_entry)
+                total_minutes += m
+                working += 1
+                breakdown.append({"day": d.isoformat(), "type": "shift", "consumed": True, "minutes": m,
+                                  "start": pattern_entry.get("start"), "end": pattern_entry.get("end"),
+                                  "beyond_horizon": True})
+            else:
+                off += 1
+                breakdown.append({"day": d.isoformat(), "type": "off", "consumed": False, "minutes": 0,
+                                  "beyond_horizon": True})
         d = d + timedelta(days=1)
     return {
         "days_total": (end - start).days + 1,
