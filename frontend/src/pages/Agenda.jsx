@@ -238,47 +238,36 @@ export default function Agenda() {
                 </p>
               )}
 
-              <div className="mt-5 flex flex-col sm:flex-row gap-2">
-                {(selected.signup_enabled || selected.needs_registration) ? (
-                  selected.signup_url ? (
+              <div className="mt-5 flex flex-col sm:flex-row gap-2 flex-wrap">
+                {selected.cta_enabled && selected.cta_text ? (
+                  selected.cta_target_type === "news" && selected.cta_target_id ? (
                     <a
-                      href={selected.signup_url}
+                      href={`/actualites/${selected.cta_target_id}`}
+                      data-testid="event-cta"
+                      className="ms-btn-primary flex-1 min-w-[200px]"
+                    >
+                      {selected.cta_text}
+                    </a>
+                  ) : selected.cta_target_type === "internal" && selected.cta_url ? (
+                    <a
+                      href={selected.cta_url}
+                      data-testid="event-cta"
+                      className="ms-btn-primary flex-1 min-w-[200px]"
+                    >
+                      {selected.cta_text}
+                    </a>
+                  ) : selected.cta_url ? (
+                    <a
+                      href={selected.cta_url}
                       target="_blank"
                       rel="noreferrer"
-                      data-testid="event-register"
-                      className="ms-btn-primary flex-1"
+                      data-testid="event-cta"
+                      className="ms-btn-primary flex-1 min-w-[200px]"
                     >
-                      <Users className="h-4 w-4" /> S'inscrire à cet événement
+                      {selected.cta_text} <ExternalLink className="h-3.5 w-3.5" />
                     </a>
-                  ) : (
-                    <a
-                      href={`mailto:rh@mspark.fr?subject=Inscription : ${encodeURIComponent(selected.title)}`}
-                      data-testid="event-register"
-                      className="ms-btn-primary flex-1"
-                    >
-                      <Users className="h-4 w-4" /> S'inscrire à cet événement
-                    </a>
-                  )
-                ) : (
-                  <div className="flex-1 rounded-xl bg-[#F4F7FA] px-4 py-2.5 text-xs text-[#475569] text-center">
-                    Aucune inscription requise
-                  </div>
-                )}
-                {selected.linked_news_id && (
-                  <a href={`/actualites/${selected.linked_news_id}`} className="ms-btn-outline">
-                    Voir l'actualité liée <ExternalLink className="h-3.5 w-3.5" />
-                  </a>
-                )}
-                {selected.external_link && (
-                  <a
-                    href={selected.external_link}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="ms-btn-outline"
-                  >
-                    Ouvrir le lien <ExternalLink className="h-3.5 w-3.5" />
-                  </a>
-                )}
+                  ) : null
+                ) : null}
                 <button
                   onClick={() => setSelected(null)}
                   className="ms-btn-outline"

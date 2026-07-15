@@ -47,6 +47,18 @@ Intranet premium pour employés du parc MS Park + espace administrateur pour le 
 - `/app/frontend/src/lib/api.js` — interceptor axios ajoutant `X-Employee-Id` depuis localStorage
 
 ## Changelog
+### 2026-08 — Bouton d'événement personnalisable + historique badgeage
+- **Bouton d'événement 100% personnalisable** :
+  - Toggle activation/désactivation
+  - Texte libre (max 40 car.) + 9 raccourcis préréglés (Réserver, En savoir plus, Acheter un billet, Découvrir, Voir l'actualité, Voir le programme, Accéder au site, Répondre, Nous contacter)
+  - 4 types de destination : Actualité (ID pérenne), Lien externe, Page interne, Formulaire/billetterie
+  - Aperçu live du bouton avant sauvegarde
+  - Backend : nouveaux champs `cta_enabled`, `cta_text`, `cta_target_type`, `cta_target_id`, `cta_url` sur `EventPayload` + migration automatique depuis les legacy `signup_enabled`/`linked_news_id`/`external_link` via `_normalize_event`.
+  - Frontend `Agenda.jsx` modal + `NewsDetail` `EventDetail` utilisent uniquement le nouveau CTA unifié.
+- **Historique badgeage** :
+  - Filtre backend `filter_range=day/week/month` désormais roulant (aujourd'hui / 7 jours / 30 jours) au lieu de calendaire — l'historique passé s'affiche toujours.
+  - Frontend Badgeage.jsx : n'affiche que les **5 derniers jours** + bouton **"↓ Voir plus (N jours supplémentaires)"** / **"↑ Réduire"**.
+
 ### 2026-08 — Titres, redirections, image agenda, rich text & sync globale
 - **Titre obligatoire** sur les publications du fil (`PostCreate.title` requis backend, input dédié composer max 140 car).
 - **Redirection par ID unique** : `NewsDetail` (`/actualites/:id`) résout news → fallback post automatique. Le lien reste valide même si le titre change.

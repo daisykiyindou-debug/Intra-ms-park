@@ -18,6 +18,10 @@ export default function Badgeage() {
   const [data, setData] = useState([]);
   const [lostOpen, setLostOpen] = useState(false);
   const [lostForm, setLostForm] = useState({ reason: "", last_seen_location: "", contact_phone: "" });
+  const [expanded, setExpanded] = useState(false);
+
+  // Reset expansion on range change
+  useEffect(() => { setExpanded(false); }, [range, statusFilter]);
 
   useEffect(() => {
     const load = () => api.get(`/badging?filter_range=${range}`).then((r) => setData(r.data));
@@ -191,38 +195,51 @@ export default function Badgeage() {
             Aucun badgeage sur cette période.
           </div>
         ) : (
-          filtered.map((b) => {
-            const anom = b.anomaly ? anomalyMeta[b.anomaly] : null;
-            return (
-              <div
-                key={b.id}
-                className="grid grid-cols-12 gap-3 px-5 py-4 border-b border-[#071B34]/5 last:border-none items-center hover:bg-[#F4F7FA]/50 transition-colors text-sm"
+          <>
+            {(expanded ? filtered : filtered.slice(0, 5)).map((b) => {
+              const anom = b.anomaly ? anomalyMeta[b.anomaly] : null;
+              return (
+                <div
+                  key={b.id}
+                  className="grid grid-cols-12 gap-3 px-5 py-4 border-b border-[#071B34]/5 last:border-none items-center hover:bg-[#F4F7FA]/50 transition-colors text-sm"
+                >
+                  <div className="col-span-3">
+                    <div className="font-semibold text-[#071B34]">{formatDateFr(b.day)}</div>
+                    {b.note && <div className="text-[11px] text-[#475569]">{b.note}</div>}
+                  </div>
+                  <div className="col-span-1 font-mono text-[#071B34]">{b.clock_in || "—"}</div>
+                  <div className="col-span-1 font-mono text-[#F59E0B]">{b.pause_out || "—"}</div>
+                  <div className="col-span-1 font-mono text-[#F59E0B]">{b.pause_in || "—"}</div>
+                  <div className="col-span-1 font-mono text-[#071B34]">{b.clock_out || "—"}</div>
+                  <div className="col-span-2 font-semibold text-[#071B34]">
+                    {b.worked_minutes ? formatMinutes(b.worked_minutes) : "—"}
+                  </div>
+                  <div className="col-span-3 flex justify-end">
+                    {anom ? (
+                      <span className="ms-chip" style={{ background: anom.bg, color: anom.color }}>
+                        <AlertTriangle className="h-3 w-3" /> {anom.label}
+                      </span>
+                    ) : (
+                      <span className="ms-chip" style={{ background: "#D1FAE5", color: "#065F46" }}>
+                        Conforme
+                      </span>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+            {filtered.length > 5 && (
+              <button
+                onClick={() => setExpanded((v) => !v)}
+                data-testid="badge-history-toggle"
+                className="w-full py-3 text-xs font-semibold text-[#3BA4FF] hover:bg-[#3BA4FF]/5 transition-colors border-t border-[#071B34]/5"
               >
-                <div className="col-span-3">
-                  <div className="font-semibold text-[#071B34]">{formatDateFr(b.day)}</div>
-                  {b.note && <div className="text-[11px] text-[#475569]">{b.note}</div>}
-                </div>
-                <div className="col-span-1 font-mono text-[#071B34]">{b.clock_in || "—"}</div>
-                <div className="col-span-1 font-mono text-[#F59E0B]">{b.pause_out || "—"}</div>
-                <div className="col-span-1 font-mono text-[#F59E0B]">{b.pause_in || "—"}</div>
-                <div className="col-span-1 font-mono text-[#071B34]">{b.clock_out || "—"}</div>
-                <div className="col-span-2 font-semibold text-[#071B34]">
-                  {b.worked_minutes ? formatMinutes(b.worked_minutes) : "—"}
-                </div>
-                <div className="col-span-3 flex justify-end">
-                  {anom ? (
-                    <span className="ms-chip" style={{ background: anom.bg, color: anom.color }}>
-                      <AlertTriangle className="h-3 w-3" /> {anom.label}
-                    </span>
-                  ) : (
-                    <span className="ms-chip" style={{ background: "#D1FAE5", color: "#065F46" }}>
-                      Conforme
-                    </span>
-                  )}
-                </div>
-              </div>
-            );
-          })
+                {expanded
+                  ? `↑ Réduire — afficher les 5 derniers jours`
+                  : `↓ Voir plus (${filtered.length - 5} jour${filtered.length - 5 > 1 ? "s" : ""} supplémentaire${filtered.length - 5 > 1 ? "s" : ""})`}
+              </button>
+            )}
+          </>
         )}
       </div>
 

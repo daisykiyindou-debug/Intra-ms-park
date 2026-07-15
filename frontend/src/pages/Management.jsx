@@ -2039,6 +2039,13 @@ function EventEditor({ event, news, onClose, onSaved }) {
     signup_url: event?.signup_url || "",
     linked_news_id: event?.linked_news_id || "",
     external_link: event?.external_link || "",
+    // ─── Unified CTA button
+    cta_enabled: event?.cta_enabled ?? (event?.signup_enabled || !!event?.linked_news_id || !!event?.external_link) ?? false,
+    cta_text: event?.cta_text || "",
+    cta_target_type: event?.cta_target_type
+      || (event?.linked_news_id ? "news" : event?.external_link ? "external" : event?.signup_url ? "signup" : "news"),
+    cta_target_id: event?.cta_target_id || event?.linked_news_id || "",
+    cta_url: event?.cta_url || event?.external_link || event?.signup_url || "",
     group_targets: event?.group_targets || ["all"],
     employee_targets: event?.employee_targets || [],
   });
@@ -2283,58 +2290,145 @@ function EventEditor({ event, news, onClose, onSaved }) {
             </div>
           </details>
 
-          <div className="rounded-xl border border-[#071B34]/5 p-3 space-y-2">
-            <label className="flex items-center gap-2 text-xs font-semibold text-[#071B34]">
+          {/* ───────── Unified action button configurator ───────── */}
+          <div className="rounded-xl border border-[#071B34]/5 p-3 space-y-3">
+            <label className="flex items-center justify-between gap-2 text-sm font-semibold text-[#071B34]">
+              <span className="flex items-center gap-2">
+                <span className="inline-block h-2 w-2 rounded-full bg-[#3BA4FF]" />
+                Bouton d'action sur l'événement
+              </span>
               <input
                 type="checkbox"
-                checked={form.signup_enabled}
-                onChange={(e) => setForm({ ...form, signup_enabled: e.target.checked })}
-                data-testid="event-signup-toggle"
+                checked={form.cta_enabled}
+                onChange={(e) => setForm({ ...form, cta_enabled: e.target.checked })}
+                data-testid="event-cta-toggle"
                 className="h-4 w-4 accent-[#3BA4FF]"
               />
-              Inscription requise
             </label>
-            {form.signup_enabled && (
-              <input
-                value={form.signup_url}
-                onChange={(e) => setForm({ ...form, signup_url: e.target.value })}
-                placeholder="URL d'inscription ou mailto:… (facultatif)"
-                className="ms-input"
-              />
-            )}
-          </div>
 
-          <div>
-            <label className="ms-overline">Actualité liée (optionnel)</label>
-            <select
-              value={form.linked_news_id}
-              onChange={(e) => setForm({ ...form, linked_news_id: e.target.value })}
-              className="ms-input mt-2"
-              data-testid="event-linked-news"
-            >
-              <option value="">— Aucune —</option>
-              {news.map((n) => (
-                <option key={n.id} value={n.id}>
-                  {n.title}
-                  {n.kind === "post" ? " · Fil" : n.kind === "news" ? " · Carrousel" : ""}
-                </option>
-              ))}
-            </select>
-            {form.linked_news_id && (
-              <div className="mt-1 text-[10px] text-[#475569]">
-                Le bouton "Voir l'actualité" ouvrira directement cette publication.
+            {form.cta_enabled && (
+              <>
+                <div>
+                  <label className="ms-overline">Texte du bouton</label>
+                  <input
+                    value={form.cta_text}
+                    onChange={(e) => setForm({ ...form, cta_text: e.target.value })}
+                    placeholder="Ex. Réserver, En savoir plus, Voir le programme…"
+                    data-testid="event-cta-text"
+                    maxLength={40}
+                    className="ms-input mt-2"
+                  />
+                  <div className="mt-1 flex flex-wrap gap-1">
+                    {["Réserver", "En savoir plus", "Acheter un billet", "Découvrir", "Voir l'actualité", "Voir le programme", "Accéder au site", "Répondre", "Nous contacter"].map((t) => (
+                      <button
+                        key={t}
+                        type="button"
+                        onClick={() => setForm({ ...form, cta_text: t })}
+                        className="text-[10px] rounded-md px-2 py-1 bg-[#F4F7FA] hover:bg-[#071B34]/8 text-[#475569] font-semibold"
+                      >
+                        {t}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="ms-overline">Destination du bouton</label>
+                  <div className="grid grid-cols-4 gap-1 mt-2">
+                    {[
+                      ["news", "Actualité"],
+                      ["external", "Lien externe"],
+                      ["internal", "Page interne"],
+                      ["signup", "Formulaire"],
+                    ].map(([v, l]) => (
+                      <button
+                        key={v}
+                        type="button"
+                        onClick={() => setForm({ ...form, cta_target_type: v, cta_target_id: "", cta_url: "" })}
+                        data-testid={`event-cta-target-${v}`}
+                        className={`text-[10px] font-semibold rounded-lg py-1.5 transition-colors ${
+                          form.cta_target_type === v
+                            ? "bg-[#071B34] text-white"
+                            : "bg-[#F4F7FA] text-[#475569] hover:bg-[#071B34]/5"
+                        }`}
+                      >
+                        {l}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="mt-2">
+                    {form.cta_target_type === "news" && (
+                      <>
+                        <select
+                          value={form.cta_target_id}
+                          onChange={(e) => setForm({ ...form, cta_target_id: e.target.value })}
+                          data-testid="event-cta-news-select"
+                          className="ms-input"
+                        >
+                          <option value="">— Choisir une actualité —</option>
+                          {news.map((n) => (
+                            <option key={n.id} value={n.id}>
+                              {n.title}
+                              {n.kind === "post" ? " · Fil" : n.kind === "news" ? " · Carrousel" : ""}
+                            </option>
+                          ))}
+                        </select>
+                        {form.cta_target_id && (
+                          <div className="mt-1 text-[10px] text-[#475569]">
+                            ID enregistré : <code className="text-[#3BA4FF]">{form.cta_target_id}</code> — la
+                            redirection restera valide même si le titre change.
+                          </div>
+                        )}
+                      </>
+                    )}
+                    {form.cta_target_type === "external" && (
+                      <input
+                        value={form.cta_url}
+                        onChange={(e) => setForm({ ...form, cta_url: e.target.value })}
+                        placeholder="https://…"
+                        data-testid="event-cta-external-url"
+                        className="ms-input"
+                      />
+                    )}
+                    {form.cta_target_type === "internal" && (
+                      <input
+                        value={form.cta_url}
+                        onChange={(e) => setForm({ ...form, cta_url: e.target.value })}
+                        placeholder="Ex. /agenda ou /rh/planning"
+                        className="ms-input"
+                      />
+                    )}
+                    {form.cta_target_type === "signup" && (
+                      <input
+                        value={form.cta_url}
+                        onChange={(e) => setForm({ ...form, cta_url: e.target.value })}
+                        placeholder="URL du formulaire, billetterie ou mailto:rh@mspark.fr…"
+                        className="ms-input"
+                      />
+                    )}
+                  </div>
+                </div>
+
+                {/* Live preview of the final button */}
+                <div className="rounded-lg bg-[#F8FAFC] p-3">
+                  <div className="text-[10px] uppercase tracking-wider font-semibold text-[#475569] mb-2">
+                    Aperçu du bouton
+                  </div>
+                  <div
+                    className="ms-btn-primary inline-flex select-none pointer-events-none"
+                    data-testid="event-cta-preview"
+                  >
+                    {form.cta_text || "En savoir plus"}
+                  </div>
+                </div>
+              </>
+            )}
+            {!form.cta_enabled && (
+              <div className="text-[11px] text-[#475569] italic">
+                Aucun bouton ne sera affiché sur la fiche de l'événement.
               </div>
             )}
-          </div>
-
-          <div>
-            <label className="ms-overline">Lien externe (optionnel)</label>
-            <input
-              value={form.external_link}
-              onChange={(e) => setForm({ ...form, external_link: e.target.value })}
-              placeholder="https://…"
-              className="ms-input mt-2"
-            />
           </div>
 
           <div className="flex gap-2 pt-3">

@@ -187,27 +187,27 @@ export function EventDetail() {
             </div>
           )}
           <div className="mt-6 flex flex-wrap gap-2">
-            {item.signup_enabled && item.signup_url && (
-              <a
-                href={item.signup_url}
-                target="_blank"
-                rel="noreferrer"
-                data-testid="event-signup"
-                className="ms-btn-primary"
-              >
-                S'inscrire à l'événement
-              </a>
-            )}
-            {item.linked_news_id && (
-              <Link to={`/actualites/${item.linked_news_id}`} className="ms-btn-outline">
-                Voir l'actualité liée
-              </Link>
-            )}
-            {item.external_link && (
-              <a href={item.external_link} target="_blank" rel="noreferrer" className="ms-btn-outline">
-                Ouvrir le lien <ExternalLink className="h-3.5 w-3.5" />
-              </a>
-            )}
+            {item.cta_enabled && item.cta_text ? (
+              item.cta_target_type === "news" && item.cta_target_id ? (
+                <Link to={`/actualites/${item.cta_target_id}`} className="ms-btn-primary">
+                  {item.cta_text}
+                </Link>
+              ) : item.cta_target_type === "internal" && item.cta_url ? (
+                <Link to={item.cta_url} className="ms-btn-primary">
+                  {item.cta_text}
+                </Link>
+              ) : item.cta_url ? (
+                <a
+                  href={item.cta_url}
+                  target="_blank"
+                  rel="noreferrer"
+                  data-testid="event-cta"
+                  className="ms-btn-primary"
+                >
+                  {item.cta_text} <ExternalLink className="h-3.5 w-3.5" />
+                </a>
+              ) : null
+            ) : null}
           </div>
         </div>
       </article>

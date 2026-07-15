@@ -1426,12 +1426,14 @@ def _compute_today_badging(sched: dict, employee_id: str) -> Optional[dict]:
 @api.get("/badging")
 async def get_badging(filter_range: str = "month"):
     today_d = _now_paris().date()
+    # Rolling windows so the user always sees past history, not just the
+    # calendar-current period. The frontend labels them "Jour / Semaine / Mois".
     if filter_range == "day":
-        start = today_d
+        start = today_d  # today only (live card handles it)
     elif filter_range == "week":
-        start = today_d - timedelta(days=today_d.weekday())
+        start = today_d - timedelta(days=7)
     else:
-        start = today_d.replace(day=1)
+        start = today_d - timedelta(days=30)
 
     # Historical entries — exclude today (rebuilt live from planning)
     items = await db.badging.find(
@@ -2070,6 +2072,15 @@ class EventPayload(BaseModel):
     end_time: Optional[str] = None
     location: Optional[str] = None
     image: Optional[str] = None
+    # ─── Unified action button (fully configurable per event) ──
+    # If cta_enabled is False, no button is displayed on the event detail.
+    # Otherwise the admin freely picks the label + destination.
+    cta_enabled: Optional[bool] = False
+    cta_text: Optional[str] = None  # free label: "Réserver", "Voir le programme"…
+    cta_target_type: Optional[str] = None  # "news" | "external" | "internal" | "signup"
+    cta_target_id: Optional[str] = None    # ID of a news/post when target_type=news
+    cta_url: Optional[str] = None          # URL (external/internal/signup)
+    # ─── Legacy flags (kept for backward compat with older seed data)
     signup_enabled: Optional[bool] = False
     signup_url: Optional[str] = None
     linked_news_id: Optional[str] = None
@@ -2094,6 +2105,24 @@ def _normalize_event(ev: dict) -> dict:
         ev["start_time"] = ev["time"]
     if "signup_enabled" in ev and "needs_registration" not in ev:
         ev["needs_registration"] = bool(ev.get("signup_enabled"))
+    # Auto-derive the unified CTA button from legacy fields when the admin
+    # hasn't set the new fields explicitly (backward compatibility).
+    if not ev.get("cta_enabled") and not ev.get("cta_target_type"):
+        if ev.get("linked_news_id"):
+            ev["cta_enabled"] = True
+            ev["cta_text"] = ev.get("cta_text") or "Voir l'actualité"
+            ev["cta_target_type"] = "news"
+            ev["cta_target_id"] = ev["linked_news_id"]
+        elif ev.get("signup_enabled"):
+            ev["cta_enabled"] = True
+            ev["cta_text"] = ev.get("cta_text") or "S'inscrire"
+            ev["cta_target_type"] = "signup"
+            ev["cta_url"] = ev.get("signup_url") or ev.get("cta_url")
+        elif ev.get("external_link"):
+            ev["cta_enabled"] = True
+            ev["cta_text"] = ev.get("cta_text") or "Ouvrir le lien"
+            ev["cta_target_type"] = "external"
+            ev["cta_url"] = ev["external_link"]
     return ev
 
 
