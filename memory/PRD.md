@@ -47,6 +47,15 @@ Intranet premium pour employés du parc MS Park + espace administrateur pour le 
 - `/app/frontend/src/lib/api.js` — interceptor axios ajoutant `X-Employee-Id` depuis localStorage
 
 ## Changelog
+### 2026-08 — Agenda Admin + Carrousel v2
+- **Fix crash** `Can't find variable: AgendaManager` sur `/management/agenda` (composant manquant côté frontend)
+- **AgendaManager complet** ajouté à `Management.jsx` : CRUD événements, catégories (event/training/meeting/birthday/maintenance), ciblage multi-groupes (all/admin/managers/ops/restauration) + ciblage employés spécifiques, image, description, inscription optionnelle avec URL, actualité liée, lien externe
+- **Helper `_normalize_event`** côté backend : synchronise `category ↔ type`, `start_time ↔ time`, `signup_enabled ↔ needs_registration` (nouveaux événements admin s'affichent désormais correctement sur l'Agenda employé qui lit les clés legacy)
+- **Filtrage `/api/events` par `group_targets`** vérifié : employé (role=employe) voit `all` + `ops`, admin voit `all` + `admin`, encadrement voit `all` + `managers/encadrement`, restauration voit `all` + `restauration`. Ciblage employé unitaire (`employee_targets`) fonctionne.
+- **NewsCarousel CTA routing** vérifié : `target_type=event` → `/agenda/event/{id}`, `target_type=news` → `/actualites/{id}`, external/internal/document routent correctement.
+- **PUT /api/admin/events** : les valeurs `None` sont maintenant filtrées pour éviter d'écraser des champs existants lors d'updates partiels.
+- **data-testid `event-detail-modal`** ajouté sur la modal Agenda employé.
+
 ### 2026-07 — Update final
 - **Seed Idriss corrigé** : planning 24h/semaine exact (Mer-Sam 09h-14h + Dim 10h-14h)
 - Suppression des pauses artificielles sur shifts < 6h (conforme code du travail)

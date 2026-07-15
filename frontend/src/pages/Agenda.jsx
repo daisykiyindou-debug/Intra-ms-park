@@ -176,7 +176,7 @@ export default function Agenda() {
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            data-testid="event-modal"
+            data-testid="event-detail-modal"
             className="ms-card max-w-lg w-full p-6"
           >
             <div className="flex items-start justify-between mb-4">

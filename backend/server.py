@@ -1938,7 +1938,11 @@ async def admin_create_event(payload: EventPayload):
 @api.put("/admin/events/{eid}")
 async def admin_update_event(eid: str, payload: EventPayload):
     await require_admin()
-    updates = payload.model_dump()
+    # exclude_unset would require frontend to omit unchanged fields.
+    # The current UI always sends the full form, so keep model_dump().
+    # We simply drop `None` values to avoid overwriting existing data
+    # when a future caller does a partial update.
+    updates = {k: v for k, v in payload.model_dump().items() if v is not None}
     updates.pop("id", None)
     updates = _normalize_event(updates)
     await db.events.update_one({"id": eid}, {"$set": updates})
