@@ -3633,6 +3633,19 @@ async def admin_delete_news(nid: str):
     return {"ok": True}
 
 
+class ReorderPayload(BaseModel):
+    ids: list[str]
+
+
+@api.post("/admin/news/reorder")
+async def admin_reorder_news(payload: ReorderPayload):
+    """Persist a full ordered list of news IDs — assigns order 10, 20, 30 …"""
+    await require_communication_editor()
+    for i, nid in enumerate(payload.ids):
+        await db.news.update_one({"id": nid}, {"$set": {"order": (i + 1) * 10}})
+    return {"ok": True, "count": len(payload.ids)}
+
+
 @api.get("/carousel")
 async def get_carousel():
     """Public: news marked featured & active, sorted by order (asc)."""

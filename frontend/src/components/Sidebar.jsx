@@ -19,6 +19,7 @@ import {
   Inbox,
   BarChart3,
   Megaphone,
+  ListChecks,
 } from "lucide-react";
 import { useApp } from "@/contexts/AppContext";
 
@@ -48,6 +49,7 @@ const adminNav = [
   { to: "/management/attributions", label: "RTT / CP", icon: Gift, key: "mgmt-rtt" },
   { to: "/management/carrousel", label: "Carrousel accueil", icon: Newspaper, key: "mgmt-carrousel" },
   { to: "/management/agenda", label: "Agenda", icon: Calendar, key: "mgmt-agenda" },
+  { to: "/management/formulaires", label: "Formulaires", icon: ListChecks, key: "mgmt-forms" },
   { to: "/management/documents", label: "Documents RH", icon: FileText, key: "mgmt-docs" },
 ];
 
@@ -55,6 +57,7 @@ const commNav = [
   { divider: "Communication", commBadge: true },
   { to: "/management/carrousel", label: "Carrousel accueil", icon: Newspaper, key: "comm-carrousel" },
   { to: "/management/agenda", label: "Agenda", icon: Calendar, key: "comm-agenda" },
+  { to: "/management/formulaires", label: "Formulaires", icon: ListChecks, key: "comm-forms" },
 ];
 
 export default function Sidebar({ open, onClose }) {

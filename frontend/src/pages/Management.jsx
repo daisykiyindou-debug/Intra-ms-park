@@ -4,7 +4,7 @@ import {
   BarChart3, ClipboardList, Inbox, Newspaper, ShieldCheck, ArrowRight,
   Users as UsersIcon, AlertTriangle, CheckCircle2, TrendingUp, ChevronLeft, ChevronRight,
   Plus, Trash2, Save, X, CalendarDays, CalendarClock, Clock, MessageCircle, Gift, Sparkles,
-  FileText, Receipt, Send, Megaphone,
+  FileText, Receipt, Send, Megaphone, GripVertical,
 } from "lucide-react";
 import { toast } from "sonner";
 import { api, fr, formatMinutes, absoluteUrl } from "@/lib/api";
@@ -1273,6 +1273,44 @@ function NewsManager() {
     }
   };
 
+  const [dragId, setDragId] = useState(null);
+  const [dragOverId, setDragOverId] = useState(null);
+  const onDragStart = (id) => setDragId(id);
+  const onDragOver = (e, id) => {
+    e.preventDefault();
+    if (id !== dragOverId) setDragOverId(id);
+  };
+  const onDragEnd = () => { setDragId(null); setDragOverId(null); };
+  const onDrop = async (e, targetId) => {
+    e.preventDefault();
+    const sourceId = dragId;
+    onDragEnd();
+    if (!sourceId || sourceId === targetId) return;
+    // Compute new order from currently-sorted list
+    const sorted = news.slice().sort((a, b) => (a.order || 100) - (b.order || 100));
+    const from = sorted.findIndex((n) => n.id === sourceId);
+    const to = sorted.findIndex((n) => n.id === targetId);
+    if (from === -1 || to === -1) return;
+    const reordered = [...sorted];
+    const [moved] = reordered.splice(from, 1);
+    reordered.splice(to, 0, moved);
+    const ids = reordered.map((n) => n.id);
+    // Optimistic UI: apply new orders locally right away
+    setNews((prev) => prev.map((n) => {
+      const i = ids.indexOf(n.id);
+      return i >= 0 ? { ...n, order: (i + 1) * 10 } : n;
+    }));
+    try {
+      await api.post("/admin/news/reorder", { ids });
+      toast.success("Ordre mis à jour");
+      notifyLiveRefresh(["news", "carousel"]);
+      load();
+    } catch {
+      toast.error("Erreur");
+      load();
+    }
+  };
+
   const remove = async (n) => {
     if (!window.confirm(`Supprimer "${n.title}" ?`)) return;
     try {
@@ -1399,7 +1437,7 @@ function NewsManager() {
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-lg font-bold text-[#071B34]">Actualités &amp; carrousel</h3>
           <span className="text-[10px] text-[#475569] uppercase tracking-wider">
-            {news.filter((n) => n.featured).length} en carrousel · {news.length} total
+            {news.filter((n) => n.featured).length} en carrousel · {news.length} total · Glisser pour réordonner
           </span>
         </div>
         <div className="space-y-2 max-h-[600px] overflow-y-auto pr-1">
@@ -1409,10 +1447,25 @@ function NewsManager() {
             .map((n) => (
               <div
                 key={n.id}
-                className={`rounded-xl border p-3 flex gap-3 items-start ${
-                  n.featured ? "border-[#F59E0B]/40 bg-[#FEF3C7]/30" : "border-[#071B34]/5"
+                draggable
+                onDragStart={() => onDragStart(n.id)}
+                onDragOver={(e) => onDragOver(e, n.id)}
+                onDrop={(e) => onDrop(e, n.id)}
+                onDragEnd={onDragEnd}
+                data-testid={`slide-row-${n.id}`}
+                className={`rounded-xl border p-3 flex gap-2 items-start transition-all cursor-grab active:cursor-grabbing ${
+                  dragOverId === n.id && dragId !== n.id
+                    ? "ring-2 ring-[#3BA4FF] border-[#3BA4FF] bg-[#3BA4FF]/5"
+                    : dragId === n.id
+                    ? "opacity-40"
+                    : n.featured
+                    ? "border-[#F59E0B]/40 bg-[#FEF3C7]/30"
+                    : "border-[#071B34]/5"
                 }`}
               >
+                <div className="flex items-center h-14 text-[#94A3B8]" title="Glisser pour réordonner">
+                  <GripVertical className="h-4 w-4" />
+                </div>
                 {n.image && (
                   <img src={absoluteUrl(n.image)} alt="" className="h-14 w-20 rounded-lg object-cover shrink-0" />
                 )}

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Link } from "react-router-dom";
 import {
   Heart, MessageCircle, Send, Filter, Eye, EyeOff,
@@ -70,6 +71,7 @@ export default function Actualites() {
   const [posts, setPosts] = useState([]);
   const [filter, setFilter] = useState("all");
   const [editingPost, setEditingPost] = useState(null);
+  const [lightbox, setLightbox] = useState(null); // { images: [url], index: number } | null
 
   const refresh = () => api.get("/posts").then((r) => setPosts(r.data));
   useLiveData(refresh, ["posts", "news"]);
@@ -134,6 +136,7 @@ export default function Actualites() {
             findEmployee={findEmployee}
             refresh={refresh}
             setEditingPost={setEditingPost}
+            setLightbox={setLightbox}
           />
         ))}
       </div>
@@ -143,6 +146,13 @@ export default function Actualites() {
           post={editingPost}
           onClose={() => setEditingPost(null)}
           onSaved={() => { setEditingPost(null); refresh(); notifyLiveRefresh(["posts"]); }}
+        />
+      )}
+      {lightbox && (
+        <Lightbox
+          images={lightbox.images}
+          startIndex={lightbox.index}
+          onClose={() => setLightbox(null)}
         />
       )}
     </div>
@@ -583,7 +593,7 @@ function ToolBtn({ active, onClick, testid, children }) {
 
 // ────────────────────── Post card
 
-function PostCard({ post, me, onLike, findEmployee, refresh, setEditingPost }) {
+function PostCard({ post, me, onLike, findEmployee, refresh, setEditingPost, setLightbox }) {
   const authorFromDb = findEmployee(post.author_id);
   const isOfficial = post.posted_as === "official";
   const author = isOfficial
@@ -762,12 +772,27 @@ function PostCard({ post, me, onLike, findEmployee, refresh, setEditingPost }) {
       {images.length > 0 && (
         <div className={`grid gap-1 ${images.length === 1 ? "grid-cols-1" : images.length === 2 ? "grid-cols-2" : "grid-cols-2"}`}>
           {images.slice(0, 4).map((url, i) => (
-            <img
+            <button
               key={url + i}
-              src={absoluteUrl(url)}
-              alt=""
-              className={`w-full object-cover ${images.length === 1 ? "max-h-96" : "h-48"}`}
-            />
+              type="button"
+              onClick={() => setLightbox({ images, index: i })}
+              data-testid={`post-image-${post.id}-${i}`}
+              className={`relative overflow-hidden group ${images.length === 1 ? "" : ""}`}
+              title="Voir en grand"
+            >
+              <img
+                src={absoluteUrl(url)}
+                alt=""
+                className={`w-full object-cover transition-transform duration-500 group-hover:scale-[1.03] cursor-zoom-in ${
+                  images.length === 1 ? "max-h-96" : "h-48"
+                }`}
+              />
+              {i === 3 && images.length > 4 && (
+                <div className="absolute inset-0 bg-black/50 flex items-center justify-center text-white text-2xl font-bold">
+                  +{images.length - 4}
+                </div>
+              )}
+            </button>
           ))}
         </div>
       )}
@@ -920,3 +945,80 @@ function PostEditor({ post, onClose, onSaved }) {
   );
 }
 
+
+
+// ────────────────────── Lightbox
+function Lightbox({ images, startIndex = 0, onClose }) {
+  const [idx, setIdx] = useState(startIndex);
+  const total = images.length;
+
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === "Escape") onClose();
+      if (e.key === "ArrowRight") setIdx((i) => (i + 1) % total);
+      if (e.key === "ArrowLeft") setIdx((i) => (i - 1 + total) % total);
+    };
+    window.addEventListener("keydown", onKey);
+    document.body.style.overflow = "hidden";
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.body.style.overflow = "";
+    };
+  }, [total, onClose]);
+
+  const prev = (e) => { e.stopPropagation(); setIdx((i) => (i - 1 + total) % total); };
+  const next = (e) => { e.stopPropagation(); setIdx((i) => (i + 1) % total); };
+
+  return createPortal(
+    <div
+      role="dialog"
+      aria-modal="true"
+      data-testid="lightbox"
+      onClick={onClose}
+      className="fixed inset-0 z-[110] bg-black/90 backdrop-blur-md flex items-center justify-center"
+    >
+      <button
+        onClick={(e) => { e.stopPropagation(); onClose(); }}
+        data-testid="lightbox-close"
+        className="absolute top-4 right-4 flex h-11 w-11 items-center justify-center rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors z-10"
+        aria-label="Fermer"
+      >
+        <X className="h-5 w-5" />
+      </button>
+
+      {total > 1 && (
+        <>
+          <button
+            onClick={prev}
+            data-testid="lightbox-prev"
+            className="absolute left-4 top-1/2 -translate-y-1/2 flex h-12 w-12 items-center justify-center rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors z-10"
+            aria-label="Précédent"
+          >
+            ‹
+          </button>
+          <button
+            onClick={next}
+            data-testid="lightbox-next"
+            className="absolute right-4 top-1/2 -translate-y-1/2 flex h-12 w-12 items-center justify-center rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors z-10"
+            aria-label="Suivant"
+          >
+            ›
+          </button>
+          <div className="absolute bottom-6 left-1/2 -translate-x-1/2 text-white/80 text-xs font-semibold bg-white/10 rounded-full px-3 py-1">
+            {idx + 1} / {total}
+          </div>
+        </>
+      )}
+
+      <img
+        src={absoluteUrl(images[idx])}
+        alt=""
+        onClick={(e) => e.stopPropagation()}
+        data-testid="lightbox-image"
+        className="max-w-[92vw] max-h-[88vh] object-contain rounded-lg shadow-2xl"
+      />
+    </div>
+  );
+}
+  );
+}
