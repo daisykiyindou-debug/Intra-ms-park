@@ -1,0 +1,291 @@
+{
+  "base_url": "https://mspark-employee-hub.preview.emergentagent.com",
+  "unique": "BUGVERIF6-1784193937",
+  "checks": {
+    "baseline_idriss_notifications_normalized": {
+      "ok": true,
+      "count": 30,
+      "missing_content_icon_or_link": []
+    },
+    "post_regular_channel_message_200": {
+      "ok": true,
+      "status": 200,
+      "expected_status": 200,
+      "body": {
+        "id": "103ae641-2b54-4f45-b28c-098d50aca2dc",
+        "channel_id": "ch-accueil",
+        "author_id": "emp-marcus-simeo",
+        "content": "BUGVERIF6-1784193937 regular channel message",
+        "ts": "2026-07-16T09:25:38.017086+00:00"
+      }
+    },
+    "regular_message_notification_idriss": {
+      "ok": true,
+      "notification": {
+        "id": "488acc2b-ff91-4dd5-8374-f10c7e0361c3",
+        "employee_id": "emp-idriss-malonga",
+        "type": "message",
+        "title": "Nouveau message · #Accueil",
+        "content": "Marcus SIMÉO : BUGVERIF6-1784193937 regular channel message",
+        "message": "Marcus SIMÉO : BUGVERIF6-1784193937 regular channel message",
+        "icon": "message-circle",
+        "link": "/messagerie?channel=ch-accueil",
+        "read": false,
+        "ts": "2026-07-16T09:25:38.019447+00:00",
+        "created_at": "2026-07-16T09:25:38.019455+00:00"
+      }
+    },
+    "regular_message_notification_lea": {
+      "ok": true,
+      "notification": {
+        "id": "820c71d0-a669-4248-97b7-131b35ab43e7",
+        "employee_id": "emp-lea-comm",
+        "type": "message",
+        "title": "Nouveau message · #Accueil",
+        "content": "Marcus SIMÉO : BUGVERIF6-1784193937 regular channel message",
+        "message": "Marcus SIMÉO : BUGVERIF6-1784193937 regular channel message",
+        "icon": "message-circle",
+        "link": "/messagerie?channel=ch-accueil",
+        "read": false,
+        "ts": "2026-07-16T09:25:38.019462+00:00",
+        "created_at": "2026-07-16T09:25:38.019464+00:00"
+      }
+    },
+    "post_admin_news_200": {
+      "ok": true,
+      "status": 200,
+      "expected_status": 200,
+      "body": {
+        "id": "5eecdfcf-5344-46ef-b9a8-5e413761454e",
+        "title": "BUGVERIF6-1784193937 nouvelle actualité",
+        "content": "Contenu QA",
+        "category": "info",
+        "image": null,
+        "images": [],
+        "documents": [],
+        "external_link": null,
+        "featured": false,
+        "active": true,
+        "order": 100,
+        "cta_text": null,
+        "cta_url": null,
+        "target_type": null,
+        "target_id": null,
+        "pinned": false,
+        "date": "2026-07-16T09:25:38.349317+00:00",
+        "author_id": "emp-marcus-simeo",
+        "author_name": "Marcus SIMÉO",
+        "posted_as": "official",
+        "likes": [],
+        "comments": []
+      }
+    },
+    "news_notification_idriss": {
+      "ok": true,
+      "notification": {
+        "id": "eadeebbf-48f8-4371-a571-089e22f558bb",
+        "employee_id": "emp-idriss-malonga",
+        "type": "news",
+        "title": "Nouvelle actualité",
+        "content": "BUGVERIF6-1784193937 nouvelle actualité",
+        "message": "BUGVERIF6-1784193937 nouvelle actualité",
+        "icon": "megaphone",
+        "link": "/actualites/5eecdfcf-5344-46ef-b9a8-5e413761454e",
+        "read": false,
+        "ts": "2026-07-16T09:25:38.350505+00:00",
+        "created_at": "2026-07-16T09:25:38.350510+00:00"
+      }
+    },
+    "post_admin_event_200": {
+      "ok": true,
+      "status": 200,
+      "expected_status": 200,
+      "body": {
+        "title": "BUGVERIF6-1784193937 événement agenda",
+        "description": "Event QA",
+        "intro_text": null,
+        "date": "2026-08-20",
+        "end_date": null,
+        "start_time": null,
+        "end_time": null,
+        "location": null,
+        "image": null,
+        "cta_enabled": false,
+        "cta_text": null,
+        "cta_target_type": null,
+        "cta_target_id": null,
+        "cta_url": null,
+        "signup_enabled": false,
+        "signup_url": null,
+        "linked_news_id": null,
+        "external_link": null,
+        "internal_page": null,
+        "group_targets": [
+          "all"
+        ],
+        "employee_targets": null,
+        "category": "event",
+        "id": "baa8fdc2-967f-4d18-9136-745b0acb4c91",
+        "type": "event",
+        "needs_registration": false
+      }
+    },
+    "event_notification_idriss": {
+      "ok": true,
+      "notification": {
+        "id": "83d4ec39-886d-46c6-8a21-5fee0f843875",
+        "employee_id": "emp-idriss-malonga",
+        "type": "event",
+        "title": "Nouvel événement",
+        "content": "BUGVERIF6-1784193937 événement agenda — 2026-08-20",
+        "message": "BUGVERIF6-1784193937 événement agenda — 2026-08-20",
+        "icon": "calendar",
+        "link": "/agenda/event/baa8fdc2-967f-4d18-9136-745b0acb4c91",
+        "read": false,
+        "ts": "2026-07-16T09:25:38.559797+00:00",
+        "created_at": "2026-07-16T09:25:38.559802+00:00"
+      }
+    },
+    "post_feed_post_200": {
+      "ok": true,
+      "status": 200,
+      "expected_status": 200,
+      "body": {
+        "id": "77141053-6125-4a98-a5c4-60adc85a3f2a",
+        "author_id": "emp-marcus-simeo",
+        "title": "BUGVERIF6-1784193937 publication fil",
+        "category": "annonce",
+        "content": "Post QA",
+        "image": null,
+        "images": [],
+        "attachments": [],
+        "links": [],
+        "hashtags": [],
+        "posted_as": "personal",
+        "likes": [],
+        "comments": [],
+        "created_at": "2026-07-16T09:25:38.776236+00:00"
+      }
+    },
+    "post_notification_idriss": {
+      "ok": true,
+      "notification": {
+        "id": "4f9ad95f-0e60-4069-8b62-5923e9d6b5c2",
+        "employee_id": "emp-idriss-malonga",
+        "type": "post",
+        "title": "Nouvelle publication",
+        "content": "Marcus SIMÉO a publié : BUGVERIF6-1784193937 publication fil",
+        "message": "Marcus SIMÉO a publié : BUGVERIF6-1784193937 publication fil",
+        "icon": "megaphone",
+        "link": "/actualites/77141053-6125-4a98-a5c4-60adc85a3f2a",
+        "read": false,
+        "ts": "2026-07-16T09:25:38.777346+00:00",
+        "created_at": "2026-07-16T09:25:38.777353+00:00"
+      }
+    },
+    "post_admin_payslip_200": {
+      "ok": true,
+      "status": 200,
+      "expected_status": 200,
+      "body": {
+        "id": "728b7f34-1ee4-43dd-b945-a8ba8631c289",
+        "name": "Fiche de paie — Juillet 2026",
+        "category": "Paie",
+        "url": "/api/payslip/emp-idriss-malonga/2026/7",
+        "description": "Bulletin de salaire — Juillet 2026",
+        "target_employee_id": "emp-idriss-malonga",
+        "issued_at": "2026-07-16",
+        "size_kb": 248,
+        "read": false,
+        "is_payslip": true,
+        "payslip_year": 2026,
+        "payslip_month": 7
+      }
+    },
+    "payslip_notification_idriss": {
+      "ok": true,
+      "notification": {
+        "id": "191d6836-20d8-4b64-b348-f65012c8c06e",
+        "employee_id": "emp-idriss-malonga",
+        "type": "document",
+        "title": "Nouvelle fiche de paie",
+        "content": "Votre bulletin de Juillet 2026 est disponible.",
+        "message": "Votre bulletin de Juillet 2026 est disponible.",
+        "icon": "file-text",
+        "link": "/documents",
+        "ts": "2026-07-16T09:25:38.993891+00:00",
+        "created_at": "2026-07-16T09:25:38.993897+00:00",
+        "read": false
+      }
+    },
+    "post_admin_broadcast_200": {
+      "ok": true,
+      "status": 200,
+      "expected_status": 200,
+      "body": {
+        "id": "497835e4-9894-4b71-8563-30cd0138a995",
+        "channel_id": "ch-accueil",
+        "author_id": "emp-marcus-simeo",
+        "content": "BUGVERIF6-1784193937 broadcast accueil",
+        "ts": "2026-07-16T09:25:39.194619+00:00",
+        "attachments": [],
+        "is_admin_broadcast": true
+      }
+    },
+    "broadcast_notification_idriss": {
+      "ok": true,
+      "notification": {
+        "id": "65e6cfc9-d774-41f9-8f6a-5b8948de9e99",
+        "employee_id": "emp-idriss-malonga",
+        "type": "message",
+        "title": "Annonce sur #Accueil",
+        "content": "BUGVERIF6-1784193937 broadcast accueil",
+        "message": "BUGVERIF6-1784193937 broadcast accueil",
+        "icon": "message-circle",
+        "link": "/messagerie?channel=ch-accueil",
+        "read": false,
+        "ts": "2026-07-16T09:25:39.195625+00:00",
+        "created_at": "2026-07-16T09:25:39.195632+00:00"
+      }
+    },
+    "final_idriss_notifications_normalized": {
+      "ok": true,
+      "count": 36,
+      "missing_content_icon_or_link": []
+    }
+  },
+  "created_records": [
+    {
+      "kind": "message",
+      "id": "103ae641-2b54-4f45-b28c-098d50aca2dc",
+      "content": "BUGVERIF6-1784193937 regular channel message"
+    },
+    {
+      "kind": "news",
+      "id": "5eecdfcf-5344-46ef-b9a8-5e413761454e",
+      "title": "BUGVERIF6-1784193937 nouvelle actualité"
+    },
+    {
+      "kind": "event",
+      "id": "baa8fdc2-967f-4d18-9136-745b0acb4c91",
+      "title": "BUGVERIF6-1784193937 événement agenda"
+    },
+    {
+      "kind": "post",
+      "id": "77141053-6125-4a98-a5c4-60adc85a3f2a",
+      "title": "BUGVERIF6-1784193937 publication fil"
+    },
+    {
+      "kind": "payslip",
+      "id": "728b7f34-1ee4-43dd-b945-a8ba8631c289",
+      "name": "Fiche de paie — Juillet 2026"
+    },
+    {
+      "kind": "broadcast",
+      "id": "497835e4-9894-4b71-8563-30cd0138a995",
+      "content": "BUGVERIF6-1784193937 broadcast accueil"
+    }
+  ],
+  "errors": [],
+  "ok": true
+}

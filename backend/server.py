@@ -2244,12 +2244,59 @@ async def admin_broadcast(payload: ChannelBroadcast):
 
 
 # ─── Notifications
+_NOTIF_DEFAULT_LINKS = {
+    "planning": "/rh/planning",
+    "conge_valide": "/rh/demandes",
+    "cp": "/rh/demandes",
+    "rtt": "/rh/demandes",
+    "conge": "/rh/demandes",
+    "echange": "/rh/demandes",
+    "absence": "/rh/demandes",
+    "document": "/documents",
+    "post": "/actualites",
+    "news": "/actualites",
+    "comment": "/actualites",
+    "event": "/agenda",
+    "message": "/messagerie",
+    "form": "/management/formulaires",
+}
+
+_NOTIF_DEFAULT_ICONS = {
+    "planning": "calendar",
+    "conge_valide": "check-circle",
+    "cp": "check-circle",
+    "rtt": "check-circle",
+    "conge": "check-circle",
+    "echange": "check-circle",
+    "absence": "check-circle",
+    "document": "file-text",
+    "post": "megaphone",
+    "news": "megaphone",
+    "comment": "message-circle",
+    "event": "calendar",
+    "message": "message-circle",
+    "form": "file-text",
+}
+
+
+def _normalize_notif(n: dict) -> dict:
+    n = dict(n)
+    t = n.get("type") or ""
+    if not n.get("content"):
+        n["content"] = n.get("message") or ""
+    if not n.get("icon"):
+        n["icon"] = _NOTIF_DEFAULT_ICONS.get(t, "bell")
+    if not n.get("link"):
+        n["link"] = _NOTIF_DEFAULT_LINKS.get(t)
+    return n
+
+
 @api.get("/notifications")
 async def list_notifications():
     items = await db.notifications.find(
         {"employee_id": current_user()}, {"_id": 0}
     ).sort("created_at", -1).to_list(50)
-    return items
+    return [_normalize_notif(n) for n in items]
 
 
 @api.post("/notifications/{nid}/read")
@@ -2295,29 +2342,25 @@ async def post_message(cid: str, payload: MessageCreate):
         "ts": _now(),
     }
     await db.messages.insert_one(msg.copy())
-    # Notify other members of this channel
+    # Notify other employees about the new message on this channel
     ch = await db.channels.find_one({"id": cid}, {"_id": 0})
-    if ch:
-        members = ch.get("members") or []
-        author = await db.employees.find_one({"id": current_user()}, {"_id": 0})
-        author_name = (
-            f"{author.get('first_name', '')} {author.get('last_name', '')}".strip()
-            if author else "Un collègue"
-        )
-        preview = (payload.content or "").strip()
-        if len(preview) > 90:
-            preview = preview[:87] + "…"
-        for mid in members:
-            if mid == current_user():
-                continue
-            await _push_notification(
-                mid,
-                type="message",
-                title=f"Message de {author_name}",
-                content=preview or "Nouveau message",
-                icon="message-circle",
-                link=f"/messagerie?channel={cid}",
-            )
+    author = await db.employees.find_one({"id": current_user()}, {"_id": 0})
+    author_name = (
+        f"{author.get('first_name', '')} {author.get('last_name', '')}".strip()
+        if author else "Un collègue"
+    )
+    preview = (payload.content or "").strip()
+    if len(preview) > 90:
+        preview = preview[:87] + "…"
+    ch_label = (ch or {}).get("name") or cid
+    await _broadcast_notification(
+        type="message",
+        title=f"Nouveau message · #{ch_label}",
+        content=f"{author_name} : {preview or 'Nouveau message'}",
+        icon="message-circle",
+        link=f"/messagerie?channel={cid}",
+        exclude_ids=[current_user()],
+    )
     return await _strip(msg)
 
 

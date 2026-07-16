@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { Link } from "react-router-dom";
 import {
   ClipboardList, Plus, Trash2, Save, X, GripVertical, ArrowUp, ArrowDown, Copy,
@@ -323,16 +324,23 @@ function FormEditor({ form, onClose, onSaved }) {
     }
   };
 
-  return (
+  return createPortal(
     <div
       role="dialog"
       aria-modal="true"
-      onClick={onClose}
-      className="fixed inset-0 z-50 bg-black/40 backdrop-blur-md flex items-center justify-center p-2 md:p-4"
+      className="fixed inset-0 z-[100]"
     >
+      {/* Backdrop */}
+      <button
+        type="button"
+        aria-label="Fermer"
+        onClick={onClose}
+        className="absolute inset-0 bg-black/40 backdrop-blur-md w-full h-full cursor-default"
+      />
+      {/* Modal — pinned to all 4 sides with a safe margin, guaranteed centered/visible */}
       <div
         onClick={(e) => e.stopPropagation()}
-        className="ms-card w-full max-w-[1400px] h-[95vh] overflow-hidden flex flex-col"
+        className="absolute inset-3 md:inset-6 lg:inset-8 rounded-2xl bg-white shadow-2xl border border-[#071B34]/5 overflow-hidden flex flex-col"
         data-testid="form-editor"
       >
         {/* Header */}
@@ -508,7 +516,8 @@ function FormEditor({ form, onClose, onSaved }) {
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
@@ -655,12 +664,12 @@ function ResponsesModal({ form, onClose }) {
     a.click();
   };
 
-  return (
+  return createPortal(
     <div
       role="dialog"
       aria-modal="true"
       onClick={onClose}
-      className="fixed inset-0 z-50 bg-black/40 backdrop-blur-md flex items-center justify-center p-4"
+      className="fixed inset-0 z-[100] bg-black/40 backdrop-blur-md flex items-center justify-center p-4"
     >
       <div
         onClick={(e) => e.stopPropagation()}
@@ -721,6 +730,7 @@ function ResponsesModal({ form, onClose }) {
           )}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
