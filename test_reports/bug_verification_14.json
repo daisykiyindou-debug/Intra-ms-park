@@ -1,0 +1,74 @@
+{
+  "verdict": "not_fixed",
+  "user_reported_bug": "Améliore l'interface de demande de congés, RTT et autres absences. Précédemment, le bug testing agent a signalé 2 blockers: (1) POST /api/requests/multi acceptait n'importe quelle date (passée, férié, déjà en attente) sans validation. (2) GET /api/availability retournait toutes les journées comme 'available' au-delà de SHIFT_HORIZON_CAP (2026-08-01), ne dérivant pas le pattern hebdomadaire d'Idriss.",
+  "summary": "No relevant testing skill found. Focused backend retest shows partial improvement: past dates, Assomption, duplicate/pending dates, atomic mixed requests, and valid multi-range creation behave correctly. However the requested contract is still not fixed because GET /api/availability?month=2026-09 returns 2026-09-06 (Sunday) as worked/selectable, and POST /api/requests/multi accepted a new request for that Sunday instead of rejecting it as 'jour OFF'.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "GET /api/availability?month=2026-09",
+        "issue": "The requested explicit check still fails: 2026-09-06 (Sunday) is returned as status='worked', label='Travail 10:00–14:00', selectable=true instead of status='off'. This means future availability still does not match the requested Idriss Saturday/Sunday OFF contract.",
+        "priority": "CRITICAL"
+      },
+      {
+        "endpoint": "POST /api/requests/multi",
+        "issue": "A direct POST for ['2026-09-06'] with X-Employee-Id=emp-idriss-malonga returned 200 and created a pending request instead of 400 with invalid_dates containing 'jour OFF'.",
+        "priority": "CRITICAL"
+      }
+    ],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {
+        "flow": "Leave/RTT/absence calendar fed by /api/availability",
+        "issue": "Frontend toast/regression was not browser-tested in this retest because the backend user-visible contract still fails for the required Sunday OFF case; the UI would receive worked/selectable data for 2026-09-06.",
+        "affected_selectors": [
+          "[data-testid='leave-calendar']"
+        ]
+      }
+    ],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/test_reports/bug_verification_14_api.py",
+    "/app/test_reports/bug_verification_14_api_results.json",
+    "/app/test_reports/bug_verification_14_pattern_probe.py",
+    "/app/test_reports/bug_verification_14_pattern_probe_results.json",
+    "/app/test_reports/bug_verification_14_cleanup.py",
+    "/app/test_reports/bug_verification_14_cleanup_results.json",
+    "/app/test_reports/bug_verification_14_final_probe.py",
+    "/app/test_reports/bug_verification_14_final_probe_results.json"
+  ],
+  "action_items": [
+    "Update Idriss' effective weekly pattern/seeded DB migration so Saturday and Sunday are OFF as required, then ensure GET /api/availability derives that beyond SHIFT_HORIZON_CAP.",
+    "Retest POST /api/requests/multi for 2026-09-06 after the pattern fix; it must return 400 with detail.invalid_dates containing 'jour OFF'.",
+    "After backend passes, retest the UI toast/error path and calendar regression flow."
+  ],
+  "critical_code_review_comments": [
+    "backend/server.py _entry_from_pattern is now used as a fallback, but the seeded/current employee pattern for emp-idriss-malonga has weekdays 0/1 as OFF and weekdays 5/6 as shifts, which contradicts the retest contract requiring Saturday/Sunday OFF and specifically 2026-09-06 Sunday OFF.",
+    "Because POST /api/requests/multi validates against that same current pattern, it accepted 2026-09-06 as worked/selectable."
+  ],
+  "updated_files": [
+    "/app/test_reports/bug_verification_14_api.py",
+    "/app/test_reports/bug_verification_14_api_results.json",
+    "/app/test_reports/bug_verification_14_pattern_probe.py",
+    "/app/test_reports/bug_verification_14_pattern_probe_results.json",
+    "/app/test_reports/bug_verification_14_cleanup.py",
+    "/app/test_reports/bug_verification_14_cleanup_results.json",
+    "/app/test_reports/bug_verification_14_final_probe.py",
+    "/app/test_reports/bug_verification_14_final_probe_results.json",
+    "/app/test_reports/write_iteration_14_report.py",
+    "/app/test_reports/bug_verification_14.json",
+    "/app/test_reports/iteration_14.json"
+  ],
+  "success_rate": {
+    "backend": "80%",
+    "frontend": "not tested"
+  },
+  "seed_data_creation": "Created temporary QA14 requests during API validation (including the failing 2026-09-06 request and a valid multi-range RTT request), then cleaned up all Idriss requests whose comment started with 'QA14 '. Auth is MOCKED via X-Employee-Id.",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Use iteration 14 scripts/results. After cleanup, GET /api/availability?month=2026-09 still returned 2026-09-06 as worked/selectable. Past date, Assomption, duplicate pending date, actual-pattern OFF Monday 2026-09-07, and atomic mixed valid+invalid validation passed. No relevant testing skill found.",
+  "rca_of_the_issue": "The backend fix enforces validation from the schedule/pattern, but the effective Idriss pattern in seed/current DB marks Monday/Tuesday as OFF and Saturday/Sunday as shifts. This causes the required Sunday 2026-09-06 to be treated as a valid worked day by both availability and multi-request validation."
+}

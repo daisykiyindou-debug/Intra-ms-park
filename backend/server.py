@@ -1628,6 +1628,9 @@ async def availability(month: Optional[str] = None):
     ).to_list(200)
     by_day = {e["day"]: e for e in entries}
 
+    # Load employee (for pattern fallback on days beyond auto-gen horizon)
+    emp = await db.employees.find_one({"id": current_user()}, {"_id": 0}) or {}
+
     # Load employee's requests overlapping this month (any status)
     reqs = await db.requests.find(
         {"employee_id": current_user()},
@@ -1658,6 +1661,9 @@ async def availability(month: Optional[str] = None):
         iso = cur.isoformat()
         r = by_day_req.get(iso)
         sched = by_day.get(iso)
+        # Fallback: derive from weekly pattern for days without a materialized entry
+        if not sched:
+            sched = _entry_from_pattern(emp, cur)
         status, label, selectable = "available", "Disponible", True
 
         if iso < today_iso:
@@ -1705,11 +1711,80 @@ class MultiDayRequest(BaseModel):
 
 @api.post("/requests/multi")
 async def create_multi_day_request(payload: MultiDayRequest):
-    """Create one HR request per contiguous range picked from the calendar."""
+    """Create one HR request per contiguous range picked from the calendar.
+    Validates each date server-side against the same availability rules."""
     if not payload.dates:
         raise HTTPException(400, "Aucun jour sélectionné")
     if payload.type not in ("conge", "rtt", "absence"):
         raise HTTPException(400, "Type de demande invalide pour la sélection multi-jours")
+
+    # Compute availability for each requested date's month once
+    months_needed: set[str] = set()
+    parsed: list[date] = []
+    for d in payload.dates:
+        try:
+            parsed.append(date.fromisoformat(d))
+        except Exception:
+            raise HTTPException(400, f"Date invalide : {d}")
+        months_needed.add(d[:7])
+
+    # Reuse availability logic: fetch schedule + requests + holidays
+    today = date.today()
+    emp = await db.employees.find_one({"id": current_user()}, {"_id": 0}) or {}
+    scheds = await db.schedules.find(
+        {"employee_id": current_user(),
+         "day": {"$in": [d.isoformat() for d in parsed]}},
+        {"_id": 0},
+    ).to_list(200)
+    sched_by_day = {s["day"]: s for s in scheds}
+    reqs = await db.requests.find(
+        {"employee_id": current_user(),
+         "status": {"$in": ["approved", "pending"]}},
+        {"_id": 0},
+    ).to_list(500)
+    blocked_by_req: set[str] = set()
+    for r in reqs:
+        try:
+            s = date.fromisoformat(r["start_date"])
+            e = date.fromisoformat(r.get("end_date") or r["start_date"])
+        except Exception:
+            continue
+        cur = s
+        while cur <= e:
+            blocked_by_req.add(cur.isoformat())
+            cur += timedelta(days=1)
+
+    years_needed = {d.year for d in parsed}
+    holidays: dict[str, str] = {}
+    for y in years_needed:
+        holidays.update(_year_holidays(y))
+
+    # Validate each requested day
+    errors: list[str] = []
+    for d in parsed:
+        iso = d.isoformat()
+        if d < today:
+            errors.append(f"{iso} : jour passé")
+            continue
+        if iso in holidays:
+            errors.append(f"{iso} : jour férié ({holidays[iso]})")
+            continue
+        if iso in blocked_by_req:
+            errors.append(f"{iso} : déjà en congé ou en attente")
+            continue
+        sched = sched_by_day.get(iso) or _entry_from_pattern(emp, d)
+        st = sched.get("type") if sched else None
+        if st == "off":
+            errors.append(f"{iso} : jour OFF")
+        elif st in ("cp", "rtt"):
+            errors.append(f"{iso} : déjà en {st.upper()}")
+
+    if errors:
+        raise HTTPException(
+            400,
+            {"message": "Certaines dates sélectionnées ne sont pas disponibles",
+             "invalid_dates": errors},
+        )
 
     # Sort & split into contiguous ranges
     sorted_days = sorted(set(payload.dates))

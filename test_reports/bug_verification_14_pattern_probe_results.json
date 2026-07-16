@@ -1,0 +1,58 @@
+{
+  "checks": [
+    {
+      "name": "Sunday 2026-09-06 currently exposed as worked/selectable",
+      "ok": false,
+      "detail": {
+        "date": "2026-09-06",
+        "status": "pending",
+        "label": "Demande en attente (CONGE)",
+        "selectable": false,
+        "weekday": 6
+      }
+    },
+    {
+      "name": "Monday 2026-09-07 currently exposed as off/not selectable",
+      "ok": true,
+      "detail": {
+        "date": "2026-09-07",
+        "status": "off",
+        "label": "Jour OFF",
+        "selectable": false,
+        "weekday": 0
+      }
+    },
+    {
+      "name": "POST rejects currently-patterned OFF Monday 2026-09-07",
+      "ok": true,
+      "detail": {
+        "status": 400,
+        "body": {
+          "detail": {
+            "message": "Certaines dates sélectionnées ne sont pas disponibles",
+            "invalid_dates": [
+              "2026-09-07 : jour OFF"
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "details": {
+    "2026-09-06": {
+      "date": "2026-09-06",
+      "status": "pending",
+      "label": "Demande en attente (CONGE)",
+      "selectable": false,
+      "weekday": 6
+    },
+    "2026-09-07": {
+      "date": "2026-09-07",
+      "status": "off",
+      "label": "Jour OFF",
+      "selectable": false,
+      "weekday": 0
+    }
+  },
+  "overall_ok": false
+}

@@ -66,34 +66,45 @@ export default function Demandes() {
       ? `${form.comment} [PJ: ${form.attachment_name}]`
       : form.comment;
 
-    if (usesCalendar) {
-      if (!form.dates || form.dates.length === 0) {
-        toast.error("Sélectionnez au moins une journée dans le calendrier");
-        return;
+    try {
+      if (usesCalendar) {
+        if (!form.dates || form.dates.length === 0) {
+          toast.error("Sélectionnez au moins une journée dans le calendrier");
+          return;
+        }
+        const res = await api.post("/requests/multi", {
+          type: form.type,
+          dates: form.dates,
+          comment,
+        });
+        const n = res.data?.created || 1;
+        toast.success(`${form.dates.length} jour${form.dates.length > 1 ? "s" : ""} demandé${form.dates.length > 1 ? "s" : ""}`, {
+          description: `${n} demande${n > 1 ? "s" : ""} envoyée${n > 1 ? "s" : ""} à votre manager.`,
+        });
+      } else {
+        await api.post("/requests", {
+          type: form.type,
+          start_date: form.start_date,
+          end_date: form.end_date || form.start_date,
+          comment,
+          amount: form.amount ? parseFloat(form.amount) : null,
+        });
+        toast.success("Demande envoyée", { description: "Votre manager sera notifié." });
       }
-      const res = await api.post("/requests/multi", {
-        type: form.type,
-        dates: form.dates,
-        comment,
-      });
-      const n = res.data?.created || 1;
-      toast.success(`${form.dates.length} jour${form.dates.length > 1 ? "s" : ""} demandé${form.dates.length > 1 ? "s" : ""}`, {
-        description: `${n} demande${n > 1 ? "s" : ""} envoyée${n > 1 ? "s" : ""} à votre manager.`,
-      });
-    } else {
-      await api.post("/requests", {
-        type: form.type,
-        start_date: form.start_date,
-        end_date: form.end_date || form.start_date,
-        comment,
-        amount: form.amount ? parseFloat(form.amount) : null,
-      });
-      toast.success("Demande envoyée", { description: "Votre manager sera notifié." });
+      setOpen(false);
+      setForm({ type: "conge", start_date: "", end_date: "", comment: "", amount: "", attachment_name: "", dates: [] });
+      refresh();
+      notifyLiveRefresh(["requests", "notifications"]);
+    } catch (err) {
+      const detail = err?.response?.data?.detail;
+      if (detail && typeof detail === "object" && detail.invalid_dates) {
+        toast.error(detail.message || "Certaines dates ne sont pas disponibles", {
+          description: detail.invalid_dates.slice(0, 3).join(" · "),
+        });
+      } else {
+        toast.error(typeof detail === "string" ? detail : "Impossible d'envoyer la demande");
+      }
     }
-    setOpen(false);
-    setForm({ type: "conge", start_date: "", end_date: "", comment: "", amount: "", attachment_name: "", dates: [] });
-    refresh();
-    notifyLiveRefresh(["requests", "notifications"]);
   };
 
   const balance = me?.leave_balance || { cp_n_1: 0, cp_n: 0, rtt: 0 };

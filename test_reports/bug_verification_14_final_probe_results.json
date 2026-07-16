@@ -1,0 +1,25 @@
+{
+  "checks": [
+    {
+      "name": "After cleanup, 2026-09-06 Sunday should be off per requested contract",
+      "ok": false,
+      "detail": {
+        "date": "2026-09-06",
+        "status": "worked",
+        "label": "Travail 10:00–14:00",
+        "selectable": true,
+        "weekday": 6
+      }
+    }
+  ],
+  "details": {
+    "2026-09-06_after_cleanup": {
+      "date": "2026-09-06",
+      "status": "worked",
+      "label": "Travail 10:00–14:00",
+      "selectable": true,
+      "weekday": 6
+    }
+  },
+  "overall_ok": false
+}

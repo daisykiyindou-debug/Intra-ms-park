@@ -1,0 +1,408 @@
+{
+  "base": "http://localhost:8001/api",
+  "run_id": "5ff6bdbe",
+  "checks": [
+    {
+      "name": "GET /availability 2026-09 returns 200",
+      "ok": true,
+      "detail": "status=200 body={\"month\":\"2026-09\",\"days\":[{\"date\":\"2026-09-01\",\"status\":\"off\",\"label\":\"Jour OFF\",\"selectable\":false,\"weekday\":1},{\"date\":\"2026-09-02\",\"status\":\"worked\",\"label\":\"Travail 09:00–14:00\",\"selectable\":true,\"weekday\":2},{\"date\":\"2026-09-03\",\"status\":\"worked\",\"label\":\"Travail 09:00–14:00\",\"selectable\":true"
+    },
+    {
+      "name": "2026-09 has no past days",
+      "ok": true,
+      "detail": {
+        "off": 6,
+        "worked": 20,
+        "pending": 4
+      }
+    },
+    {
+      "name": "2026-09 has realistic worked days",
+      "ok": true,
+      "detail": {
+        "off": 6,
+        "worked": 20,
+        "pending": 4
+      }
+    },
+    {
+      "name": "2026-09 has realistic OFF/weekend days",
+      "ok": true,
+      "detail": {
+        "off": 6,
+        "worked": 20,
+        "pending": 4
+      }
+    },
+    {
+      "name": "GET /availability 2026-10 returns 200",
+      "ok": true,
+      "detail": "status=200 body={\"month\":\"2026-10\",\"days\":[{\"date\":\"2026-10-01\",\"status\":\"pending\",\"label\":\"Demande en attente (CONGE)\",\"selectable\":false,\"weekday\":3},{\"date\":\"2026-10-02\",\"status\":\"worked\",\"label\":\"Travail 09:00–14:00\",\"selectable\":true,\"weekday\":4},{\"date\":\"2026-10-03\",\"status\":\"pending\",\"label\":\"Demande en atte"
+    },
+    {
+      "name": "2026-10 has no past days",
+      "ok": true,
+      "detail": {
+        "pending": 3,
+        "worked": 21,
+        "off": 7
+      }
+    },
+    {
+      "name": "2026-10 has realistic worked days",
+      "ok": true,
+      "detail": {
+        "pending": 3,
+        "worked": 21,
+        "off": 7
+      }
+    },
+    {
+      "name": "2026-10 has realistic OFF/weekend days",
+      "ok": true,
+      "detail": {
+        "pending": 3,
+        "worked": 21,
+        "off": 7
+      }
+    },
+    {
+      "name": "GET /availability 2026-11 returns 200",
+      "ok": true,
+      "detail": "status=200 body={\"month\":\"2026-11\",\"days\":[{\"date\":\"2026-11-01\",\"status\":\"holiday\",\"label\":\"Férié — Toussaint\",\"selectable\":false,\"weekday\":6},{\"date\":\"2026-11-02\",\"status\":\"off\",\"label\":\"Jour OFF\",\"selectable\":false,\"weekday\":0},{\"date\":\"2026-11-03\",\"status\":\"off\",\"label\":\"Jour OFF\",\"selectable\":false,\"weekday\":1}"
+    },
+    {
+      "name": "2026-11 has no past days",
+      "ok": true,
+      "detail": {
+        "holiday": 2,
+        "off": 9,
+        "pending": 1,
+        "worked": 18
+      }
+    },
+    {
+      "name": "2026-11 has realistic worked days",
+      "ok": true,
+      "detail": {
+        "holiday": 2,
+        "off": 9,
+        "pending": 1,
+        "worked": 18
+      }
+    },
+    {
+      "name": "2026-11 has realistic OFF/weekend days",
+      "ok": true,
+      "detail": {
+        "holiday": 2,
+        "off": 9,
+        "pending": 1,
+        "worked": 18
+      }
+    },
+    {
+      "name": "2026-09-06 Sunday is status=off and not selectable",
+      "ok": false,
+      "detail": {
+        "date": "2026-09-06",
+        "status": "worked",
+        "label": "Travail 10:00–14:00",
+        "selectable": true,
+        "weekday": 6
+      }
+    },
+    {
+      "name": "past date rejected with 400",
+      "ok": true,
+      "detail": "status=400 body={\"detail\":{\"message\":\"Certaines dates sélectionnées ne sont pas disponibles\",\"invalid_dates\":[\"2025-01-01 : jour passé\"]}}"
+    },
+    {
+      "name": "past rejection includes 'jour passé'",
+      "ok": true,
+      "detail": [
+        "2025-01-01 : jour passé"
+      ]
+    },
+    {
+      "name": "Assomption 2026-08-15 rejected with 400",
+      "ok": true,
+      "detail": "status=400 body={\"detail\":{\"message\":\"Certaines dates sélectionnées ne sont pas disponibles\",\"invalid_dates\":[\"2026-08-15 : jour férié (Assomption)\"]}}"
+    },
+    {
+      "name": "holiday rejection includes 'jour férié (Assomption)'",
+      "ok": true,
+      "detail": [
+        "2026-08-15 : jour férié (Assomption)"
+      ]
+    },
+    {
+      "name": "Idriss OFF Sunday 2026-09-06 rejected with 400",
+      "ok": false,
+      "detail": "status=200 body={\"created\":1,\"ranges\":[{\"start\":\"2026-09-06\",\"end\":\"2026-09-06\"}]}"
+    },
+    {
+      "name": "OFF rejection includes 'jour OFF'",
+      "ok": false,
+      "detail": []
+    },
+    {
+      "name": "mixed valid+invalid request rejected with 400",
+      "ok": true,
+      "detail": "status=400 body={\"detail\":{\"message\":\"Certaines dates sélectionnées ne sont pas disponibles\",\"invalid_dates\":[\"2026-09-06 : déjà en congé ou en attente\"]}}"
+    },
+    {
+      "name": "mixed rejection reports invalid OFF date",
+      "ok": false,
+      "detail": [
+        "2026-09-06 : déjà en congé ou en attente"
+      ]
+    },
+    {
+      "name": "mixed valid+invalid request is atomic (no insertion)",
+      "ok": true,
+      "detail": {
+        "before": 0,
+        "after": 0,
+        "comment": "QA14 atomic 5ff6bdbe"
+      }
+    },
+    {
+      "name": "valid selectable worked dates still submit successfully",
+      "ok": true,
+      "detail": "status=200 body={\"created\":2,\"ranges\":[{\"start\":\"2026-09-02\",\"end\":\"2026-09-03\"},{\"start\":\"2026-09-05\",\"end\":\"2026-09-05\"}]}"
+    },
+    {
+      "name": "valid multi request creates two ranges for contiguous + non-contiguous days",
+      "ok": true,
+      "detail": {
+        "created": 2,
+        "ranges": [
+          {
+            "start": "2026-09-02",
+            "end": "2026-09-03"
+          },
+          {
+            "start": "2026-09-05",
+            "end": "2026-09-05"
+          }
+        ]
+      }
+    },
+    {
+      "name": "valid multi request persisted two pending request rows",
+      "ok": true,
+      "detail": [
+        {
+          "id": "cf47bcf1-4622-4949-8445-cb8f041cebe7",
+          "employee_id": "emp-idriss-malonga",
+          "type": "rtt",
+          "start_date": "2026-09-05",
+          "end_date": "2026-09-05",
+          "comment": "QA14 valid multi 5ff6bdbe",
+          "amount": null,
+          "status": "pending",
+          "created_at": "2026-07-16T12:37:23.613398+00:00",
+          "decided_at": null
+        },
+        {
+          "id": "507157cd-fa08-4604-8e7d-a60bca928df1",
+          "employee_id": "emp-idriss-malonga",
+          "type": "rtt",
+          "start_date": "2026-09-02",
+          "end_date": "2026-09-03",
+          "comment": "QA14 valid multi 5ff6bdbe",
+          "amount": null,
+          "status": "pending",
+          "created_at": "2026-07-16T12:37:23.613033+00:00",
+          "decided_at": null
+        }
+      ]
+    },
+    {
+      "name": "already-pending date rejected on retry with 400",
+      "ok": true,
+      "detail": "status=400 body={\"detail\":{\"message\":\"Certaines dates sélectionnées ne sont pas disponibles\",\"invalid_dates\":[\"2026-09-02 : déjà en congé ou en attente\"]}}"
+    },
+    {
+      "name": "duplicate rejection includes 'déjà en congé ou en attente'",
+      "ok": true,
+      "detail": [
+        "2026-09-02 : déjà en congé ou en attente"
+      ]
+    }
+  ],
+  "details": {
+    "availability": {
+      "2026-09": {
+        "month": "2026-09",
+        "day_count": 30,
+        "status_counts": {
+          "off": 6,
+          "worked": 20,
+          "pending": 4
+        },
+        "weekend_samples": [
+          {
+            "date": "2026-09-05",
+            "status": "worked",
+            "label": "Travail 09:00–14:00",
+            "selectable": true,
+            "weekday": 5
+          },
+          {
+            "date": "2026-09-06",
+            "status": "worked",
+            "label": "Travail 10:00–14:00",
+            "selectable": true,
+            "weekday": 6
+          },
+          {
+            "date": "2026-09-12",
+            "status": "worked",
+            "label": "Travail 09:00–14:00",
+            "selectable": true,
+            "weekday": 5
+          },
+          {
+            "date": "2026-09-13",
+            "status": "worked",
+            "label": "Travail 10:00–14:00",
+            "selectable": true,
+            "weekday": 6
+          },
+          {
+            "date": "2026-09-19",
+            "status": "worked",
+            "label": "Travail 09:00–14:00",
+            "selectable": true,
+            "weekday": 5
+          },
+          {
+            "date": "2026-09-20",
+            "status": "worked",
+            "label": "Travail 10:00–14:00",
+            "selectable": true,
+            "weekday": 6
+          }
+        ]
+      },
+      "2026-10": {
+        "month": "2026-10",
+        "day_count": 31,
+        "status_counts": {
+          "pending": 3,
+          "worked": 21,
+          "off": 7
+        },
+        "weekend_samples": [
+          {
+            "date": "2026-10-03",
+            "status": "pending",
+            "label": "Demande en attente (CONGE)",
+            "selectable": false,
+            "weekday": 5
+          },
+          {
+            "date": "2026-10-04",
+            "status": "worked",
+            "label": "Travail 10:00–14:00",
+            "selectable": true,
+            "weekday": 6
+          },
+          {
+            "date": "2026-10-10",
+            "status": "worked",
+            "label": "Travail 09:00–14:00",
+            "selectable": true,
+            "weekday": 5
+          },
+          {
+            "date": "2026-10-11",
+            "status": "worked",
+            "label": "Travail 10:00–14:00",
+            "selectable": true,
+            "weekday": 6
+          },
+          {
+            "date": "2026-10-17",
+            "status": "worked",
+            "label": "Travail 09:00–14:00",
+            "selectable": true,
+            "weekday": 5
+          },
+          {
+            "date": "2026-10-18",
+            "status": "worked",
+            "label": "Travail 10:00–14:00",
+            "selectable": true,
+            "weekday": 6
+          }
+        ]
+      },
+      "2026-11": {
+        "month": "2026-11",
+        "day_count": 30,
+        "status_counts": {
+          "holiday": 2,
+          "off": 9,
+          "pending": 1,
+          "worked": 18
+        },
+        "weekend_samples": [
+          {
+            "date": "2026-11-01",
+            "status": "holiday",
+            "label": "Férié — Toussaint",
+            "selectable": false,
+            "weekday": 6
+          },
+          {
+            "date": "2026-11-07",
+            "status": "worked",
+            "label": "Travail 09:00–14:00",
+            "selectable": true,
+            "weekday": 5
+          },
+          {
+            "date": "2026-11-08",
+            "status": "worked",
+            "label": "Travail 10:00–14:00",
+            "selectable": true,
+            "weekday": 6
+          },
+          {
+            "date": "2026-11-14",
+            "status": "worked",
+            "label": "Travail 09:00–14:00",
+            "selectable": true,
+            "weekday": 5
+          },
+          {
+            "date": "2026-11-15",
+            "status": "worked",
+            "label": "Travail 10:00–14:00",
+            "selectable": true,
+            "weekday": 6
+          },
+          {
+            "date": "2026-11-21",
+            "status": "worked",
+            "label": "Travail 09:00–14:00",
+            "selectable": true,
+            "weekday": 5
+          }
+        ]
+      }
+    },
+    "selected_test_dates": {
+      "atomic_valid": "2026-09-02",
+      "group_dates": [
+        "2026-09-02",
+        "2026-09-03",
+        "2026-09-05"
+      ]
+    }
+  },
+  "overall_ok": false
+}
