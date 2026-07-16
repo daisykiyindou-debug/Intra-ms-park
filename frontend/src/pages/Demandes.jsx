@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { createPortal } from "react-dom";
 import {
   Plus, FileText, Calendar as CalIcon, Banknote, Stethoscope, ArrowLeftRight, Package,
   X, Clock, CheckCircle2, XCircle, Info, Paperclip, Sun,
@@ -7,6 +8,7 @@ import { toast } from "sonner";
 import { api, formatDateFr } from "@/lib/api";
 import { useApp } from "@/contexts/AppContext";
 import useLiveData, { notifyLiveRefresh } from "@/hooks/useLiveData";
+import LeaveCalendar from "@/components/LeaveCalendar";
 
 const TYPES = [
   { k: "conge", l: "Congé payé", icon: CalIcon, color: "#3BA4FF" },
@@ -44,6 +46,7 @@ export default function Demandes() {
     comment: "",
     amount: "",
     attachment_name: "",
+    dates: [], // for interactive calendar (conge/rtt/absence)
   });
 
   const refresh = () => {
@@ -58,19 +61,37 @@ export default function Demandes() {
 
   const submit = async (e) => {
     e.preventDefault();
+    const usesCalendar = ["conge", "rtt", "absence"].includes(form.type);
     const comment = form.attachment_name
       ? `${form.comment} [PJ: ${form.attachment_name}]`
       : form.comment;
-    await api.post("/requests", {
-      type: form.type,
-      start_date: form.start_date,
-      end_date: form.end_date || form.start_date,
-      comment,
-      amount: form.amount ? parseFloat(form.amount) : null,
-    });
-    toast.success("Demande envoyée", { description: "Votre manager sera notifié." });
+
+    if (usesCalendar) {
+      if (!form.dates || form.dates.length === 0) {
+        toast.error("Sélectionnez au moins une journée dans le calendrier");
+        return;
+      }
+      const res = await api.post("/requests/multi", {
+        type: form.type,
+        dates: form.dates,
+        comment,
+      });
+      const n = res.data?.created || 1;
+      toast.success(`${form.dates.length} jour${form.dates.length > 1 ? "s" : ""} demandé${form.dates.length > 1 ? "s" : ""}`, {
+        description: `${n} demande${n > 1 ? "s" : ""} envoyée${n > 1 ? "s" : ""} à votre manager.`,
+      });
+    } else {
+      await api.post("/requests", {
+        type: form.type,
+        start_date: form.start_date,
+        end_date: form.end_date || form.start_date,
+        comment,
+        amount: form.amount ? parseFloat(form.amount) : null,
+      });
+      toast.success("Demande envoyée", { description: "Votre manager sera notifié." });
+    }
     setOpen(false);
-    setForm({ type: "conge", start_date: "", end_date: "", comment: "", amount: "", attachment_name: "" });
+    setForm({ type: "conge", start_date: "", end_date: "", comment: "", amount: "", attachment_name: "", dates: [] });
     refresh();
     notifyLiveRefresh(["requests", "notifications"]);
   };
@@ -190,18 +211,18 @@ export default function Demandes() {
       </div>
 
       {/* New request modal */}
-      {open && (
+      {open && createPortal(
         <div
           role="dialog"
           aria-modal="true"
           onClick={() => setOpen(false)}
-          className="fixed inset-0 z-50 bg-black/40 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto"
+          className="fixed inset-0 z-[100] bg-black/40 backdrop-blur-md flex items-start md:items-center justify-center p-4 overflow-y-auto"
         >
           <form
             onClick={(e) => e.stopPropagation()}
             onSubmit={submit}
             data-testid="request-form"
-            className="ms-card max-w-lg w-full p-6 my-8"
+            className="ms-card max-w-2xl w-full p-6 my-8"
           >
             <div className="flex items-start justify-between">
               <div>
@@ -241,31 +262,41 @@ export default function Demandes() {
               </div>
             </div>
 
-            <div className="mt-4 grid grid-cols-2 gap-3">
-              <div>
-                <label className="ms-overline">Date début</label>
-                <input
-                  type="date"
-                  required
-                  min={todayIso}
-                  data-testid="start-date"
-                  value={form.start_date}
-                  onChange={(e) => setForm({ ...form, start_date: e.target.value })}
-                  className="ms-input mt-2"
+            {["conge", "rtt", "absence"].includes(form.type) ? (
+              <div className="mt-4">
+                <label className="ms-overline block mb-2">Sélectionnez vos jours dans le calendrier</label>
+                <LeaveCalendar
+                  value={form.dates}
+                  onChange={(d) => setForm({ ...form, dates: d })}
                 />
               </div>
-              <div>
-                <label className="ms-overline">Date fin</label>
-                <input
-                  type="date"
-                  min={form.start_date || todayIso}
-                  data-testid="end-date"
-                  value={form.end_date}
-                  onChange={(e) => setForm({ ...form, end_date: e.target.value })}
-                  className="ms-input mt-2"
-                />
+            ) : (
+              <div className="mt-4 grid grid-cols-2 gap-3">
+                <div>
+                  <label className="ms-overline">Date début</label>
+                  <input
+                    type="date"
+                    required
+                    min={todayIso}
+                    data-testid="start-date"
+                    value={form.start_date}
+                    onChange={(e) => setForm({ ...form, start_date: e.target.value })}
+                    className="ms-input mt-2"
+                  />
+                </div>
+                <div>
+                  <label className="ms-overline">Date fin</label>
+                  <input
+                    type="date"
+                    min={form.start_date || todayIso}
+                    data-testid="end-date"
+                    value={form.end_date}
+                    onChange={(e) => setForm({ ...form, end_date: e.target.value })}
+                    className="ms-input mt-2"
+                  />
+                </div>
               </div>
-            </div>
+            )}
 
             {form.type === "acompte" && (
               <div className="mt-4">
@@ -330,15 +361,16 @@ export default function Demandes() {
               Envoyer la demande
             </button>
           </form>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* Info modal */}
-      {infoOpen && (
+      {infoOpen && createPortal(
         <div
           role="dialog"
           onClick={() => setInfoOpen(false)}
-          className="fixed inset-0 z-50 bg-black/40 backdrop-blur-md flex items-center justify-center p-4"
+          className="fixed inset-0 z-[100] bg-black/40 backdrop-blur-md flex items-center justify-center p-4"
         >
           <div onClick={(e) => e.stopPropagation()} className="ms-card max-w-md w-full p-6">
             <div className="flex items-start justify-between mb-3">
@@ -365,7 +397,8 @@ export default function Demandes() {
               </li>
             </ul>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

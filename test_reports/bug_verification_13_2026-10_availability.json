@@ -1,0 +1,287 @@
+{
+  "month": "2026-10",
+  "counts": {
+    "pending": 3,
+    "available": 28
+  },
+  "expected_off_dates": [
+    "2026-10-05",
+    "2026-10-06",
+    "2026-10-12",
+    "2026-10-13",
+    "2026-10-19",
+    "2026-10-20",
+    "2026-10-26",
+    "2026-10-27"
+  ],
+  "bad_expected_off_days": [
+    {
+      "date": "2026-10-06",
+      "status": "available",
+      "label": "Disponible",
+      "selectable": true,
+      "weekday": 1
+    },
+    {
+      "date": "2026-10-12",
+      "status": "available",
+      "label": "Disponible",
+      "selectable": true,
+      "weekday": 0
+    },
+    {
+      "date": "2026-10-13",
+      "status": "available",
+      "label": "Disponible",
+      "selectable": true,
+      "weekday": 1
+    },
+    {
+      "date": "2026-10-19",
+      "status": "available",
+      "label": "Disponible",
+      "selectable": true,
+      "weekday": 0
+    },
+    {
+      "date": "2026-10-20",
+      "status": "available",
+      "label": "Disponible",
+      "selectable": true,
+      "weekday": 1
+    },
+    {
+      "date": "2026-10-26",
+      "status": "available",
+      "label": "Disponible",
+      "selectable": true,
+      "weekday": 0
+    },
+    {
+      "date": "2026-10-27",
+      "status": "available",
+      "label": "Disponible",
+      "selectable": true,
+      "weekday": 1
+    }
+  ],
+  "days": [
+    {
+      "date": "2026-10-01",
+      "status": "pending",
+      "label": "Demande en attente (CONGE)",
+      "selectable": false,
+      "weekday": 3
+    },
+    {
+      "date": "2026-10-02",
+      "status": "available",
+      "label": "Disponible",
+      "selectable": true,
+      "weekday": 4
+    },
+    {
+      "date": "2026-10-03",
+      "status": "pending",
+      "label": "Demande en attente (CONGE)",
+      "selectable": false,
+      "weekday": 5
+    },
+    {
+      "date": "2026-10-04",
+      "status": "available",
+      "label": "Disponible",
+      "selectable": true,
+      "weekday": 6
+    },
+    {
+      "date": "2026-10-05",
+      "status": "pending",
+      "label": "Demande en attente (CONGE)",
+      "selectable": false,
+      "weekday": 0
+    },
+    {
+      "date": "2026-10-06",
+      "status": "available",
+      "label": "Disponible",
+      "selectable": true,
+      "weekday": 1
+    },
+    {
+      "date": "2026-10-07",
+      "status": "available",
+      "label": "Disponible",
+      "selectable": true,
+      "weekday": 2
+    },
+    {
+      "date": "2026-10-08",
+      "status": "available",
+      "label": "Disponible",
+      "selectable": true,
+      "weekday": 3
+    },
+    {
+      "date": "2026-10-09",
+      "status": "available",
+      "label": "Disponible",
+      "selectable": true,
+      "weekday": 4
+    },
+    {
+      "date": "2026-10-10",
+      "status": "available",
+      "label": "Disponible",
+      "selectable": true,
+      "weekday": 5
+    },
+    {
+      "date": "2026-10-11",
+      "status": "available",
+      "label": "Disponible",
+      "selectable": true,
+      "weekday": 6
+    },
+    {
+      "date": "2026-10-12",
+      "status": "available",
+      "label": "Disponible",
+      "selectable": true,
+      "weekday": 0
+    },
+    {
+      "date": "2026-10-13",
+      "status": "available",
+      "label": "Disponible",
+      "selectable": true,
+      "weekday": 1
+    },
+    {
+      "date": "2026-10-14",
+      "status": "available",
+      "label": "Disponible",
+      "selectable": true,
+      "weekday": 2
+    },
+    {
+      "date": "2026-10-15",
+      "status": "available",
+      "label": "Disponible",
+      "selectable": true,
+      "weekday": 3
+    },
+    {
+      "date": "2026-10-16",
+      "status": "available",
+      "label": "Disponible",
+      "selectable": true,
+      "weekday": 4
+    },
+    {
+      "date": "2026-10-17",
+      "status": "available",
+      "label": "Disponible",
+      "selectable": true,
+      "weekday": 5
+    },
+    {
+      "date": "2026-10-18",
+      "status": "available",
+      "label": "Disponible",
+      "selectable": true,
+      "weekday": 6
+    },
+    {
+      "date": "2026-10-19",
+      "status": "available",
+      "label": "Disponible",
+      "selectable": true,
+      "weekday": 0
+    },
+    {
+      "date": "2026-10-20",
+      "status": "available",
+      "label": "Disponible",
+      "selectable": true,
+      "weekday": 1
+    },
+    {
+      "date": "2026-10-21",
+      "status": "available",
+      "label": "Disponible",
+      "selectable": true,
+      "weekday": 2
+    },
+    {
+      "date": "2026-10-22",
+      "status": "available",
+      "label": "Disponible",
+      "selectable": true,
+      "weekday": 3
+    },
+    {
+      "date": "2026-10-23",
+      "status": "available",
+      "label": "Disponible",
+      "selectable": true,
+      "weekday": 4
+    },
+    {
+      "date": "2026-10-24",
+      "status": "available",
+      "label": "Disponible",
+      "selectable": true,
+      "weekday": 5
+    },
+    {
+      "date": "2026-10-25",
+      "status": "available",
+      "label": "Disponible",
+      "selectable": true,
+      "weekday": 6
+    },
+    {
+      "date": "2026-10-26",
+      "status": "available",
+      "label": "Disponible",
+      "selectable": true,
+      "weekday": 0
+    },
+    {
+      "date": "2026-10-27",
+      "status": "available",
+      "label": "Disponible",
+      "selectable": true,
+      "weekday": 1
+    },
+    {
+      "date": "2026-10-28",
+      "status": "available",
+      "label": "Disponible",
+      "selectable": true,
+      "weekday": 2
+    },
+    {
+      "date": "2026-10-29",
+      "status": "available",
+      "label": "Disponible",
+      "selectable": true,
+      "weekday": 3
+    },
+    {
+      "date": "2026-10-30",
+      "status": "available",
+      "label": "Disponible",
+      "selectable": true,
+      "weekday": 4
+    },
+    {
+      "date": "2026-10-31",
+      "status": "available",
+      "label": "Disponible",
+      "selectable": true,
+      "weekday": 5
+    }
+  ]
+}

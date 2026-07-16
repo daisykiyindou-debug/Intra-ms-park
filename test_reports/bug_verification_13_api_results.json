@@ -1,0 +1,271 @@
+{
+  "checks": [
+    {
+      "name": "GET /availability 2026-08 returns 200",
+      "ok": true,
+      "detail": "status=200 body={\"month\":\"2026-08\",\"days\":[{\"date\":\"2026-08-01\",\"status\":\"worked\",\"label\":\"Travail 09:00–14:00\",\"selectable\":true,\"weekday\":5},{\"date\":\"2026-08-02\",\"status\":\"worked\",\"label\":\"Travail 14:00–18:00\",\"selectable\":true,\"weekday\":6},{\"date\":\"2026-08-03\",\"status\":\"cp_approved\",\"label\":\"CP validé\",\"selectab"
+    },
+    {
+      "name": "availability includes month=2026-08",
+      "ok": true,
+      "detail": "2026-08"
+    },
+    {
+      "name": "availability day count valid",
+      "ok": true,
+      "detail": 31
+    },
+    {
+      "name": "each day has required keys",
+      "ok": true,
+      "detail": []
+    },
+    {
+      "name": "each day has valid status",
+      "ok": true,
+      "detail": {
+        "worked": 2,
+        "cp_approved": 23,
+        "rtt_approved": 2,
+        "holiday": 1,
+        "available": 3
+      }
+    },
+    {
+      "name": "Assomption 2026-08-15 marked holiday and disabled",
+      "ok": true,
+      "detail": {
+        "date": "2026-08-15",
+        "status": "holiday",
+        "label": "Férié — Assomption",
+        "selectable": false,
+        "weekday": 5
+      }
+    },
+    {
+      "name": "August has worked days",
+      "ok": true,
+      "detail": {
+        "worked": 2,
+        "cp_approved": 23,
+        "rtt_approved": 2,
+        "holiday": 1,
+        "available": 3
+      }
+    },
+    {
+      "name": "August has OFF days",
+      "ok": false,
+      "detail": {
+        "worked": 2,
+        "cp_approved": 23,
+        "rtt_approved": 2,
+        "holiday": 1,
+        "available": 3
+      }
+    },
+    {
+      "name": "POST /requests/multi returns 200",
+      "ok": true,
+      "detail": "status=200 body={\"created\":2,\"ranges\":[{\"start\":\"2026-09-14\",\"end\":\"2026-09-15\"},{\"start\":\"2026-09-18\",\"end\":\"2026-09-18\"}]}"
+    },
+    {
+      "name": "multi created=2",
+      "ok": true,
+      "detail": {
+        "created": 2,
+        "ranges": [
+          {
+            "start": "2026-09-14",
+            "end": "2026-09-15"
+          },
+          {
+            "start": "2026-09-18",
+            "end": "2026-09-18"
+          }
+        ]
+      }
+    },
+    {
+      "name": "multi ranges split contiguous/non-contiguous correctly",
+      "ok": true,
+      "detail": [
+        {
+          "start": "2026-09-14",
+          "end": "2026-09-15"
+        },
+        {
+          "start": "2026-09-18",
+          "end": "2026-09-18"
+        }
+      ]
+    },
+    {
+      "name": "GET /requests returns 200",
+      "ok": true,
+      "detail": "status=200"
+    },
+    {
+      "name": "GET /requests contains two new pending ranges",
+      "ok": true,
+      "detail": [
+        {
+          "id": "158b4382-6a2b-46c5-9a73-9d2943d3630e",
+          "employee_id": "emp-idriss-malonga",
+          "type": "conge",
+          "start_date": "2026-09-18",
+          "end_date": "2026-09-18",
+          "comment": "QA verification multi-range 13",
+          "amount": null,
+          "status": "pending",
+          "created_at": "2026-07-16T12:24:26.214454+00:00",
+          "decided_at": null
+        },
+        {
+          "id": "9dd306ff-486d-4d9f-8a3e-a0471cf2210c",
+          "employee_id": "emp-idriss-malonga",
+          "type": "conge",
+          "start_date": "2026-09-14",
+          "end_date": "2026-09-15",
+          "comment": "QA verification multi-range 13",
+          "amount": null,
+          "status": "pending",
+          "created_at": "2026-07-16T12:24:26.213525+00:00",
+          "decided_at": null
+        }
+      ]
+    }
+  ],
+  "details": {
+    "availability_2026_08": {
+      "month": "2026-08",
+      "day_count": 31,
+      "status_counts": {
+        "worked": 2,
+        "cp_approved": 23,
+        "rtt_approved": 2,
+        "holiday": 1,
+        "available": 3
+      },
+      "sample_days": [
+        {
+          "date": "2026-08-01",
+          "status": "worked",
+          "label": "Travail 09:00–14:00",
+          "selectable": true,
+          "weekday": 5
+        },
+        {
+          "date": "2026-08-02",
+          "status": "worked",
+          "label": "Travail 14:00–18:00",
+          "selectable": true,
+          "weekday": 6
+        },
+        {
+          "date": "2026-08-03",
+          "status": "cp_approved",
+          "label": "CP validé",
+          "selectable": false,
+          "weekday": 0
+        },
+        {
+          "date": "2026-08-04",
+          "status": "cp_approved",
+          "label": "CP validé",
+          "selectable": false,
+          "weekday": 1
+        },
+        {
+          "date": "2026-08-05",
+          "status": "rtt_approved",
+          "label": "RTT validé",
+          "selectable": false,
+          "weekday": 2
+        },
+        {
+          "date": "2026-08-14",
+          "status": "cp_approved",
+          "label": "CP validé",
+          "selectable": false,
+          "weekday": 4
+        },
+        {
+          "date": "2026-08-15",
+          "status": "holiday",
+          "label": "Férié — Assomption",
+          "selectable": false,
+          "weekday": 5
+        },
+        {
+          "date": "2026-08-16",
+          "status": "cp_approved",
+          "label": "CP validé",
+          "selectable": false,
+          "weekday": 6
+        },
+        {
+          "date": "2026-08-29",
+          "status": "cp_approved",
+          "label": "CP validé",
+          "selectable": false,
+          "weekday": 5
+        },
+        {
+          "date": "2026-08-30",
+          "status": "cp_approved",
+          "label": "CP validé",
+          "selectable": false,
+          "weekday": 6
+        },
+        {
+          "date": "2026-08-31",
+          "status": "available",
+          "label": "Disponible",
+          "selectable": true,
+          "weekday": 0
+        }
+      ]
+    },
+    "multi_response": {
+      "created": 2,
+      "ranges": [
+        {
+          "start": "2026-09-14",
+          "end": "2026-09-15"
+        },
+        {
+          "start": "2026-09-18",
+          "end": "2026-09-18"
+        }
+      ]
+    },
+    "matching_requests": [
+      {
+        "id": "158b4382-6a2b-46c5-9a73-9d2943d3630e",
+        "employee_id": "emp-idriss-malonga",
+        "type": "conge",
+        "start_date": "2026-09-18",
+        "end_date": "2026-09-18",
+        "comment": "QA verification multi-range 13",
+        "amount": null,
+        "status": "pending",
+        "created_at": "2026-07-16T12:24:26.214454+00:00",
+        "decided_at": null
+      },
+      {
+        "id": "9dd306ff-486d-4d9f-8a3e-a0471cf2210c",
+        "employee_id": "emp-idriss-malonga",
+        "type": "conge",
+        "start_date": "2026-09-14",
+        "end_date": "2026-09-15",
+        "comment": "QA verification multi-range 13",
+        "amount": null,
+        "status": "pending",
+        "created_at": "2026-07-16T12:24:26.213525+00:00",
+        "decided_at": null
+      }
+    ]
+  },
+  "overall_ok": false
+}

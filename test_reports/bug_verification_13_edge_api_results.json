@@ -1,0 +1,32 @@
+{
+  "checks": [
+    {
+      "name": "past_day",
+      "dates": [
+        "2026-07-01"
+      ],
+      "status_code": 200,
+      "blocked": false,
+      "body": "{\"created\":1,\"ranges\":[{\"start\":\"2026-07-01\",\"end\":\"2026-07-01\"}]}"
+    },
+    {
+      "name": "holiday_assomption",
+      "dates": [
+        "2026-08-15"
+      ],
+      "status_code": 200,
+      "blocked": false,
+      "body": "{\"created\":1,\"ranges\":[{\"start\":\"2026-08-15\",\"end\":\"2026-08-15\"}]}"
+    },
+    {
+      "name": "already_pending_day",
+      "dates": [
+        "2026-09-14"
+      ],
+      "status_code": 200,
+      "blocked": false,
+      "body": "{\"created\":1,\"ranges\":[{\"start\":\"2026-09-14\",\"end\":\"2026-09-14\"}]}"
+    }
+  ],
+  "overall_blocked_all": false
+}

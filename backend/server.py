@@ -1565,6 +1565,184 @@ async def get_schedule_day(day: str):
     return {"day": day, "entry": item, "is_working_day": bool(item and item.get("type") == "shift")}
 
 
+# ─── French public holidays (Alsace-Moselle excluded, jour de solidarité included)
+_FR_HOLIDAYS = {
+    "01-01": "Jour de l'an",
+    "05-01": "Fête du Travail",
+    "05-08": "Victoire 1945",
+    "07-14": "Fête nationale",
+    "08-15": "Assomption",
+    "11-01": "Toussaint",
+    "11-11": "Armistice 1918",
+    "12-25": "Noël",
+    # Movable feasts kept simple — Easter Monday, Ascension, Whit Monday are computed
+}
+
+
+def _easter_sunday(year: int) -> date:
+    """Anonymous Gregorian algorithm."""
+    a = year % 19
+    b, c = divmod(year, 100)
+    d, e = divmod(b, 4)
+    f = (b + 8) // 25
+    g = (b - f + 1) // 3
+    h = (19 * a + b - d - g + 15) % 30
+    i, k = divmod(c, 4)
+    L = (32 + 2 * e + 2 * i - h - k) % 7
+    m = (a + 11 * h + 22 * L) // 451
+    month = (h + L - 7 * m + 114) // 31
+    day = ((h + L - 7 * m + 114) % 31) + 1
+    return date(year, month, day)
+
+
+def _year_holidays(year: int) -> dict:
+    hols = {f"{year}-{md}": name for md, name in _FR_HOLIDAYS.items()}
+    easter = _easter_sunday(year)
+    hols[(easter + timedelta(days=1)).isoformat()] = "Lundi de Pâques"
+    hols[(easter + timedelta(days=39)).isoformat()] = "Ascension"
+    hols[(easter + timedelta(days=50)).isoformat()] = "Lundi de Pentecôte"
+    return hols
+
+
+@api.get("/availability")
+async def availability(month: Optional[str] = None):
+    """Combined day-availability for the calendar picker (used to file leave/RTT requests).
+
+    Returns for each day of the given month:
+      - status: available | off | worked | cp_approved | rtt_approved | pending | holiday | past
+      - label: short display string (e.g. "09h-17h", "Jour férié — Ascension")
+      - selectable: bool
+    """
+    if month is None:
+        month = date.today().strftime("%Y-%m")
+    y, m = map(int, month.split("-"))
+    first = date(y, m, 1)
+    last = (date(y, m + 1, 1) if m < 12 else date(y + 1, 1, 1)) - timedelta(days=1)
+    await _ensure_range(current_user(), first, last)
+
+    # Load schedule entries for the month
+    entries = await db.schedules.find(
+        {"employee_id": current_user(),
+         "day": {"$gte": first.isoformat(), "$lte": last.isoformat()}},
+        {"_id": 0},
+    ).to_list(200)
+    by_day = {e["day"]: e for e in entries}
+
+    # Load employee's requests overlapping this month (any status)
+    reqs = await db.requests.find(
+        {"employee_id": current_user()},
+        {"_id": 0},
+    ).to_list(500)
+    by_day_req: dict[str, dict] = {}
+    for r in reqs:
+        try:
+            s = date.fromisoformat(r["start_date"])
+            e = date.fromisoformat(r.get("end_date") or r["start_date"])
+        except Exception:
+            continue
+        cur = s
+        while cur <= e:
+            iso = cur.isoformat()
+            if first <= cur <= last:
+                # Priority: approved > pending > rejected
+                prev = by_day_req.get(iso)
+                if not prev or (prev["status"] == "rejected") or (prev["status"] == "pending" and r["status"] == "approved"):
+                    by_day_req[iso] = r
+            cur += timedelta(days=1)
+
+    holidays = _year_holidays(y)
+    today_iso = date.today().isoformat()
+    days = []
+    cur = first
+    while cur <= last:
+        iso = cur.isoformat()
+        r = by_day_req.get(iso)
+        sched = by_day.get(iso)
+        status, label, selectable = "available", "Disponible", True
+
+        if iso < today_iso:
+            status, selectable = "past", False
+            label = "Passé"
+        elif iso in holidays:
+            status, selectable = "holiday", False
+            label = f"Férié — {holidays[iso]}"
+        elif r and r["status"] == "approved" and r["type"] in ("conge", "rtt"):
+            status = "cp_approved" if r["type"] == "conge" else "rtt_approved"
+            selectable = False
+            label = "CP validé" if r["type"] == "conge" else "RTT validé"
+        elif r and r["status"] == "pending":
+            status = "pending"
+            selectable = False
+            label = f"Demande en attente ({r['type'].upper()})"
+        elif sched and sched.get("type") == "off":
+            status, selectable = "off", False
+            label = "Jour OFF"
+        elif sched and sched.get("type") == "shift":
+            status, selectable = "worked", True  # can still request CP/RTT on a worked day
+            label = f"Travail {sched.get('start', '')}–{sched.get('end', '')}"
+        elif sched and sched.get("type") in ("cp", "rtt"):
+            status = "cp_approved" if sched["type"] == "cp" else "rtt_approved"
+            selectable = False
+            label = "CP" if sched["type"] == "cp" else "RTT"
+
+        days.append({
+            "date": iso,
+            "status": status,
+            "label": label,
+            "selectable": selectable,
+            "weekday": cur.weekday(),  # 0=Mon
+        })
+        cur += timedelta(days=1)
+
+    return {"month": month, "days": days}
+
+
+class MultiDayRequest(BaseModel):
+    type: str  # conge | rtt | absence
+    dates: list[str]  # list of ISO dates
+    comment: Optional[str] = ""
+
+
+@api.post("/requests/multi")
+async def create_multi_day_request(payload: MultiDayRequest):
+    """Create one HR request per contiguous range picked from the calendar."""
+    if not payload.dates:
+        raise HTTPException(400, "Aucun jour sélectionné")
+    if payload.type not in ("conge", "rtt", "absence"):
+        raise HTTPException(400, "Type de demande invalide pour la sélection multi-jours")
+
+    # Sort & split into contiguous ranges
+    sorted_days = sorted(set(payload.dates))
+    ranges: list[tuple[str, str]] = []
+    start = prev = sorted_days[0]
+    for d in sorted_days[1:]:
+        if date.fromisoformat(d) - date.fromisoformat(prev) == timedelta(days=1):
+            prev = d
+            continue
+        ranges.append((start, prev))
+        start = prev = d
+    ranges.append((start, prev))
+
+    created = []
+    for s, e in ranges:
+        r = {
+            "id": _id(),
+            "employee_id": current_user(),
+            "type": payload.type,
+            "start_date": s,
+            "end_date": e,
+            "comment": payload.comment or "",
+            "amount": None,
+            "status": "pending",
+            "created_at": _now(),
+            "decided_at": None,
+        }
+        await db.requests.insert_one(r.copy())
+        created.append(r)
+
+    return {"created": len(created), "ranges": [{"start": s, "end": e} for s, e in ranges]}
+
+
 # ─── Badging
 PARIS_TZ = ZoneInfo("Europe/Paris")
 

@@ -1,0 +1,284 @@
+{
+  "checks": [
+    {
+      "name": "login Idriss succeeds",
+      "ok": true,
+      "detail": "https://mspark-employee-hub.preview.emergentagent.com/dashboard"
+    },
+    {
+      "name": "/rh/demandes loads",
+      "ok": true,
+      "detail": null
+    },
+    {
+      "name": "modal is visible and portaled/top in viewport",
+      "ok": true,
+      "detail": {
+        "x": 624,
+        "y": 85.75,
+        "width": 672,
+        "height": 908.5
+      }
+    },
+    {
+      "name": "Congé payé selected by default",
+      "ok": true,
+      "detail": "rounded-xl border p-3 text-center transition-all border-[#3BA4FF] bg-[#3BA4FF]/8 shadow-md"
+    },
+    {
+      "name": "leave calendar present",
+      "ok": true,
+      "detail": null
+    },
+    {
+      "name": "calendar prev/next present",
+      "ok": true,
+      "detail": null
+    },
+    {
+      "name": "calendar shows month/year header",
+      "ok": true,
+      "detail": "Juillet 2026"
+    },
+    {
+      "name": "calendar weekday 7 columns",
+      "ok": true,
+      "detail": "L,M,M,J,V,S,D"
+    },
+    {
+      "name": "calendar has 28-31 day buttons",
+      "ok": true,
+      "detail": 31
+    },
+    {
+      "name": "calendar days have data-status",
+      "ok": true,
+      "detail": [
+        "available",
+        "off",
+        "past",
+        "worked"
+      ]
+    },
+    {
+      "name": "legend includes 7 required statuses",
+      "ok": true,
+      "detail": "Juillet 2026LMMJVSD12345678910111213141516Travail17Travail18Travail19Travail20OFF21OFF22Travail23Travail24Travail25Travail2627OFF28OFF29Travail30Travail31TravailDisponibleTravailOFFCP validéRTT validéEn attenteFériéCliquez sur les journées que vous souhaitez poser. Vous pouvez sélectionner plusieurs jours non consécutifs. Les jours OFF, fériés, déjà validés ou en attente sont automatiquement bloqués."
+    },
+    {
+      "name": "unavailable visible days are disabled",
+      "ok": true,
+      "detail": [
+        {
+          "id": "day-2026-07-01",
+          "status": "past",
+          "disabled": true,
+          "selected": "false"
+        },
+        {
+          "id": "day-2026-07-02",
+          "status": "past",
+          "disabled": true,
+          "selected": "false"
+        },
+        {
+          "id": "day-2026-07-03",
+          "status": "past",
+          "disabled": true,
+          "selected": "false"
+        },
+        {
+          "id": "day-2026-07-04",
+          "status": "past",
+          "disabled": true,
+          "selected": "false"
+        },
+        {
+          "id": "day-2026-07-05",
+          "status": "past",
+          "disabled": true,
+          "selected": "false"
+        }
+      ]
+    },
+    {
+      "name": "clicking unavailable day does not select it",
+      "ok": true,
+      "detail": {
+        "before": 0,
+        "after": 0,
+        "day": {
+          "id": "day-2026-07-01",
+          "status": "past",
+          "disabled": true,
+          "selected": "false"
+        }
+      }
+    },
+    {
+      "name": "can navigate to September 2026",
+      "ok": true,
+      "detail": "Septembre 2026"
+    },
+    {
+      "name": "September day buttons rendered",
+      "ok": true,
+      "detail": 30
+    },
+    {
+      "name": "found 3 selectable non-contiguous days",
+      "ok": true,
+      "detail": {
+        "selectable_sample": [
+          "2026-09-01",
+          "2026-09-02",
+          "2026-09-03",
+          "2026-09-04",
+          "2026-09-05",
+          "2026-09-06",
+          "2026-09-07",
+          "2026-09-08",
+          "2026-09-09",
+          "2026-09-10"
+        ],
+        "chosen": [
+          "2026-09-01",
+          "2026-09-03",
+          "2026-09-05"
+        ]
+      }
+    },
+    {
+      "name": "clicked days get data-selected=true",
+      "ok": true,
+      "detail": [
+        {
+          "date": "2026-09-01",
+          "selected": "true"
+        },
+        {
+          "date": "2026-09-03",
+          "selected": "true"
+        },
+        {
+          "date": "2026-09-05",
+          "selected": "true"
+        }
+      ]
+    },
+    {
+      "name": "summary displays 3 selected days",
+      "ok": true,
+      "detail": "Septembre 2026LMMJVSD1234567891011121314En attente15En attente161718En attente192021222324252627282930DisponibleTravailOFFCP validéRTT validéEn attenteFériéCliquez sur les journées que vous souhaitez poser. Vous pouvez sélectionner plusieurs jours non consécutifs. Les jours OFF, fériés, déjà validés ou en attente sont automatiquement bloqués.3 jours sélectionnés"
+    },
+    {
+      "name": "clicking selected day deselects",
+      "ok": true,
+      "detail": {
+        "date": "2026-09-03",
+        "data-selected": "false"
+      }
+    },
+    {
+      "name": "calendar disappears for Acompte",
+      "ok": true,
+      "detail": null
+    },
+    {
+      "name": "start/end date inputs appear for Acompte",
+      "ok": true,
+      "detail": null
+    },
+    {
+      "name": "Acompte classic submission closes modal and appears pending",
+      "ok": true,
+      "detail": {
+        "form_count": 0,
+        "has_comment": true
+      }
+    },
+    {
+      "name": "found 3 selectable October days for submit",
+      "ok": true,
+      "detail": {
+        "sample": [
+          "2026-10-01",
+          "2026-10-02",
+          "2026-10-03",
+          "2026-10-04",
+          "2026-10-05",
+          "2026-10-06",
+          "2026-10-07",
+          "2026-10-08",
+          "2026-10-09",
+          "2026-10-10"
+        ],
+        "chosen": [
+          "2026-10-01",
+          "2026-10-03",
+          "2026-10-05"
+        ]
+      }
+    },
+    {
+      "name": "calendar multi-day submission closes modal",
+      "ok": true,
+      "detail": 0
+    },
+    {
+      "name": "calendar submission refreshes list with pending conge",
+      "ok": true,
+      "detail": {
+        "has_comment": true,
+        "has_pending": true
+      }
+    },
+    {
+      "name": "Matériel/Echange/Maladie use classic date inputs",
+      "ok": true,
+      "detail": {
+        "materiel": {
+          "calendar_count": 0,
+          "start_count": 1,
+          "end_count": 1,
+          "attachment_count": null
+        },
+        "echange": {
+          "calendar_count": 0,
+          "start_count": 1,
+          "end_count": 1,
+          "attachment_count": null
+        },
+        "maladie": {
+          "calendar_count": 0,
+          "start_count": 1,
+          "end_count": 1,
+          "attachment_count": 1
+        }
+      }
+    },
+    {
+      "name": "no visible error messages",
+      "ok": true,
+      "detail": ""
+    }
+  ],
+  "console": [
+    {
+      "type": "info",
+      "text": "%cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold"
+    },
+    {
+      "type": "info",
+      "text": "%cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold"
+    },
+    {
+      "type": "info",
+      "text": "%cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold"
+    },
+    {
+      "type": "info",
+      "text": "%cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold"
+    }
+  ]
+}
