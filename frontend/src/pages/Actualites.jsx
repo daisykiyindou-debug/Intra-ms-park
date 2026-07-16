@@ -64,7 +64,7 @@ const ATTACHMENTS_LIBRARY = [
 ];
 
 const OFFICIAL_AVATAR =
-  "https://images.unsplash.com/photo-1533174072545-7a4b6ad7a6c3?w=200&h=200&fit=crop";
+  "https://customer-assets-jt897jd0.emergentagent.net/job_mspark-employee-hub/artifacts/7vgenyd4_MS%20PARK%20LOGO%20FOND%20BLEU.png";
 
 export default function Actualites() {
   const { me, findEmployee } = useApp();
@@ -284,7 +284,13 @@ function AdminComposer({ me, onPublished }) {
     <div className="ms-card p-5 space-y-3" data-testid="admin-composer">
       {/* Header + author selector */}
       <div className="flex items-start gap-3">
-        <img src={authorAvatar} alt="" className="h-11 w-11 rounded-full object-cover shrink-0" />
+        <img
+          src={authorAvatar}
+          alt=""
+          className={`h-11 w-11 rounded-full shrink-0 ${
+            postedAs === "official" ? "object-contain bg-[#071B34] p-1" : "object-cover"
+          }`}
+        />
         <div className="flex-1 min-w-0">
           <div className="text-sm font-bold text-[#071B34]">{authorName}</div>
           <div className="text-xs text-[#475569]">{authorRole}</div>
@@ -637,8 +643,10 @@ function PostCard({ post, me, onLike, findEmployee, refresh, setEditingPost, set
             <img
               src={author.avatar}
               alt=""
-              className={`h-11 w-11 rounded-full object-cover ${
-                isOfficial ? "ring-2 ring-[#071B34]" : "ring-2 ring-white shadow-sm"
+              className={`h-11 w-11 rounded-full ${
+                isOfficial
+                  ? "object-contain bg-[#071B34] p-1 ring-2 ring-[#071B34]"
+                  : "object-cover ring-2 ring-white shadow-sm"
               }`}
             />
             {isOfficial && (

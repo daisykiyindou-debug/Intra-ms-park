@@ -1,0 +1,39 @@
+{
+  "verdict": "fixed",
+  "user_reported_bug": "Fais ça en priorité : (1) Quand on ouvre une notification la notification doit disparaître du fil de notification. (2) Dans fil d'actualité, quand on poste au nom de MS Park, la photo de profil doit être celle jointe (logo MS Park). (3) Dans restauration, rajouter du riz, salade César (avec photos), et une catégorie dessert avec cheesecake et flan (avec photos).",
+  "summary": "No relevant testing skill found. Focused UI/API verification passed: unread-only notification drawer hides read notifications, clicked notification disappears after redirect/reopen, 'Tout marquer lu' empties the list; official MS Park composer/PostCard avatar uses the requested logo asset with object-contain and #071B34 background; Soccer Bar restaurant menu shows Riz, Salade César, Cheesecake and Flan with loaded images and the Desserts filter shows only Cheesecake/Flan. Backend GET /api/menu?store=soccer_bar returns 15 items including all 4 new products. Auth is MOCKED via X-Employee-Id in this app.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/test_reports/bug_verification_10_backend.py",
+    "/app/test_reports/bug_verification_10_cleanup.py",
+    "/app/test_reports/bug_verification_10_seed.json"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "No blocking code-review findings for the reported user-visible flows. Note: /api/notifications returns read and unread notifications; the drawer correctly filters unread notifications client-side per the requested visible behavior."
+  ],
+  "updated_files": [
+    "/app/test_reports/bug_verification_10_backend.py",
+    "/app/test_reports/bug_verification_10_cleanup.py",
+    "/app/test_reports/bug_verification_10_seed.json",
+    "/app/test_reports/bug_verification_10.json",
+    "/app/test_reports/iteration_10.json"
+  ],
+  "success_rate": {
+    "backend": "100%",
+    "frontend": "100%"
+  },
+  "seed_data_creation": "Created deterministic QA notifications for Idriss and one QA official post during UI testing; all QA notifications/posts and generated broadcast notification were cleaned up after verification.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Preview URL tested: https://mspark-employee-hub.preview.emergentagent.com. Credentials used: Idriss employee and Marcus admin. Browser automation verified the exact notification, actualites official avatar, and restaurant menu flows end-to-end. Backend script verified auth login and /api/menu?store=soccer_bar item count/content.",
+  "rca_of_the_issue": "Verification evidence: notification drawer showed seeded unread notifications only, hid a seeded read notification, removed qa-notif-click-10 after click/read + redirect, and showed 'Tout est à jour' after read-all. Official avatar evidence: composer and created PostCard image src was customer-assets.../7vgenyd4_MS%20PARK%20LOGO%20FOND%20BLEU.png with objectFit contain and rgb(7,27,52) background. Restaurant evidence: API returned 15 Soccer Bar items; UI cards for Riz, Salade César, Cheesecake, Flan had correct points and nonzero natural image dimensions; Desserts filter returned exactly 2 cards."
+}

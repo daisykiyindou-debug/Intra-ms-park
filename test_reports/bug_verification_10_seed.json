@@ -1,0 +1,10 @@
+{
+  "click_title": "QA_NOTIFICATION_CLICK_10",
+  "markall_title": "QA_NOTIFICATION_MARKALL_10",
+  "read_title": "QA_NOTIFICATION_READ_10",
+  "notification_ids": [
+    "qa-notif-click-10",
+    "qa-notif-markall-10",
+    "qa-notif-read-10"
+  ]
+}

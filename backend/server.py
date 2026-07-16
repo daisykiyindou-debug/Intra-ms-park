@@ -914,6 +914,26 @@ async def _seed_once() -> None:
          "points": 4, "price_eur": 3.5,
          "image": "https://images.unsplash.com/photo-1576107232684-1279f390859f?w=600&h=600&fit=crop",
          "allergens": []},
+        {"id": _id(), "store": "soccer_bar", "category": "Accompagnements", "name": "Riz",
+         "description": "Riz basmati parfumé, cuisson maison",
+         "points": 4, "price_eur": 3.5,
+         "image": "https://customer-assets-jt897jd0.emergentagent.net/job_mspark-employee-hub/artifacts/b44la9j1_Cuire-le-riz-et-le-reussir.webp",
+         "allergens": []},
+        {"id": _id(), "store": "soccer_bar", "category": "Salades", "name": "Salade César",
+         "description": "Poulet pané croustillant, laitue romaine, croûtons, sauce César maison",
+         "points": 12, "price_eur": 10.5,
+         "image": "https://customer-assets-jt897jd0.emergentagent.net/job_mspark-employee-hub/artifacts/5zo6gzz8_Salade-Cesar-Poulet-Pane-1.jpg",
+         "allergens": ["gluten", "lait", "œuf"]},
+        {"id": _id(), "store": "soccer_bar", "category": "Desserts", "name": "Cheesecake",
+         "description": "Cheesecake crémeux, coulis de fruits rouges",
+         "points": 8, "price_eur": 6.5,
+         "image": "https://customer-assets-jt897jd0.emergentagent.net/job_mspark-employee-hub/artifacts/16ftw8kc_2-1.jpg",
+         "allergens": ["gluten", "lait", "œuf"]},
+        {"id": _id(), "store": "soccer_bar", "category": "Desserts", "name": "Flan pâtissier",
+         "description": "Flan pâtissier maison, pâte brisée feuilletée",
+         "points": 7, "price_eur": 5.5,
+         "image": "https://customer-assets-jt897jd0.emergentagent.net/job_mspark-employee-hub/artifacts/v6zbpnyo_photo_flan_patissier_cuisinovores.webp",
+         "allergens": ["gluten", "lait", "œuf"]},
         {"id": _id(), "store": "soccer_bar", "category": "Mocktails", "name": "Mocktails",
          "description": "Cocktails sans alcool premium",
          "points": 8, "price_eur": 7.0,
@@ -3824,6 +3844,37 @@ async def attach_current_user(request: Request, call_next):
 @app.on_event("startup")
 async def on_start():
     await _seed_once()
+    await _seed_extra_products()
+
+
+async def _seed_extra_products():
+    """Idempotently add new demo products introduced after the initial seed."""
+    extras = [
+        {"store": "soccer_bar", "category": "Accompagnements", "name": "Riz",
+         "description": "Riz basmati parfumé, cuisson maison",
+         "points": 4, "price_eur": 3.5,
+         "image": "https://customer-assets-jt897jd0.emergentagent.net/job_mspark-employee-hub/artifacts/b44la9j1_Cuire-le-riz-et-le-reussir.webp",
+         "allergens": []},
+        {"store": "soccer_bar", "category": "Salades", "name": "Salade César",
+         "description": "Poulet pané croustillant, laitue romaine, croûtons, sauce César maison",
+         "points": 12, "price_eur": 10.5,
+         "image": "https://customer-assets-jt897jd0.emergentagent.net/job_mspark-employee-hub/artifacts/5zo6gzz8_Salade-Cesar-Poulet-Pane-1.jpg",
+         "allergens": ["gluten", "lait", "œuf"]},
+        {"store": "soccer_bar", "category": "Desserts", "name": "Cheesecake",
+         "description": "Cheesecake crémeux, coulis de fruits rouges",
+         "points": 8, "price_eur": 6.5,
+         "image": "https://customer-assets-jt897jd0.emergentagent.net/job_mspark-employee-hub/artifacts/16ftw8kc_2-1.jpg",
+         "allergens": ["gluten", "lait", "œuf"]},
+        {"store": "soccer_bar", "category": "Desserts", "name": "Flan pâtissier",
+         "description": "Flan pâtissier maison, pâte brisée feuilletée",
+         "points": 7, "price_eur": 5.5,
+         "image": "https://customer-assets-jt897jd0.emergentagent.net/job_mspark-employee-hub/artifacts/v6zbpnyo_photo_flan_patissier_cuisinovores.webp",
+         "allergens": ["gluten", "lait", "œuf"]},
+    ]
+    for it in extras:
+        existing = await db.products.find_one({"store": it["store"], "name": it["name"]})
+        if not existing:
+            await db.products.insert_one({"id": _id(), **it})
 
 
 @app.on_event("shutdown")

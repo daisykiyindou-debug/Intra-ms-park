@@ -16,6 +16,8 @@ const icons = {
 export default function NotificationsDrawer({ open, onClose }) {
   const { notifications, refreshNotifications } = useApp();
   const navigate = useNavigate();
+  // Only show UNREAD notifications — opening one removes it from the list
+  const visible = notifications.filter((n) => !n.read);
 
   const markAll = async () => {
     await api.post("/notifications/read-all");
@@ -80,10 +82,14 @@ export default function NotificationsDrawer({ open, onClose }) {
         </div>
 
         <div className="overflow-y-auto h-[calc(100vh-5rem)] p-4 space-y-2">
-          {notifications.length === 0 && (
-            <div className="text-center py-12 text-[#475569]">Aucune notification</div>
+          {visible.length === 0 && (
+            <div className="text-center py-12 text-[#475569]">
+              <Bell className="h-10 w-10 mx-auto mb-3 text-[#94A3B8]" />
+              <div className="text-sm font-semibold text-[#071B34]">Tout est à jour</div>
+              <div className="text-xs mt-1">Aucune nouvelle notification.</div>
+            </div>
           )}
-          {notifications.map((n) => {
+          {visible.map((n) => {
             const Icon = icons[n.icon] || Bell;
             const text = n.content || n.message || "";
             const clickable = Boolean(n.link);
@@ -93,21 +99,15 @@ export default function NotificationsDrawer({ open, onClose }) {
                 onClick={() => openNotification(n)}
                 data-testid={`notif-${n.id}`}
                 title={clickable ? "Ouvrir" : "Marquer comme lu"}
-                className={`group w-full text-left flex gap-3 rounded-2xl p-4 transition-all duration-200 ${
-                  n.read ? "bg-white hover:bg-[#F4F7FA]" : "bg-[#3BA4FF]/[0.06] hover:bg-[#3BA4FF]/10"
-                }`}
+                className="group w-full text-left flex gap-3 rounded-2xl p-4 transition-all duration-200 bg-[#3BA4FF]/[0.06] hover:bg-[#3BA4FF]/10"
               >
-                <div
-                  className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${
-                    n.read ? "bg-[#071B34]/5" : "bg-[#3BA4FF]/15"
-                  }`}
-                >
-                  <Icon className={`h-4.5 w-4.5 ${n.read ? "text-[#475569]" : "text-[#3BA4FF]"}`} />
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#3BA4FF]/15">
+                  <Icon className="h-4.5 w-4.5 text-[#3BA4FF]" />
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
                     <div className="text-sm font-semibold text-[#071B34]">{n.title}</div>
-                    {!n.read && <span className="h-1.5 w-1.5 rounded-full bg-[#3BA4FF]" />}
+                    <span className="h-1.5 w-1.5 rounded-full bg-[#3BA4FF]" />
                   </div>
                   <div className="text-xs text-[#475569] mt-0.5 line-clamp-2">{text}</div>
                   {clickable && (
@@ -116,9 +116,7 @@ export default function NotificationsDrawer({ open, onClose }) {
                     </div>
                   )}
                 </div>
-                {!n.read && (
-                  <Check className="h-4 w-4 text-[#3BA4FF] opacity-0 group-hover:opacity-100 transition-opacity" />
-                )}
+                <Check className="h-4 w-4 text-[#3BA4FF] opacity-0 group-hover:opacity-100 transition-opacity" />
               </button>
             );
           })}
