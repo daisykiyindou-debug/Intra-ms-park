@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { NavLink, Route, Routes, Navigate } from "react-router-dom";
 import {
   BarChart3, ClipboardList, Inbox, Newspaper, ShieldCheck, ArrowRight,
@@ -7,6 +8,23 @@ import {
   FileText, Receipt, Send, Megaphone, GripVertical,
 } from "lucide-react";
 import { toast } from "sonner";
+
+// Shared modal wrapper — rendered via portal to escape any ancestor `transform`
+// (e.g. `.ms-fade-up` on Management pages) that would otherwise capture `position: fixed`.
+function PortalModal({ onClose, children }) {
+  return createPortal(
+    <div
+      role="dialog"
+      aria-modal="true"
+      onClick={onClose}
+      className="fixed inset-0 z-[100] bg-black/40 backdrop-blur-md flex items-center justify-center p-4"
+    >
+      {children}
+    </div>,
+    document.body
+  );
+}
+
 import { api, fr, formatMinutes, absoluteUrl } from "@/lib/api";
 import { useApp } from "@/contexts/AppContext";
 import { notifyLiveRefresh } from "@/hooks/useLiveData";
@@ -660,12 +678,7 @@ function WeekEditor({ employee, weekStart, existingEntries, onClose, onSaved }) 
   };
 
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      onClick={onClose}
-      className="fixed inset-0 z-50 bg-black/40 backdrop-blur-md flex items-center justify-center p-4"
-    >
+    <PortalModal onClose={onClose}>
       <div
         onClick={(e) => e.stopPropagation()}
         data-testid="week-editor"
@@ -753,7 +766,7 @@ function WeekEditor({ employee, weekStart, existingEntries, onClose, onSaved }) 
           </div>
         </div>
       </div>
-    </div>
+    </PortalModal>
   );
 }
 
@@ -861,12 +874,7 @@ function EntryEditor({ entry, employeeName, onClose, onSave }) {
   const [form, setForm] = useState(entry);
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      onClick={onClose}
-      className="fixed inset-0 z-50 bg-black/40 backdrop-blur-md flex items-center justify-center p-4"
-    >
+    <PortalModal onClose={onClose}>
       <div
         onClick={(e) => e.stopPropagation()}
         className="ms-card max-w-lg w-full p-6 max-h-[90vh] overflow-y-auto"
@@ -998,7 +1006,7 @@ function EntryEditor({ entry, employeeName, onClose, onSave }) {
           </button>
         </div>
       </div>
-    </div>
+    </PortalModal>
   );
 }
 
@@ -1082,12 +1090,7 @@ function RequestsManager() {
       )}
 
       {infoModal && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          onClick={() => setInfoModal(null)}
-          className="fixed inset-0 z-50 bg-black/40 backdrop-blur-md flex items-center justify-center p-4"
-        >
+        <PortalModal onClose={() => setInfoModal(null)}>
           <div onClick={(e) => e.stopPropagation()} className="ms-card max-w-md w-full p-6">
             <h3 className="text-lg font-bold text-[#071B34]">Demande de complément</h3>
             <p className="text-sm text-[#475569] mt-1">À {infoModal.employee_name}</p>
@@ -1113,7 +1116,7 @@ function RequestsManager() {
               </button>
             </div>
           </div>
-        </div>
+        </PortalModal>
       )}
     </div>
   );
@@ -1695,12 +1698,7 @@ function SlideEditor({ slide, news, events, onClose, onSaved }) {
     }
   };
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      onClick={onClose}
-      className="fixed inset-0 z-50 bg-black/40 backdrop-blur-md flex items-center justify-center p-4"
-    >
+    <PortalModal onClose={onClose}>
       <div
         onClick={(e) => e.stopPropagation()}
         className="ms-card max-w-2xl w-full p-6 max-h-[90vh] overflow-y-auto"
@@ -1788,7 +1786,7 @@ function SlideEditor({ slide, news, events, onClose, onSaved }) {
           </div>
         </div>
       </div>
-    </div>
+    </PortalModal>
   );
 }
 
@@ -2511,12 +2509,7 @@ function EventEditor({ event, news, onClose, onSaved }) {
   };
 
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      onClick={onClose}
-      className="fixed inset-0 z-50 bg-black/40 backdrop-blur-md flex items-center justify-center p-4"
-    >
+    <PortalModal onClose={onClose}>
       <div
         onClick={(e) => e.stopPropagation()}
         className="ms-card max-w-2xl w-full p-6 max-h-[90vh] overflow-y-auto"
@@ -2851,7 +2844,7 @@ function EventEditor({ event, news, onClose, onSaved }) {
           </div>
         </div>
       </div>
-    </div>
+    </PortalModal>
   );
 }
 

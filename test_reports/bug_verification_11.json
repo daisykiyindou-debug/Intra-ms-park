@@ -1,0 +1,38 @@
+{
+  "verdict": "fixed",
+  "user_reported_bug": "dans agenda, revois la mise en page car je ne peux pas modifier le titre. L'utilisateur a joint une capture montrant le modal 'Nouvel/Modifier événement' avec le haut coupé au-dessus du viewport — le champ TITRE n'est pas visible du tout.",
+  "summary": "No relevant testing skill found. Focused UI verification on 1920x1080 confirms the Agenda create/edit event modal is fully visible (create/edit top=54, bottom=1026), the TITRE field is visible above CATÉGORIE (title_top=175, category_top=239), and the title can be edited and persisted through create/update/delete. Regression smoke checks for PortalModal users also passed: planning EntryEditor/WeekEditor, Requests info modal, carousel SlideEditor, and Actualites PostEditor all had top>=0. Auth uses **MOCKED** X-Employee-Id flow as documented.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/tests/bug_verification_11_modal_layout.py",
+    "/app/test_reports/bug_verification_11.json",
+    "/app/test_reports/iteration_11.json"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Verified Management.jsx EventEditor, EntryEditor, WeekEditor, Requests info modal, and SlideEditor render via PortalModal/createPortal(document.body); Actualites.jsx PostEditor also renders via createPortal(document.body).",
+    "index.css ms-fade-up final keyframe now uses transform: none, which is a defensive mitigation for fixed-position containing block issues."
+  ],
+  "updated_files": [
+    "/app/tests/bug_verification_11_modal_layout.py",
+    "/app/test_reports/bug_verification_11.json",
+    "/app/test_reports/iteration_11.json"
+  ],
+  "success_rate": {
+    "backend": "100% (UI-driven event CRUD API path exercised)",
+    "frontend": "100%"
+  },
+  "seed_data_creation": "Temporary event 'QA Modal Layout Test 2026' was created, edited to 'QA Modal Layout Test 2026 Edited', then deleted via the UI; no persistent seed data should remain.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Focused browser automation passed on preview URL with admin credentials. Key evidence: agenda EventEditor create/edit top=54 bottom=1026 on 1080px viewport; event-title top=175 and editable. Other portalized modals top>=0. No relevant testing skill found.",
+  "rca_of_the_issue": "The prior symptom was consistent with fixed-position dialogs being captured by an ancestor transform on .ms-fade-up. The tested fix portals dialogs to document.body and removes the final transform from the fade-up animation; the user-visible Agenda title field is now visible and editable."
+}
