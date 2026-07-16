@@ -10,6 +10,7 @@ import { toast } from "sonner";
 import { api, fr, formatMinutes } from "@/lib/api";
 import { useApp } from "@/contexts/AppContext";
 import { notifyLiveRefresh } from "@/hooks/useLiveData";
+import FormBuilder from "@/pages/FormBuilder";
 
 const subNav = [
   { to: "/management", label: "Vue d'ensemble", icon: BarChart3, end: true },
@@ -18,6 +19,7 @@ const subNav = [
   { to: "/management/attributions", label: "RTT / CP", icon: Gift },
   { to: "/management/carrousel", label: "Carrousel accueil", icon: Newspaper },
   { to: "/management/agenda", label: "Agenda", icon: CalendarDays },
+  { to: "/management/formulaires", label: "Formulaires", icon: FileText },
   { to: "/management/documents", label: "Documents RH", icon: FileText },
 ];
 
@@ -59,6 +61,7 @@ export default function ManagementShell() {
   const commSubNav = [
     { to: "/management/carrousel", label: "Carrousel accueil", icon: Newspaper },
     { to: "/management/agenda", label: "Agenda", icon: CalendarDays },
+    { to: "/management/formulaires", label: "Formulaires", icon: FileText },
   ];
   const tabs = isAdmin ? subNav : commSubNav;
   const headerAccent = isAdmin ? "#7C3AED" : "#F59E0B";
@@ -106,6 +109,7 @@ export default function ManagementShell() {
         {isAdmin && <Route path="attributions" element={<LeaveGrantManager />} />}
         <Route path="carrousel" element={<NewsManager />} />
         <Route path="agenda" element={<AgendaManager />} />
+        <Route path="formulaires" element={<FormBuilder />} />
         <Route path="actualites" element={<Navigate to="/management/carrousel" replace />} />
         {isAdmin && <Route path="documents" element={<DocumentsManager />} />}
         <Route path="fil" element={<Navigate to="/actualites" replace />} />
@@ -2164,6 +2168,48 @@ const GROUP_OPTIONS = [
   { v: "restauration", label: "Restauration" },
 ];
 
+
+function FormPickerOrUrl({ value, onChange }) {
+  const [forms, setForms] = useState([]);
+  useEffect(() => {
+    api.get("/admin/forms").then((r) => setForms(r.data)).catch(() => setForms([]));
+  }, []);
+  const formsById = useMemo(() => Object.fromEntries(forms.map((f) => [`/formulaires/${f.id}`, f])), [forms]);
+  const isFormUrl = value?.startsWith("/formulaires/");
+  return (
+    <div className="space-y-2">
+      {forms.length > 0 && (
+        <select
+          value={isFormUrl ? value : ""}
+          onChange={(e) => onChange(e.target.value)}
+          data-testid="event-cta-form-select"
+          className="ms-input"
+        >
+          <option value="">— Choisir un formulaire créé —</option>
+          {forms.map((f) => (
+            <option key={f.id} value={`/formulaires/${f.id}`}>
+              {f.title}
+              {!f.active ? " (désactivé)" : ""}
+            </option>
+          ))}
+        </select>
+      )}
+      <input
+        value={value || ""}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder="…ou coller une URL (billetterie, mailto:…, https://…)"
+        className="ms-input"
+      />
+      {isFormUrl && formsById[value] && (
+        <div className="text-[10px] text-[#475569] px-2">
+          → Ouvre le formulaire <strong>{formsById[value].title}</strong>.
+        </div>
+      )}
+    </div>
+  );
+}
+
+
 function AgendaManager() {
   const [events, setEvents] = useState([]);
   const [news, setNews] = useState([]);
@@ -2713,11 +2759,9 @@ function EventEditor({ event, news, onClose, onSaved }) {
                       />
                     )}
                     {form.cta_target_type === "signup" && (
-                      <input
+                      <FormPickerOrUrl
                         value={form.cta_url}
-                        onChange={(e) => setForm({ ...form, cta_url: e.target.value })}
-                        placeholder="URL du formulaire, billetterie ou mailto:rh@mspark.fr…"
-                        className="ms-input"
+                        onChange={(v) => setForm({ ...form, cta_url: v })}
                       />
                     )}
                   </div>

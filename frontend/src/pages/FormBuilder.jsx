@@ -1,0 +1,609 @@
+import { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
+import {
+  ClipboardList, Plus, Trash2, Save, X, GripVertical, ArrowUp, ArrowDown, Copy,
+  FileText, BarChart3, Eye, ExternalLink, Users,
+} from "lucide-react";
+import { toast } from "sonner";
+import { api, formatDateFr } from "@/lib/api";
+import useLiveData, { notifyLiveRefresh } from "@/hooks/useLiveData";
+
+const FIELD_TYPES = [
+  { v: "section", label: "Titre / paragraphe", icon: "H", desc: "Séparateur de section (non-interactif)" },
+  { v: "text", label: "Texte court", icon: "T" },
+  { v: "textarea", label: "Texte long", icon: "¶" },
+  { v: "email", label: "E-mail", icon: "@" },
+  { v: "tel", label: "Téléphone", icon: "📞" },
+  { v: "number", label: "Nombre", icon: "#" },
+  { v: "url", label: "URL", icon: "🔗" },
+  { v: "date", label: "Date", icon: "📅" },
+  { v: "select", label: "Liste déroulante", icon: "▾" },
+  { v: "radio", label: "Boutons radio (choix unique)", icon: "◉" },
+  { v: "checkbox", label: "Cases à cocher (multi)", icon: "☑" },
+  { v: "file", label: "Fichier (URL)", icon: "📎" },
+];
+
+function newField(type = "text") {
+  const meta = FIELD_TYPES.find((f) => f.v === type);
+  return {
+    id: `f-${Math.random().toString(36).slice(2, 9)}`,
+    type,
+    label: meta ? meta.label : "Champ",
+    name: "",
+    required: false,
+    placeholder: "",
+    help_text: "",
+    options: ["radio", "checkbox", "select"].includes(type) ? ["Option 1", "Option 2"] : null,
+  };
+}
+
+// ────────────────────────────────────── List of forms + entry point
+export default function FormBuilder() {
+  const [forms, setForms] = useState([]);
+  const [editing, setEditing] = useState(null); // null | "new" | form object
+  const [viewingResponses, setViewingResponses] = useState(null);
+
+  const load = () => api.get("/admin/forms").then((r) => setForms(r.data));
+  useLiveData(load, ["forms"]);
+
+  const removeForm = async (f) => {
+    if (!window.confirm(`Supprimer le formulaire "${f.title}" et toutes ses réponses ?`)) return;
+    try {
+      await api.delete(`/admin/forms/${f.id}`);
+      toast.success("Formulaire supprimé");
+      load();
+      notifyLiveRefresh(["forms"]);
+    } catch {
+      toast.error("Impossible de supprimer");
+    }
+  };
+
+  const duplicateForm = async (f) => {
+    try {
+      await api.post("/admin/forms", {
+        title: `${f.title} (copie)`,
+        description: f.description,
+        fields: f.fields.map((x) => ({ ...x, id: undefined })),
+        active: false,
+        submit_label: f.submit_label,
+        success_message: f.success_message,
+      });
+      toast.success("Formulaire dupliqué");
+      load();
+    } catch {
+      toast.error("Erreur");
+    }
+  };
+
+  return (
+    <div className="space-y-5">
+      <div className="ms-card p-5 flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <div className="ms-overline">Formulaires personnalisés</div>
+          <h3 className="text-lg font-bold text-[#071B34] mt-1">Construisez vos propres formulaires</h3>
+          <p className="text-xs text-[#475569] mt-1 max-w-2xl">
+            Inscription, contact, candidature, réservation, sondage… Créez un formulaire, ajoutez vos champs, puis
+            liez-le à un bouton du carrousel, de l'agenda ou d'une actualité.
+          </p>
+        </div>
+        <button
+          onClick={() => setEditing("new")}
+          data-testid="form-create"
+          className="ms-btn-primary"
+        >
+          <Plus className="h-4 w-4" /> Nouveau formulaire
+        </button>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {forms.length === 0 && (
+          <div className="col-span-2 ms-card p-10 text-center text-sm text-[#475569]">
+            Aucun formulaire pour le moment. Cliquez sur "Nouveau formulaire" pour commencer.
+          </div>
+        )}
+        {forms.map((f) => (
+          <div key={f.id} className="ms-card p-5 space-y-3" data-testid={`form-row-${f.id}`}>
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <ClipboardList className="h-4 w-4 text-[#3BA4FF] shrink-0" />
+                  <h4 className="font-bold text-[#071B34] truncate">{f.title}</h4>
+                  <span
+                    className="ms-chip"
+                    style={{
+                      background: f.active ? "#D1FAE5" : "#F1F5F9",
+                      color: f.active ? "#065F46" : "#64748B",
+                    }}
+                  >
+                    {f.active ? "Actif" : "Désactivé"}
+                  </span>
+                </div>
+                {f.description && (
+                  <p className="text-xs text-[#475569] mt-1 line-clamp-2">{f.description}</p>
+                )}
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3 text-[11px] text-[#475569]">
+              <span>{f.fields?.length || 0} champ(s)</span>
+              <span>·</span>
+              <span>{f.response_count || 0} réponse(s)</span>
+              <span>·</span>
+              <span>Créé le {formatDateFr((f.created_at || "").slice(0, 10))}</span>
+            </div>
+
+            <div className="rounded-lg bg-[#F4F7FA] p-2 text-[10px] font-mono text-[#475569] flex items-center justify-between">
+              <span>URL publique : /formulaires/{f.id.slice(0, 8)}…</span>
+              <button
+                onClick={() => {
+                  navigator.clipboard?.writeText(`${window.location.origin}/formulaires/${f.id}`);
+                  toast.success("URL copiée");
+                }}
+                className="text-[#3BA4FF] font-semibold"
+              >
+                Copier
+              </button>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              <button
+                onClick={() => setEditing(f)}
+                data-testid={`form-edit-${f.id}`}
+                className="ms-btn-outline text-xs !py-1.5"
+              >
+                Modifier
+              </button>
+              <button
+                onClick={() => setViewingResponses(f)}
+                data-testid={`form-view-responses-${f.id}`}
+                className="text-xs font-bold rounded-lg px-3 py-1.5 bg-[#3BA4FF]/12 text-[#1D70B8] hover:bg-[#3BA4FF]/25 inline-flex items-center gap-1"
+              >
+                <BarChart3 className="h-3 w-3" /> Résultats ({f.response_count || 0})
+              </button>
+              <Link
+                to={`/formulaires/${f.id}`}
+                target="_blank"
+                className="text-xs font-bold rounded-lg px-3 py-1.5 bg-[#F4F7FA] hover:bg-[#071B34]/5 text-[#475569] inline-flex items-center gap-1"
+              >
+                <Eye className="h-3 w-3" /> Aperçu
+              </Link>
+              <button
+                onClick={() => duplicateForm(f)}
+                className="text-xs rounded-lg px-3 py-1.5 bg-[#F4F7FA] hover:bg-[#071B34]/5 text-[#475569] inline-flex items-center gap-1"
+              >
+                <Copy className="h-3 w-3" /> Dupliquer
+              </button>
+              <button
+                onClick={() => removeForm(f)}
+                className="text-xs font-semibold rounded-lg px-3 py-1.5 bg-[#FEE2E2] text-[#EF4444] hover:bg-[#EF4444]/20 inline-flex items-center gap-1"
+              >
+                <Trash2 className="h-3 w-3" />
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {editing && (
+        <FormEditor
+          form={editing === "new" ? null : editing}
+          onClose={() => setEditing(null)}
+          onSaved={() => { setEditing(null); load(); notifyLiveRefresh(["forms"]); }}
+        />
+      )}
+
+      {viewingResponses && (
+        <ResponsesModal
+          form={viewingResponses}
+          onClose={() => setViewingResponses(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+// ────────────────────────────────────── Form editor (create/edit)
+function FormEditor({ form, onClose, onSaved }) {
+  const isNew = !form;
+  const [title, setTitle] = useState(form?.title || "");
+  const [description, setDescription] = useState(form?.description || "");
+  const [submitLabel, setSubmitLabel] = useState(form?.submit_label || "Envoyer");
+  const [successMessage, setSuccessMessage] = useState(form?.success_message || "Merci ! Votre formulaire a bien été envoyé.");
+  const [active, setActive] = useState(form?.active ?? true);
+  const [fields, setFields] = useState(form?.fields ? [...form.fields] : [
+    { ...newField("text"), label: "Prénom", name: "first_name", required: true, placeholder: "Auto-rempli si connecté" },
+    { ...newField("text"), label: "Nom", name: "last_name", required: true, placeholder: "Auto-rempli si connecté" },
+  ]);
+  const [saving, setSaving] = useState(false);
+
+  const addField = (type) => setFields((f) => [...f, newField(type)]);
+  const updateField = (i, patch) => setFields((f) => f.map((x, idx) => (idx === i ? { ...x, ...patch } : x)));
+  const removeField = (i) => setFields((f) => f.filter((_, idx) => idx !== i));
+  const moveField = (i, dir) => {
+    setFields((f) => {
+      const j = i + dir;
+      if (j < 0 || j >= f.length) return f;
+      const c = [...f];
+      [c[i], c[j]] = [c[j], c[i]];
+      return c;
+    });
+  };
+
+  const save = async () => {
+    if (!title.trim()) return toast.error("Titre requis");
+    if (fields.length === 0) return toast.error("Ajoutez au moins un champ");
+    setSaving(true);
+    try {
+      const payload = {
+        title: title.trim(),
+        description: description.trim() || null,
+        fields: fields.map((f) => ({
+          ...f,
+          options: ["select", "radio", "checkbox"].includes(f.type)
+            ? (f.options || []).filter((o) => o.trim())
+            : null,
+        })),
+        active,
+        submit_label: submitLabel || "Envoyer",
+        success_message: successMessage || "Merci !",
+      };
+      if (isNew) {
+        await api.post("/admin/forms", payload);
+        toast.success("Formulaire créé");
+      } else {
+        await api.put(`/admin/forms/${form.id}`, payload);
+        toast.success("Formulaire mis à jour");
+      }
+      onSaved();
+    } catch (err) {
+      toast.error("Erreur", { description: err.response?.data?.detail });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      onClick={onClose}
+      className="fixed inset-0 z-50 bg-black/40 backdrop-blur-md flex items-center justify-center p-4"
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="ms-card w-full max-w-5xl max-h-[95vh] overflow-hidden flex flex-col"
+        data-testid="form-editor"
+      >
+        <div className="p-5 border-b border-[#071B34]/5 flex items-start justify-between">
+          <div>
+            <div className="ms-overline">{isNew ? "Nouveau formulaire" : "Modifier le formulaire"}</div>
+            <h3 className="text-xl font-bold text-[#071B34] mt-1">Constructeur de formulaire</h3>
+          </div>
+          <button onClick={onClose} className="flex h-9 w-9 items-center justify-center rounded-xl hover:bg-[#071B34]/5">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-5 grid grid-cols-1 lg:grid-cols-3 gap-5">
+          {/* Left: form settings + palette */}
+          <div className="lg:col-span-1 space-y-4">
+            <div>
+              <label className="ms-overline">Titre du formulaire</label>
+              <input
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                data-testid="form-title"
+                placeholder="Ex. Inscription séminaire 2026"
+                className="ms-input mt-2"
+              />
+            </div>
+            <div>
+              <label className="ms-overline">Description (optionnel)</label>
+              <textarea
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                rows={3}
+                placeholder="Contexte, instructions, deadline…"
+                className="ms-input mt-2 resize-none"
+              />
+            </div>
+            <div>
+              <label className="ms-overline">Texte du bouton d'envoi</label>
+              <input
+                value={submitLabel}
+                onChange={(e) => setSubmitLabel(e.target.value)}
+                placeholder="Envoyer, Confirmer, S'inscrire…"
+                className="ms-input mt-2"
+              />
+            </div>
+            <div>
+              <label className="ms-overline">Message de confirmation</label>
+              <textarea
+                value={successMessage}
+                onChange={(e) => setSuccessMessage(e.target.value)}
+                rows={2}
+                placeholder="Merci ! Votre réponse a bien été enregistrée."
+                className="ms-input mt-2 resize-none"
+              />
+            </div>
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={active}
+                onChange={(e) => setActive(e.target.checked)}
+                data-testid="form-active"
+                className="h-4 w-4 accent-[#3BA4FF]"
+              />
+              Formulaire actif (accessible aux employés)
+            </label>
+
+            <div className="pt-3 border-t border-[#071B34]/5">
+              <div className="ms-overline mb-2">Ajouter un champ</div>
+              <div className="grid grid-cols-2 gap-1.5">
+                {FIELD_TYPES.map((t) => (
+                  <button
+                    key={t.v}
+                    type="button"
+                    onClick={() => addField(t.v)}
+                    data-testid={`add-field-${t.v}`}
+                    className="text-[11px] text-left rounded-lg bg-[#F4F7FA] hover:bg-[#3BA4FF]/10 hover:text-[#1D70B8] px-2 py-1.5 font-semibold flex items-center gap-1.5"
+                  >
+                    <span className="text-sm">{t.icon}</span>
+                    {t.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Right: field list */}
+          <div className="lg:col-span-2 space-y-2">
+            <div className="ms-overline">Champs du formulaire ({fields.length})</div>
+            {fields.length === 0 && (
+              <div className="ms-card p-8 text-center text-sm text-[#475569]">
+                Aucun champ. Cliquez sur un type dans la colonne de gauche.
+              </div>
+            )}
+            {fields.map((f, i) => (
+              <FieldRow
+                key={f.id}
+                field={f}
+                index={i}
+                total={fields.length}
+                onChange={(patch) => updateField(i, patch)}
+                onRemove={() => removeField(i)}
+                onMove={(dir) => moveField(i, dir)}
+              />
+            ))}
+          </div>
+        </div>
+
+        <div className="p-5 border-t border-[#071B34]/5 flex justify-end gap-2">
+          <button onClick={onClose} className="ms-btn-outline">Annuler</button>
+          <button
+            onClick={save}
+            disabled={saving}
+            data-testid="form-save"
+            className="ms-btn-primary disabled:opacity-50"
+          >
+            <Save className="h-4 w-4" />
+            {saving ? "Enregistrement…" : isNew ? "Créer le formulaire" : "Enregistrer"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ────────────────────────────────────── One field row in the editor
+function FieldRow({ field, index, total, onChange, onRemove, onMove }) {
+  const isSection = field.type === "section";
+  const hasOptions = ["select", "radio", "checkbox"].includes(field.type);
+  return (
+    <div className="rounded-xl border border-[#071B34]/5 p-3 bg-white" data-testid={`field-row-${index}`}>
+      <div className="flex items-center gap-2 mb-2">
+        <GripVertical className="h-4 w-4 text-[#94A3B8]" />
+        <span className="text-[10px] font-mono bg-[#F4F7FA] text-[#475569] rounded px-1.5 py-0.5">
+          {field.type}
+        </span>
+        <input
+          value={field.label}
+          onChange={(e) => onChange({ label: e.target.value })}
+          placeholder={isSection ? "Titre de section" : "Libellé du champ"}
+          className="flex-1 text-sm font-semibold border-none focus:outline-none focus:ring-0 bg-transparent"
+        />
+        <div className="flex items-center gap-0.5">
+          <button
+            onClick={() => onMove(-1)}
+            disabled={index === 0}
+            className="flex h-7 w-7 items-center justify-center rounded-md hover:bg-[#071B34]/5 disabled:opacity-30"
+            title="Monter"
+          >
+            <ArrowUp className="h-3 w-3" />
+          </button>
+          <button
+            onClick={() => onMove(1)}
+            disabled={index === total - 1}
+            className="flex h-7 w-7 items-center justify-center rounded-md hover:bg-[#071B34]/5 disabled:opacity-30"
+            title="Descendre"
+          >
+            <ArrowDown className="h-3 w-3" />
+          </button>
+          <button
+            onClick={onRemove}
+            className="flex h-7 w-7 items-center justify-center rounded-md hover:bg-[#FEE2E2] text-[#EF4444]"
+            title="Supprimer"
+          >
+            <Trash2 className="h-3 w-3" />
+          </button>
+        </div>
+      </div>
+
+      {!isSection && (
+        <div className="grid grid-cols-2 gap-2">
+          <input
+            value={field.placeholder || ""}
+            onChange={(e) => onChange({ placeholder: e.target.value })}
+            placeholder="Placeholder"
+            className="ms-input !py-1.5 !text-xs"
+          />
+          <input
+            value={field.name || ""}
+            onChange={(e) => onChange({ name: e.target.value })}
+            placeholder="Nom technique (auto)"
+            className="ms-input !py-1.5 !text-xs"
+          />
+        </div>
+      )}
+
+      <input
+        value={field.help_text || ""}
+        onChange={(e) => onChange({ help_text: e.target.value })}
+        placeholder={isSection ? "Paragraphe (facultatif)" : "Texte d'aide (facultatif)"}
+        className="ms-input !py-1.5 !text-xs mt-2"
+      />
+
+      {hasOptions && (
+        <div className="mt-2">
+          <div className="text-[10px] uppercase tracking-wider text-[#475569] font-semibold mb-1">Options</div>
+          {(field.options || []).map((opt, i) => (
+            <div key={i} className="flex items-center gap-1 mb-1">
+              <input
+                value={opt}
+                onChange={(e) => {
+                  const arr = [...(field.options || [])];
+                  arr[i] = e.target.value;
+                  onChange({ options: arr });
+                }}
+                placeholder={`Option ${i + 1}`}
+                className="ms-input !py-1 !text-xs"
+              />
+              <button
+                onClick={() => onChange({ options: (field.options || []).filter((_, j) => j !== i) })}
+                className="flex h-6 w-6 items-center justify-center rounded hover:bg-[#FEE2E2] text-[#EF4444] shrink-0"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </div>
+          ))}
+          <button
+            onClick={() => onChange({ options: [...(field.options || []), ""] })}
+            className="text-[11px] font-semibold text-[#3BA4FF] hover:text-[#1D70B8]"
+          >
+            + Ajouter une option
+          </button>
+        </div>
+      )}
+
+      {!isSection && (
+        <label className="flex items-center gap-2 text-[11px] mt-2">
+          <input
+            type="checkbox"
+            checked={field.required}
+            onChange={(e) => onChange({ required: e.target.checked })}
+            className="h-3.5 w-3.5 accent-[#3BA4FF]"
+          />
+          Champ obligatoire
+        </label>
+      )}
+    </div>
+  );
+}
+
+// ────────────────────────────────────── Responses viewer
+function ResponsesModal({ form, onClose }) {
+  const [responses, setResponses] = useState([]);
+  useEffect(() => {
+    api.get(`/admin/forms/${form.id}/responses`).then((r) => setResponses(r.data));
+  }, [form.id]);
+
+  const exportCsv = () => {
+    if (responses.length === 0) return;
+    const cols = ["Employé", "Date", ...form.fields.filter((f) => f.type !== "section").map((f) => f.label)];
+    const rows = responses.map((r) => [
+      r.employee_name || "",
+      r.submitted_at || "",
+      ...form.fields.filter((f) => f.type !== "section").map((f) => {
+        const v = r.answers?.[f.name];
+        return Array.isArray(v) ? v.join(" · ") : (v ?? "");
+      }),
+    ]);
+    const csv = [cols, ...rows]
+      .map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(","))
+      .join("\n");
+    const blob = new Blob(["\ufeff" + csv], { type: "text/csv;charset=utf-8" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `${form.title.replace(/[^a-z0-9]/gi, "_")}.csv`;
+    a.click();
+  };
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      onClick={onClose}
+      className="fixed inset-0 z-50 bg-black/40 backdrop-blur-md flex items-center justify-center p-4"
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="ms-card w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col"
+        data-testid="form-responses-modal"
+      >
+        <div className="p-5 border-b border-[#071B34]/5 flex items-start justify-between">
+          <div>
+            <div className="ms-overline">Réponses</div>
+            <h3 className="text-lg font-bold text-[#071B34] mt-1">{form.title}</h3>
+            <p className="text-xs text-[#475569] mt-1">
+              {responses.length} réponse(s) reçue(s)
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={exportCsv}
+              disabled={responses.length === 0}
+              className="ms-btn-outline text-xs !py-1.5 disabled:opacity-40"
+            >
+              <FileText className="h-3 w-3" /> Exporter CSV
+            </button>
+            <button onClick={onClose} className="flex h-9 w-9 items-center justify-center rounded-xl hover:bg-[#071B34]/5">
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-5 space-y-3">
+          {responses.length === 0 ? (
+            <div className="text-center py-12 text-sm text-[#475569]">
+              Aucune réponse pour le moment.
+            </div>
+          ) : (
+            responses.map((r) => (
+              <div key={r.id} className="rounded-xl border border-[#071B34]/5 p-4 hover:shadow-sm transition-shadow" data-testid={`response-${r.id}`}>
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <div className="flex items-center gap-2">
+                    <Users className="h-4 w-4 text-[#3BA4FF]" />
+                    <strong className="text-sm text-[#071B34]">{r.employee_name || "Anonyme"}</strong>
+                  </div>
+                  <span className="text-[10px] text-[#475569]">{formatDateFr(r.submitted_at.slice(0, 10))} · {r.submitted_at.slice(11, 16)}</span>
+                </div>
+                <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {form.fields.filter((f) => f.type !== "section").map((f) => {
+                    const v = r.answers?.[f.name];
+                    const display = Array.isArray(v) ? v.join(" · ") : (v ?? "—");
+                    return (
+                      <div key={f.id} className="text-xs">
+                        <span className="text-[#475569] font-semibold">{f.label} :</span>{" "}
+                        <span className="text-[#071B34]">{display || "—"}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}

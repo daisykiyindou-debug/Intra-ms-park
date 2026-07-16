@@ -127,6 +127,56 @@ class BadgingRecord(BaseModel):
     note: Optional[str] = None
 
 
+# ─── Custom Form Builder (admin/comm can craft forms with any field types)
+
+class FormField(BaseModel):
+    id: str
+    type: str  # text | email | tel | textarea | select | checkbox | radio | date | file | number | url | section
+    label: str
+    name: Optional[str] = None  # canonical key stored in the response (auto-generated if empty)
+    required: bool = False
+    placeholder: Optional[str] = None
+    help_text: Optional[str] = None
+    options: Optional[List[str]] = None  # for select/radio/checkbox
+    # For "section" type: label = heading, help_text = paragraph
+
+
+class CustomForm(BaseModel):
+    id: str
+    title: str
+    description: Optional[str] = None
+    fields: List[FormField] = []
+    active: bool = True
+    submit_label: Optional[str] = "Envoyer"
+    success_message: Optional[str] = "Merci ! Votre formulaire a bien été envoyé."
+    created_by: Optional[str] = None
+    created_at: Optional[str] = None
+
+
+class FormPayload(BaseModel):
+    title: str
+    description: Optional[str] = None
+    fields: List[FormField] = []
+    active: Optional[bool] = True
+    submit_label: Optional[str] = "Envoyer"
+    success_message: Optional[str] = "Merci ! Votre formulaire a bien été envoyé."
+
+
+class FormResponse(BaseModel):
+    id: str
+    form_id: str
+    employee_id: Optional[str] = None
+    employee_name: Optional[str] = None
+    answers: dict  # {field_name: value}
+    submitted_at: str
+
+
+class FormSubmitPayload(BaseModel):
+    answers: dict
+
+
+
+
 class MealTransaction(BaseModel):
     id: str
     employee_id: str
@@ -1089,6 +1139,49 @@ async def _seed_once() -> None:
          "date": (today - timedelta(days=2)).isoformat(), "category": "Communication"},
     ]
     await db.news.insert_many(news)
+
+    # ─── Demo forms (form builder)
+    forms: list[dict] = [
+        {
+            "id": _id(),
+            "title": "Inscription — Séminaire MS Park 2026",
+            "description": "Confirmez votre présence pour la journée du 12 juin à Fontainebleau. Merci de répondre avant le 20 mai.",
+            "fields": _prepare_fields([
+                {"id": _id(), "type": "text", "label": "Prénom", "name": "first_name", "required": True, "placeholder": "Auto-rempli", "options": None},
+                {"id": _id(), "type": "text", "label": "Nom", "name": "last_name", "required": True, "placeholder": "Auto-rempli", "options": None},
+                {"id": _id(), "type": "email", "label": "E-mail de contact", "name": "email", "required": True, "options": None},
+                {"id": _id(), "type": "tel", "label": "Téléphone", "name": "phone", "required": False, "options": None},
+                {"id": _id(), "type": "radio", "label": "Serez-vous présent(e) ?", "name": "attendance", "required": True, "options": ["Oui, toute la journée", "Oui, matinée uniquement", "Oui, après-midi uniquement", "Non, indisponible"]},
+                {"id": _id(), "type": "checkbox", "label": "Ateliers souhaités", "name": "workshops", "required": False, "options": ["Product & UX", "Sécurité & réglementation", "Restauration & F&B", "RH & culture d'équipe"]},
+                {"id": _id(), "type": "select", "label": "Régime alimentaire", "name": "diet", "required": False, "options": ["Standard", "Végétarien", "Végétalien", "Sans gluten", "Sans porc", "Halal", "Casher"]},
+                {"id": _id(), "type": "textarea", "label": "Attentes / questions", "name": "notes", "required": False, "placeholder": "Un sujet à aborder ? Une remarque ?", "options": None},
+            ]),
+            "active": True,
+            "submit_label": "Confirmer ma présence",
+            "success_message": "Merci ! Votre inscription au séminaire est bien enregistrée. Rendez-vous le 12 juin 🎉",
+            "created_by": ADMIN_EMPLOYEE_ID,
+            "created_by_name": "Marcus SIMÉO",
+            "created_at": _now(),
+        },
+        {
+            "id": _id(),
+            "title": "Suggestions & idées 💡",
+            "description": "Une idée d'amélioration pour MS Park ? Un besoin exprimé sur le terrain ? Faites-nous en part.",
+            "fields": _prepare_fields([
+                {"id": _id(), "type": "text", "label": "Prénom", "name": "first_name", "required": True, "options": None},
+                {"id": _id(), "type": "text", "label": "Nom", "name": "last_name", "required": True, "options": None},
+                {"id": _id(), "type": "select", "label": "Catégorie", "name": "category", "required": True, "options": ["Restauration", "Attractions", "Sécurité", "Communication interne", "RH", "Autre"]},
+                {"id": _id(), "type": "textarea", "label": "Votre idée", "name": "idea", "required": True, "placeholder": "Décrivez votre suggestion…", "options": None},
+            ]),
+            "active": True,
+            "submit_label": "Envoyer ma suggestion",
+            "success_message": "Merci pour votre suggestion ! Nous vous répondrons sous 15 jours.",
+            "created_by": ADMIN_EMPLOYEE_ID,
+            "created_by_name": "Marcus SIMÉO",
+            "created_at": _now(),
+        },
+    ]
+    await db.forms.insert_many(forms)
 
     await db.meta.insert_one({"_id": "seeded", "at": _now()})
     log.info("Seed complete.")
@@ -2162,6 +2255,129 @@ async def admin_delete_event(eid: str):
 async def admin_list_events():
     await require_communication_editor()
     return await db.events.find({}, {"_id": 0}).sort("date", 1).to_list(500)
+
+
+# ─── Custom Forms (builder + submissions)
+
+def _slug(s: str) -> str:
+    import re
+    s = re.sub(r"[^a-zA-Z0-9]+", "_", s or "").strip("_").lower()
+    return s or _id()[:8]
+
+
+def _prepare_fields(raw_fields):
+    out = []
+    used = set()
+    for i, f in enumerate(raw_fields or []):
+        d = f.model_dump() if hasattr(f, "model_dump") else dict(f)
+        d["id"] = d.get("id") or _id()
+        # Auto-generate a stable field name if the admin didn't provide one
+        base = d.get("name") or _slug(d.get("label", f"field_{i}"))
+        name = base
+        counter = 2
+        while name in used:
+            name = f"{base}_{counter}"
+            counter += 1
+        used.add(name)
+        d["name"] = name
+        out.append(d)
+    return out
+
+
+@api.get("/admin/forms")
+async def admin_list_forms():
+    await require_communication_editor()
+    forms = await db.forms.find({}, {"_id": 0}).sort("created_at", -1).to_list(200)
+    # Attach the number of responses per form
+    for f in forms:
+        f["response_count"] = await db.form_responses.count_documents({"form_id": f["id"]})
+    return forms
+
+
+@api.get("/forms/{fid}")
+async def get_form(fid: str):
+    """Public — logged employees can fetch a form to fill it in."""
+    f = await db.forms.find_one({"id": fid, "active": True}, {"_id": 0})
+    if not f:
+        raise HTTPException(404, "Formulaire introuvable ou désactivé")
+    return f
+
+
+@api.post("/admin/forms")
+async def admin_create_form(payload: FormPayload):
+    me = await require_communication_editor()
+    doc = {
+        "id": _id(),
+        "title": payload.title.strip(),
+        "description": payload.description,
+        "fields": _prepare_fields(payload.fields),
+        "active": bool(payload.active),
+        "submit_label": payload.submit_label or "Envoyer",
+        "success_message": payload.success_message or "Merci ! Votre formulaire a bien été envoyé.",
+        "created_by": me["id"],
+        "created_by_name": f"{me['first_name']} {me['last_name']}",
+        "created_at": _now(),
+    }
+    await db.forms.insert_one(doc.copy())
+    return doc
+
+
+@api.put("/admin/forms/{fid}")
+async def admin_update_form(fid: str, payload: FormPayload):
+    await require_communication_editor()
+    updates = payload.model_dump()
+    updates["fields"] = _prepare_fields(payload.fields)
+    await db.forms.update_one({"id": fid}, {"$set": updates})
+    item = await db.forms.find_one({"id": fid}, {"_id": 0})
+    if not item:
+        raise HTTPException(404, "Formulaire introuvable")
+    return item
+
+
+@api.delete("/admin/forms/{fid}")
+async def admin_delete_form(fid: str):
+    await require_communication_editor()
+    await db.forms.delete_one({"id": fid})
+    await db.form_responses.delete_many({"form_id": fid})
+    return {"ok": True}
+
+
+@api.post("/forms/{fid}/submit")
+async def submit_form(fid: str, payload: FormSubmitPayload):
+    f = await db.forms.find_one({"id": fid, "active": True}, {"_id": 0})
+    if not f:
+        raise HTTPException(404, "Formulaire introuvable ou désactivé")
+    me = await db.employees.find_one({"id": current_user()}, {"_id": 0})
+    employee_name = f"{me['first_name']} {me['last_name']}" if me else "Anonyme"
+    resp = {
+        "id": _id(),
+        "form_id": fid,
+        "employee_id": current_user(),
+        "employee_name": employee_name,
+        "answers": payload.answers,
+        "submitted_at": _now(),
+    }
+    await db.form_responses.insert_one(resp.copy())
+    # Notify the form creator when someone submits
+    if f.get("created_by") and f.get("created_by") != current_user():
+        await db.notifications.insert_one({
+            "id": _id(),
+            "employee_id": f["created_by"],
+            "type": "form",
+            "title": f"Réponse au formulaire « {f['title']} »",
+            "message": f"{employee_name} vient de remplir votre formulaire.",
+            "ts": _now(),
+            "read": False,
+        })
+    return {"ok": True, "response_id": resp["id"], "success_message": f.get("success_message")}
+
+
+@api.get("/admin/forms/{fid}/responses")
+async def admin_form_responses(fid: str):
+    await require_communication_editor()
+    return await db.form_responses.find({"form_id": fid}, {"_id": 0}).sort("submitted_at", -1).to_list(1000)
+
+
 
 
 # ─── News

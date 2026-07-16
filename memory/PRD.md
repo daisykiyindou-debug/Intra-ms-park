@@ -47,6 +47,23 @@ Intranet premium pour employés du parc MS Park + espace administrateur pour le 
 - `/app/frontend/src/lib/api.js` — interceptor axios ajoutant `X-Employee-Id` depuis localStorage
 
 ## Changelog
+### 2026-08 — Générateur de formulaires personnalisés
+- **Backend** : nouveaux modèles `CustomForm`, `FormField`, `FormResponse` + endpoints CRUD :
+  - `GET/POST/PUT/DELETE /admin/forms` (admin + comm editors)
+  - `GET /forms/{id}` (public — employés connectés)
+  - `POST /forms/{id}/submit` (dépose la réponse + notif push au créateur)
+  - `GET /admin/forms/{id}/responses` (résultats)
+- **12 types de champs** : text, email, tel, textarea, select, checkbox, radio, date, file, number, url, section (titre/paragraphe séparateur).
+- **Frontend** : nouvelle page `/management/formulaires` (`FormBuilder.jsx`) — liste des formulaires (badge actif/désactivé, N champs, N réponses, URL publique copiable), constructeur avec palette de types + réordonner ↑↓ + options éditables inline pour select/radio/checkbox, `ResponsesModal` avec liste des réponses et **export CSV**.
+- **Formulaire public** `/formulaires/{id}` (`PublicForm.jsx`) :
+  - Rendu de tous les types de champs avec styles cohérents.
+  - **Auto-prefill** du prénom, nom, email et téléphone depuis l'employé connecté (matching sur nom technique + libellé).
+  - Validation des champs obligatoires côté client.
+  - Écran de succès avec le message personnalisé.
+- **Intégration cible de bouton** : dans le CTA d'événement (type "Formulaire"), nouveau `FormPickerOrUrl` — l'admin choisit un formulaire créé dans une liste déroulante OU colle une URL libre.
+- **Seed** : 2 formulaires démo — "Inscription — Séminaire MS Park 2026" (8 champs) et "Suggestions & idées 💡" (4 champs).
+- **Sidebar** : Léa (Chargée de communication) voit également l'onglet "Formulaires" — elle peut créer/modifier/voir les résultats comme un admin.
+
 ### 2026-08 — Éditeur semaine complète + duplication planning
 - **Backend** : nouveau `POST /admin/schedule/week` — accepte un `employee_id`, `week_start` (lundi), `entries[]` (jusqu'à 7 jours avec type/horaires/lieu/service), et `duplicate_weeks` (0..N). Congés/RTT validés préservés (jamais écrasés). Notification push envoyée à l'employé.
 - **Frontend** : bouton "Éditer la semaine complète" dans le toolbar `PlanningManager`. Modal `WeekEditor` :
