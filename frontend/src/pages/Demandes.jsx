@@ -233,7 +233,7 @@ export default function Demandes() {
             onClick={(e) => e.stopPropagation()}
             onSubmit={submit}
             data-testid="request-form"
-            className="ms-card max-w-2xl w-full p-6 my-8"
+            className="ms-card max-w-6xl w-full p-6 my-8"
           >
             <div className="flex items-start justify-between">
               <div>
@@ -251,126 +251,125 @@ export default function Demandes() {
               </button>
             </div>
 
-            <div className="mt-5">
-              <label className="ms-overline">Type</label>
-              <div className="mt-2 grid grid-cols-3 gap-2">
-                {TYPES.map((t) => (
-                  <button
-                    type="button"
-                    key={t.k}
-                    onClick={() => setForm((f) => ({ ...f, type: t.k }))}
-                    data-testid={`type-${t.k}`}
-                    className={`rounded-xl border p-3 text-center transition-all ${
-                      form.type === t.k
-                        ? "border-[#3BA4FF] bg-[#3BA4FF]/8 shadow-md"
-                        : "border-[#071B34]/8 hover:border-[#3BA4FF]/40"
-                    }`}
-                  >
-                    <t.icon className="h-4 w-4 mx-auto" style={{ color: t.color }} />
-                    <div className="text-[11px] font-semibold text-[#071B34] mt-1">{t.l}</div>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {["conge", "rtt", "absence"].includes(form.type) ? (
-              <div className="mt-4">
-                <label className="ms-overline block mb-2">Sélectionnez vos jours dans le calendrier</label>
-                <LeaveCalendar
-                  value={form.dates}
-                  onChange={(d) => setForm({ ...form, dates: d })}
-                />
-              </div>
-            ) : (
-              <div className="mt-4 grid grid-cols-2 gap-3">
+            <div className={`mt-5 grid gap-5 ${["conge", "rtt", "absence"].includes(form.type) ? "lg:grid-cols-[minmax(260px,340px)_1fr]" : ""}`}>
+              {/* Left column — settings, comment, amount, submit */}
+              <div className="space-y-4">
                 <div>
-                  <label className="ms-overline">Date début</label>
-                  <input
-                    type="date"
-                    required
-                    min={todayIso}
-                    data-testid="start-date"
-                    value={form.start_date}
-                    onChange={(e) => setForm({ ...form, start_date: e.target.value })}
-                    className="ms-input mt-2"
-                  />
-                </div>
-                <div>
-                  <label className="ms-overline">Date fin</label>
-                  <input
-                    type="date"
-                    min={form.start_date || todayIso}
-                    data-testid="end-date"
-                    value={form.end_date}
-                    onChange={(e) => setForm({ ...form, end_date: e.target.value })}
-                    className="ms-input mt-2"
-                  />
-                </div>
-              </div>
-            )}
-
-            {form.type === "acompte" && (
-              <div className="mt-4">
-                <label className="ms-overline">Montant (€)</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  required
-                  data-testid="amount"
-                  value={form.amount}
-                  onChange={(e) => setForm({ ...form, amount: e.target.value })}
-                  className="ms-input mt-2"
-                />
-              </div>
-            )}
-
-            <div className="mt-4">
-              <label className="ms-overline">Commentaire</label>
-              <textarea
-                rows={3}
-                data-testid="comment"
-                value={form.comment}
-                onChange={(e) => setForm({ ...form, comment: e.target.value })}
-                className="ms-input mt-2 resize-none"
-                placeholder="Précisez le motif…"
-              />
-            </div>
-
-            {/* File upload for arrêt maladie */}
-            {form.type === "maladie" && (
-              <div className="mt-4">
-                <label className="ms-overline">Pièce jointe (certificat médical)</label>
-                <label className="mt-2 flex items-center gap-3 rounded-xl border-2 border-dashed border-[#3BA4FF]/40 bg-[#3BA4FF]/5 p-4 cursor-pointer hover:bg-[#3BA4FF]/10 transition-colors">
-                  <input
-                    type="file"
-                    accept="image/*,.pdf"
-                    data-testid="attachment"
-                    className="hidden"
-                    onChange={(e) => {
-                      const f = e.target.files?.[0];
-                      if (f) setForm({ ...form, attachment_name: f.name });
-                    }}
-                  />
-                  <Paperclip className="h-5 w-5 text-[#3BA4FF]" />
-                  <div className="flex-1 text-sm">
-                    {form.attachment_name ? (
-                      <span className="font-semibold text-[#071B34]">{form.attachment_name}</span>
-                    ) : (
-                      <span className="text-[#475569]">
-                        Cliquez pour joindre votre certificat (PDF ou image)
-                      </span>
-                    )}
+                  <label className="ms-overline">Type</label>
+                  <div className="mt-2 grid grid-cols-2 gap-2">
+                    {TYPES.map((t) => (
+                      <button
+                        type="button"
+                        key={t.k}
+                        onClick={() => setForm((f) => ({ ...f, type: t.k }))}
+                        data-testid={`type-${t.k}`}
+                        className={`rounded-xl border p-2.5 text-center transition-all ${
+                          form.type === t.k
+                            ? "border-[#3BA4FF] bg-[#3BA4FF]/8 shadow-md"
+                            : "border-[#071B34]/8 hover:border-[#3BA4FF]/40"
+                        }`}
+                      >
+                        <t.icon className="h-4 w-4 mx-auto" style={{ color: t.color }} />
+                        <div className="text-[11px] font-semibold text-[#071B34] mt-1">{t.l}</div>
+                      </button>
+                    ))}
                   </div>
-                </label>
-                <p className="text-[11px] text-[#475569] mt-1.5">
-                  Obligatoire pour tout arrêt maladie de plus de 3 jours.
-                </p>
-              </div>
-            )}
+                </div>
 
-            <button type="submit" data-testid="submit-request" className="ms-btn-primary w-full mt-5">
-              Envoyer la demande
-            </button>
+                {!["conge", "rtt", "absence"].includes(form.type) && (
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="ms-overline">Date début</label>
+                      <input
+                        type="date"
+                        required
+                        min={todayIso}
+                        data-testid="start-date"
+                        value={form.start_date}
+                        onChange={(e) => setForm({ ...form, start_date: e.target.value })}
+                        className="ms-input mt-2"
+                      />
+                    </div>
+                    <div>
+                      <label className="ms-overline">Date fin</label>
+                      <input
+                        type="date"
+                        min={form.start_date || todayIso}
+                        data-testid="end-date"
+                        value={form.end_date}
+                        onChange={(e) => setForm({ ...form, end_date: e.target.value })}
+                        className="ms-input mt-2"
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {form.type === "acompte" && (
+                  <div>
+                    <label className="ms-overline">Montant (€)</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      required
+                      data-testid="amount"
+                      value={form.amount}
+                      onChange={(e) => setForm({ ...form, amount: e.target.value })}
+                      className="ms-input mt-2"
+                    />
+                  </div>
+                )}
+
+                <div>
+                  <label className="ms-overline">Commentaire</label>
+                  <textarea
+                    rows={3}
+                    data-testid="comment"
+                    value={form.comment}
+                    onChange={(e) => setForm({ ...form, comment: e.target.value })}
+                    className="ms-input mt-2 resize-none"
+                    placeholder="Précisez le motif…"
+                  />
+                </div>
+
+                {form.type === "maladie" && (
+                  <div>
+                    <label className="ms-overline flex items-center gap-1">
+                      <Paperclip className="h-3 w-3" /> Justificatif (arrêt maladie)
+                    </label>
+                    <label
+                      className="mt-2 flex items-center gap-2 rounded-xl border border-dashed border-[#071B34]/20 px-3 py-2.5 hover:border-[#3BA4FF] cursor-pointer transition-colors"
+                    >
+                      <input
+                        type="file"
+                        accept="image/*,application/pdf"
+                        data-testid="attachment"
+                        onChange={(e) => setForm({ ...form, attachment_name: e.target.files?.[0]?.name || "" })}
+                        className="hidden"
+                      />
+                      <Paperclip className="h-4 w-4 text-[#3BA4FF] shrink-0" />
+                      <span className="text-xs text-[#475569] truncate">
+                        {form.attachment_name || "Choisir un fichier (PDF, image)…"}
+                      </span>
+                    </label>
+                  </div>
+                )}
+
+                <button type="submit" data-testid="submit-request" className="ms-btn-primary w-full mt-2">
+                  Envoyer la demande
+                </button>
+              </div>
+
+              {/* Right column — interactive calendar (only for conge/rtt/absence) */}
+              {["conge", "rtt", "absence"].includes(form.type) && (
+                <div>
+                  <label className="ms-overline block mb-2">Sélectionnez vos jours dans le calendrier</label>
+                  <LeaveCalendar
+                    value={form.dates}
+                    onChange={(d) => setForm({ ...form, dates: d })}
+                  />
+                </div>
+              )}
+            </div>
           </form>
         </div>,
         document.body

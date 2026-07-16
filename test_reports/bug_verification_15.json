@@ -1,0 +1,46 @@
+{
+  "verdict": "fixed",
+  "user_reported_bug": "regarde l'aperçu joint, c'est beaucoup trop long, il faut que ça soit plus large pour éviter que ça sorte de l'écran !!!! (Modal de nouvelle demande RH avait le bouton 'Envoyer' hors de l'écran verticalement).",
+  "summary": "No relevant testing skill found. Focused retest passed: the Nouvelle demande RH modal is fully within the viewport and the Envoyer button is visible without scroll at 1920x1080 and at the 1024px lg breakpoint; conge/rtt/absence render a 2-column layout with settings left and calendar right; Acompte/Matériel hide the calendar and show date inputs. Multi-day calendar selection still works, UI submit creates a request and refreshes the list, and POST /api/requests/multi rejects invalid past/holiday/OFF dates including Idriss Monday 2026-11-02 with 'jour OFF'. Auth remains MOCKED via localStorage/X-Employee-Id.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/test_reports/bug_modal_demandes_test_plan.md",
+    "/app/test_reports/scripts/verify_modal_demandes_ui.py",
+    "/app/test_reports/scripts/verify_ui_submit_request.py",
+    "/app/test_reports/scripts/verify_requests_multi_invalid.py",
+    "/app/test_reports/scripts/verify_submit_request_e2e.py",
+    "/app/test_reports/scripts/cleanup_modal_demandes_seed.py"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Demandes.jsx now uses max-w-6xl and lg:grid-cols-[minmax(260px,340px)_1fr] for conge/rtt/absence, with the submit button in the left column above the viewport bottom. At 1920x1080 measured form bounds were top=108.34 and bottom=971.64; submit bottom=703.34. At 1024x1080 measured form bounds were top=157.5 and bottom=922.5; submit bottom=752.5.",
+    "The calendar component itself did not need internal scrolling in the tested desktop layouts; the modal overlay has overflow-y:auto for containment if viewport height becomes smaller."
+  ],
+  "updated_files": [
+    "/app/test_reports/bug_modal_demandes_test_plan.md",
+    "/app/test_reports/scripts/verify_modal_demandes_ui.py",
+    "/app/test_reports/scripts/verify_ui_submit_request.py",
+    "/app/test_reports/scripts/verify_requests_multi_invalid.py",
+    "/app/test_reports/scripts/verify_submit_request_e2e.py",
+    "/app/test_reports/scripts/cleanup_modal_demandes_seed.py",
+    "/app/test_reports/bug_verification_15.json",
+    "/app/test_reports/iteration_15.json"
+  ],
+  "success_rate": {
+    "backend": "100%",
+    "frontend": "100%"
+  },
+  "seed_data_creation": "Created two temporary QA material requests while verifying submit/API persistence, then cleaned them up with cleanup_modal_demandes_seed.py. Multi-day UI selection did not submit leave dates. Auth is MOCKED via X-Employee-Id/localStorage.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Focused evidence: browser automation passed for login as lea.dubois@mspark.fr, /rh/demandes modal layout for conge/rtt/absence/acompte/materiel, 1024 and 1920 viewport bounds, multi-day selection summary, and UI submit. Backend scripts passed invalid /requests/multi checks for past, holiday, and OFF Monday 2026-11-02. No relevant testing skill found.",
+  "rca_of_the_issue": "The prior one-column max-w-2xl modal stacked type picker, full calendar, comment/PJ and submit vertically, pushing Envoyer below the viewport. The current fix widens the modal and moves the calendar into a right column so the submit control remains visible in the left column."
+}
