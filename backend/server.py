@@ -116,6 +116,66 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+async def _push_notification(
+    employee_id: str,
+    *,
+    type: str,
+    title: str,
+    content: str,
+    icon: str = "bell",
+    link: str | None = None,
+) -> None:
+    """Insert a single notification row (safe: never raises)."""
+    try:
+        await db.notifications.insert_one({
+            "id": _id(),
+            "employee_id": employee_id,
+            "type": type,
+            "title": title,
+            "content": content,
+            "message": content,
+            "icon": icon,
+            "link": link,
+            "read": False,
+            "ts": _now(),
+            "created_at": _now(),
+        })
+    except Exception as exc:  # pragma: no cover
+        log.warning("push_notification failed for %s: %s", employee_id, exc)
+
+
+async def _broadcast_notification(
+    *,
+    type: str,
+    title: str,
+    content: str,
+    icon: str = "bell",
+    link: str | None = None,
+    exclude_ids: list[str] | None = None,
+) -> None:
+    """Send the same notification to every seeded employee (minus author)."""
+    exclude = set(exclude_ids or [])
+    emps = await db.employees.find({}, {"_id": 0, "id": 1}).to_list(500)
+    docs = [
+        {
+            "id": _id(),
+            "employee_id": e["id"],
+            "type": type,
+            "title": title,
+            "content": content,
+            "message": content,
+            "icon": icon,
+            "link": link,
+            "read": False,
+            "ts": _now(),
+            "created_at": _now(),
+        }
+        for e in emps if e["id"] not in exclude
+    ]
+    if docs:
+        await db.notifications.insert_many(docs)
+
+
 class Employee(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str
@@ -1043,23 +1103,28 @@ async def _seed_once() -> None:
     notifications: list[dict] = [
         {"id": _id(), "employee_id": CURRENT_EMPLOYEE_ID, "type": "conge_valide",
          "title": "Congé validé", "content": "Votre demande de congé du 21 au 23 a été approuvée.",
-         "read": False, "created_at": _now(), "icon": "check-circle"},
+         "read": False, "created_at": _now(), "icon": "check-circle",
+         "link": "/rh/demandes"},
         {"id": _id(), "employee_id": CURRENT_EMPLOYEE_ID, "type": "planning",
          "title": "Nouveau planning publié",
          "content": "Le planning de la semaine prochaine est disponible.",
-         "read": False, "created_at": _now(), "icon": "calendar"},
+         "read": False, "created_at": _now(), "icon": "calendar",
+         "link": "/rh/planning"},
         {"id": _id(), "employee_id": CURRENT_EMPLOYEE_ID, "type": "post",
          "title": "Nouvelle annonce direction",
          "content": "Pierre Moreau a publié une annonce.",
-         "read": False, "created_at": _now(), "icon": "megaphone"},
+         "read": False, "created_at": _now(), "icon": "megaphone",
+         "link": "/actualites"},
         {"id": _id(), "employee_id": CURRENT_EMPLOYEE_ID, "type": "document",
          "title": "Nouveau document disponible",
          "content": "Fiche de paie de Janvier 2026 prête à être téléchargée.",
-         "read": True, "created_at": _now(), "icon": "file-text"},
+         "read": True, "created_at": _now(), "icon": "file-text",
+         "link": "/documents"},
         {"id": _id(), "employee_id": CURRENT_EMPLOYEE_ID, "type": "comment",
          "title": "Réponse à votre commentaire",
          "content": "Sophie a répondu à votre commentaire.",
-         "read": True, "created_at": _now(), "icon": "message-circle"},
+         "read": True, "created_at": _now(), "icon": "message-circle",
+         "link": "/actualites"},
     ]
     await db.notifications.insert_many(notifications)
 
@@ -1804,6 +1869,16 @@ async def create_post(payload: PostCreate):
         "created_at": _now(),
     }
     await db.posts.insert_one(p.copy())
+    # Broadcast notification to every other employee
+    me_name = f"{me.get('first_name', '')} {me.get('last_name', '')}".strip() or "MS Park"
+    await _broadcast_notification(
+        type="post",
+        title="Nouvelle publication",
+        content=f"{me_name} a publié : {p['title']}",
+        icon="megaphone",
+        link=f"/actualites/{p['id']}",
+        exclude_ids=[current_user()],
+    )
     return await _strip(p)
 
 
@@ -2071,6 +2146,8 @@ async def admin_create_document(payload: DocumentCreate):
             "title": "Nouveau document RH",
             "content": f"{payload.name} — disponible dans Documents RH.",
             "message": f"{payload.name} — disponible dans Documents RH.",
+            "icon": "file-text",
+            "link": "/documents",
             "ts": _now(),
             "created_at": _now(),
             "read": False,
@@ -2114,6 +2191,8 @@ async def admin_generate_payslip_document(payload: PayslipGenerate):
         "title": "Nouvelle fiche de paie",
         "content": f"Votre bulletin de {label} est disponible.",
         "message": f"Votre bulletin de {label} est disponible.",
+        "icon": "file-text",
+        "link": "/documents",
         "ts": _now(),
         "created_at": _now(),
         "read": False,
@@ -2150,6 +2229,17 @@ async def admin_broadcast(payload: ChannelBroadcast):
         "is_admin_broadcast": True,
     }
     await db.messages.insert_one(msg.copy())
+    preview = (payload.content or "").strip()
+    if len(preview) > 90:
+        preview = preview[:87] + "…"
+    await _broadcast_notification(
+        type="message",
+        title=f"Annonce sur #{ch.get('name', 'accueil')}",
+        content=preview or "Nouveau message diffusé",
+        icon="message-circle",
+        link=f"/messagerie?channel={payload.channel_id}",
+        exclude_ids=[me["id"]],
+    )
     return msg
 
 
@@ -2205,6 +2295,29 @@ async def post_message(cid: str, payload: MessageCreate):
         "ts": _now(),
     }
     await db.messages.insert_one(msg.copy())
+    # Notify other members of this channel
+    ch = await db.channels.find_one({"id": cid}, {"_id": 0})
+    if ch:
+        members = ch.get("members") or []
+        author = await db.employees.find_one({"id": current_user()}, {"_id": 0})
+        author_name = (
+            f"{author.get('first_name', '')} {author.get('last_name', '')}".strip()
+            if author else "Un collègue"
+        )
+        preview = (payload.content or "").strip()
+        if len(preview) > 90:
+            preview = preview[:87] + "…"
+        for mid in members:
+            if mid == current_user():
+                continue
+            await _push_notification(
+                mid,
+                type="message",
+                title=f"Message de {author_name}",
+                content=preview or "Nouveau message",
+                icon="message-circle",
+                link=f"/messagerie?channel={cid}",
+            )
     return await _strip(msg)
 
 
@@ -2316,13 +2429,45 @@ def _normalize_event(ev: dict) -> dict:
 
 @api.post("/admin/events")
 async def admin_create_event(payload: EventPayload):
-    await require_communication_editor()
+    me = await require_communication_editor()
     ev = payload.model_dump()
     ev["id"] = _id()
     if not ev.get("group_targets"):
         ev["group_targets"] = ["all"]
     ev = _normalize_event(ev)
     await db.events.insert_one(ev.copy())
+    # Notify targeted employees
+    groups = ev.get("group_targets") or ["all"]
+    emp_ids = ev.get("employee_targets") or []
+    targets: set[str] = set(emp_ids)
+    all_emps = await db.employees.find({}, {"_id": 0}).to_list(500)
+    for e in all_emps:
+        if "all" in groups:
+            targets.add(e["id"])
+            continue
+        if e.get("is_admin") and "admin" in groups:
+            targets.add(e["id"])
+            continue
+        rc = e.get("role_category")
+        if rc == "encadrement" and ("managers" in groups or "encadrement" in groups):
+            targets.add(e["id"])
+        elif rc == "employe" and "ops" in groups:
+            targets.add(e["id"])
+        elif rc == "restauration" and "restauration" in groups:
+            targets.add(e["id"])
+        if e.get("department") and e["department"] in groups:
+            targets.add(e["id"])
+    targets.discard(me["id"])
+    when = ev.get("date", "")
+    for tid in targets:
+        await _push_notification(
+            tid,
+            type="event",
+            title="Nouvel événement",
+            content=f"{ev['title']} — {when}",
+            icon="calendar",
+            link=f"/agenda/event/{ev['id']}",
+        )
     return ev
 
 
@@ -2460,8 +2605,12 @@ async def submit_form(fid: str, payload: FormSubmitPayload):
             "employee_id": f["created_by"],
             "type": "form",
             "title": f"Réponse au formulaire « {f['title']} »",
+            "content": f"{employee_name} vient de remplir votre formulaire.",
             "message": f"{employee_name} vient de remplir votre formulaire.",
+            "icon": "file-text",
+            "link": "/management/formulaires",
             "ts": _now(),
+            "created_at": _now(),
             "read": False,
         })
     return {"ok": True, "response_id": resp["id"], "success_message": f.get("success_message")}
@@ -2902,8 +3051,12 @@ async def admin_upsert_schedule(payload: AdminScheduleEntry):
         "employee_id": payload.employee_id,
         "type": "planning",
         "title": "Planning mis à jour",
+        "content": f"Votre planning du {payload.day} a été modifié par votre responsable.",
         "message": f"Votre planning du {payload.day} a été modifié par votre responsable.",
+        "icon": "calendar",
+        "link": "/rh/planning",
         "ts": _now(),
+        "created_at": _now(),
         "read": False,
     })
     return data
@@ -2921,8 +3074,12 @@ async def admin_delete_schedule(schedule_id: str):
         "employee_id": sch["employee_id"],
         "type": "planning",
         "title": "Planning mis à jour",
+        "content": f"Une entrée de planning ({sch['day']}) a été supprimée.",
         "message": f"Une entrée de planning ({sch['day']}) a été supprimée.",
+        "icon": "calendar",
+        "link": "/rh/planning",
         "ts": _now(),
+        "created_at": _now(),
         "read": False,
     })
     return {"ok": True}
@@ -3003,8 +3160,12 @@ async def admin_save_week(payload: BulkWeekPayload):
         "employee_id": payload.employee_id,
         "type": "planning",
         "title": "Planning mis à jour",
+        "content": f"{weeks_processed} semaine(s) planifiée(s) par votre responsable.",
         "message": f"{weeks_processed} semaine(s) planifiée(s) par votre responsable.",
+        "icon": "calendar",
+        "link": "/rh/planning",
         "ts": _now(),
+        "created_at": _now(),
         "read": False,
     })
     return {"ok": True, "days_saved": total_saved, "weeks_applied": weeks_processed}
@@ -3194,8 +3355,12 @@ async def admin_approve_request(rid: str, payload: RequestDecision):
         "employee_id": req["employee_id"],
         "type": req["type"],
         "title": "Demande approuvée",
+        "content": f"Votre demande ({req['type']}) a été acceptée. Votre planning est mis à jour.",
         "message": f"Votre demande ({req['type']}) a été acceptée. Votre planning est mis à jour.",
+        "icon": "check-circle",
+        "link": "/rh/demandes",
         "ts": _now(),
+        "created_at": _now(),
         "read": False,
     })
     return {"ok": True}
@@ -3216,9 +3381,14 @@ async def admin_reject_request(rid: str, payload: RequestDecision):
         "employee_id": req["employee_id"],
         "type": req["type"],
         "title": "Demande refusée",
+        "content": f"Votre demande ({req['type']}) a été refusée." +
+                   (f" Motif : {payload.note}" if payload.note else ""),
         "message": f"Votre demande ({req['type']}) a été refusée." +
                    (f" Motif : {payload.note}" if payload.note else ""),
+        "icon": "check-circle",
+        "link": "/rh/demandes",
         "ts": _now(),
+        "created_at": _now(),
         "read": False,
     })
     return {"ok": True}
@@ -3240,8 +3410,12 @@ async def admin_request_info(rid: str, payload: RequestDecision):
         "employee_id": req["employee_id"],
         "type": req["type"],
         "title": "Complément d'information demandé",
+        "content": payload.note or "Merci de compléter votre demande.",
         "message": payload.note or "Merci de compléter votre demande.",
+        "icon": "message-circle",
+        "link": "/rh/demandes",
         "ts": _now(),
+        "created_at": _now(),
         "read": False,
     })
     return {"ok": True}
@@ -3368,6 +3542,14 @@ async def admin_publish_news(payload: NewsCreate):
         "comments": [],
     }
     await db.news.insert_one(item.copy())
+    await _broadcast_notification(
+        type="news",
+        title="Nouvelle actualité",
+        content=item["title"],
+        icon="megaphone",
+        link=f"/actualites/{item['id']}",
+        exclude_ids=[me["id"]],
+    )
     return await _strip(item)
 
 
@@ -3443,8 +3625,12 @@ async def admin_grant_leave(payload: LeaveGrant):
             "employee_id": eid,
             "type": payload.type,
             "title": f"{payload.days} jour{'s' if payload.days > 1 else ''} {'RTT' if payload.type == 'rtt' else 'CP'} attribué{'s' if payload.days > 1 else ''}",
+            "content": f"Votre responsable vous a attribué {payload.days} jour(s) de {payload.type.upper()}.",
             "message": f"Votre responsable vous a attribué {payload.days} jour(s) de {payload.type.upper()}.",
+            "icon": "check-circle",
+            "link": "/rh/demandes",
             "ts": _now(),
+            "created_at": _now(),
             "read": False,
         })
         updated.append(eid)

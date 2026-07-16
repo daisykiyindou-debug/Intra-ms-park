@@ -1,6 +1,8 @@
 import { X, Check, Bell, FileText, MessageCircle, Calendar, Megaphone, CheckCircle2 } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import { useApp } from "@/contexts/AppContext";
 import { api } from "@/lib/api";
+import { notifyLiveRefresh } from "@/hooks/useLiveData";
 
 const icons = {
   "check-circle": CheckCircle2,
@@ -8,19 +10,34 @@ const icons = {
   megaphone: Megaphone,
   "file-text": FileText,
   "message-circle": MessageCircle,
+  bell: Bell,
 };
 
 export default function NotificationsDrawer({ open, onClose }) {
   const { notifications, refreshNotifications } = useApp();
+  const navigate = useNavigate();
 
   const markAll = async () => {
     await api.post("/notifications/read-all");
-    refreshNotifications();
+    await refreshNotifications();
+    notifyLiveRefresh(["notifications"]);
   };
 
-  const markOne = async (id) => {
-    await api.post(`/notifications/${id}/read`);
-    refreshNotifications();
+  const openNotification = async (n) => {
+    // Optimistic close + navigate first for snappy UX
+    if (!n.read) {
+      try {
+        await api.post(`/notifications/${n.id}/read`);
+      } catch {
+        /* ignore — still navigate */
+      }
+    }
+    await refreshNotifications();
+    notifyLiveRefresh(["notifications"]);
+    onClose?.();
+    if (n.link) {
+      navigate(n.link);
+    }
   };
 
   return (
@@ -68,11 +85,14 @@ export default function NotificationsDrawer({ open, onClose }) {
           )}
           {notifications.map((n) => {
             const Icon = icons[n.icon] || Bell;
+            const text = n.content || n.message || "";
+            const clickable = Boolean(n.link);
             return (
               <button
                 key={n.id}
-                onClick={() => markOne(n.id)}
+                onClick={() => openNotification(n)}
                 data-testid={`notif-${n.id}`}
+                title={clickable ? "Ouvrir" : "Marquer comme lu"}
                 className={`group w-full text-left flex gap-3 rounded-2xl p-4 transition-all duration-200 ${
                   n.read ? "bg-white hover:bg-[#F4F7FA]" : "bg-[#3BA4FF]/[0.06] hover:bg-[#3BA4FF]/10"
                 }`}
@@ -89,7 +109,12 @@ export default function NotificationsDrawer({ open, onClose }) {
                     <div className="text-sm font-semibold text-[#071B34]">{n.title}</div>
                     {!n.read && <span className="h-1.5 w-1.5 rounded-full bg-[#3BA4FF]" />}
                   </div>
-                  <div className="text-xs text-[#475569] mt-0.5">{n.content}</div>
+                  <div className="text-xs text-[#475569] mt-0.5 line-clamp-2">{text}</div>
+                  {clickable && (
+                    <div className="text-[10px] font-semibold text-[#3BA4FF] mt-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      Ouvrir →
+                    </div>
+                  )}
                 </div>
                 {!n.read && (
                   <Check className="h-4 w-4 text-[#3BA4FF] opacity-0 group-hover:opacity-100 transition-opacity" />

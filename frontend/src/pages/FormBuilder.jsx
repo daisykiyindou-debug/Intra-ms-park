@@ -202,6 +202,66 @@ export default function FormBuilder() {
   );
 }
 
+// ────────────────────────────────────── Field renderer for the live preview
+function PreviewField({ field }) {
+  if (field.type === "section") {
+    return (
+      <div className="pt-3">
+        <h4 className="text-base font-bold text-[#071B34]">{field.label || "Section"}</h4>
+        {field.help_text && (
+          <p className="text-xs text-[#475569] mt-1">{field.help_text}</p>
+        )}
+      </div>
+    );
+  }
+  const commonInput =
+    "w-full rounded-lg border border-[#071B34]/10 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#3BA4FF]/30 focus:border-[#3BA4FF]";
+  return (
+    <div>
+      <label className="text-xs font-semibold text-[#071B34] flex items-center gap-1">
+        {field.label || "Champ"}
+        {field.required && <span className="text-[#EF4444]">*</span>}
+      </label>
+      {field.help_text && (
+        <div className="text-[10px] text-[#475569] mt-0.5 mb-1.5">{field.help_text}</div>
+      )}
+      <div className="mt-1">
+        {field.type === "textarea" ? (
+          <textarea rows={3} placeholder={field.placeholder} className={commonInput} disabled />
+        ) : field.type === "select" ? (
+          <select className={commonInput} disabled>
+            <option>— Choisir —</option>
+            {(field.options || []).map((o, i) => <option key={i}>{o}</option>)}
+          </select>
+        ) : field.type === "radio" ? (
+          <div className="space-y-1">
+            {(field.options || []).map((o, i) => (
+              <label key={i} className="flex items-center gap-2 text-xs text-[#071B34]">
+                <input type="radio" disabled className="accent-[#3BA4FF]" /> {o}
+              </label>
+            ))}
+          </div>
+        ) : field.type === "checkbox" ? (
+          <div className="space-y-1">
+            {(field.options || []).map((o, i) => (
+              <label key={i} className="flex items-center gap-2 text-xs text-[#071B34]">
+                <input type="checkbox" disabled className="accent-[#3BA4FF]" /> {o}
+              </label>
+            ))}
+          </div>
+        ) : (
+          <input
+            type={field.type === "number" ? "number" : field.type === "date" ? "date" : field.type === "email" ? "email" : field.type === "tel" ? "tel" : field.type === "url" ? "url" : "text"}
+            placeholder={field.placeholder}
+            className={commonInput}
+            disabled
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ────────────────────────────────────── Form editor (create/edit)
 function FormEditor({ form, onClose, onSaved }) {
   const isNew = !form;
@@ -215,6 +275,7 @@ function FormEditor({ form, onClose, onSaved }) {
     { ...newField("text"), label: "Nom", name: "last_name", required: true, placeholder: "Auto-rempli si connecté" },
   ]);
   const [saving, setSaving] = useState(false);
+  const [showPreview, setShowPreview] = useState(true);
 
   const addField = (type) => setFields((f) => [...f, newField(type)]);
   const updateField = (i, patch) => setFields((f) => f.map((x, idx) => (idx === i ? { ...x, ...patch } : x)));
@@ -267,26 +328,42 @@ function FormEditor({ form, onClose, onSaved }) {
       role="dialog"
       aria-modal="true"
       onClick={onClose}
-      className="fixed inset-0 z-50 bg-black/40 backdrop-blur-md flex items-center justify-center p-4"
+      className="fixed inset-0 z-50 bg-black/40 backdrop-blur-md flex items-center justify-center p-2 md:p-4"
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="ms-card w-full max-w-5xl max-h-[95vh] overflow-hidden flex flex-col"
+        className="ms-card w-full max-w-[1400px] h-[95vh] overflow-hidden flex flex-col"
         data-testid="form-editor"
       >
-        <div className="p-5 border-b border-[#071B34]/5 flex items-start justify-between">
-          <div>
+        {/* Header */}
+        <div className="shrink-0 px-5 py-4 border-b border-[#071B34]/5 flex items-start justify-between gap-3">
+          <div className="min-w-0">
             <div className="ms-overline">{isNew ? "Nouveau formulaire" : "Modifier le formulaire"}</div>
-            <h3 className="text-xl font-bold text-[#071B34] mt-1">Constructeur de formulaire</h3>
+            <h3 className="text-lg md:text-xl font-bold text-[#071B34] mt-1 truncate">
+              {title.trim() || "Constructeur de formulaire"}
+            </h3>
           </div>
-          <button onClick={onClose} className="flex h-9 w-9 items-center justify-center rounded-xl hover:bg-[#071B34]/5">
-            <X className="h-4 w-4" />
-          </button>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => setShowPreview((v) => !v)}
+              data-testid="toggle-preview"
+              className="hidden lg:inline-flex ms-btn-outline text-xs !py-1.5"
+              title="Afficher/masquer l'aperçu"
+            >
+              <Eye className="h-3.5 w-3.5" />
+              {showPreview ? "Masquer aperçu" : "Afficher aperçu"}
+            </button>
+            <button onClick={onClose} className="flex h-9 w-9 items-center justify-center rounded-xl hover:bg-[#071B34]/5">
+              <X className="h-4 w-4" />
+            </button>
+          </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-5 grid grid-cols-1 lg:grid-cols-3 gap-5">
-          {/* Left: form settings + palette */}
-          <div className="lg:col-span-1 space-y-4">
+        {/* Body — three independently-scrollable columns on desktop */}
+        <div className="flex-1 min-h-0 flex flex-col lg:flex-row overflow-hidden">
+          {/* Column 1 — Settings + palette (sticky) */}
+          <aside className="lg:w-[320px] lg:shrink-0 lg:border-r border-[#071B34]/5 overflow-y-auto p-5 space-y-4 bg-[#F8FAFC]">
             <div>
               <label className="ms-overline">Titre du formulaire</label>
               <input
@@ -346,7 +423,7 @@ function FormEditor({ form, onClose, onSaved }) {
                     type="button"
                     onClick={() => addField(t.v)}
                     data-testid={`add-field-${t.v}`}
-                    className="text-[11px] text-left rounded-lg bg-[#F4F7FA] hover:bg-[#3BA4FF]/10 hover:text-[#1D70B8] px-2 py-1.5 font-semibold flex items-center gap-1.5"
+                    className="text-[11px] text-left rounded-lg bg-white hover:bg-[#3BA4FF]/10 hover:text-[#1D70B8] px-2 py-1.5 font-semibold flex items-center gap-1.5 border border-[#071B34]/5"
                   >
                     <span className="text-sm">{t.icon}</span>
                     {t.label}
@@ -354,11 +431,16 @@ function FormEditor({ form, onClose, onSaved }) {
                 ))}
               </div>
             </div>
-          </div>
+          </aside>
 
-          {/* Right: field list */}
-          <div className="lg:col-span-2 space-y-2">
-            <div className="ms-overline">Champs du formulaire ({fields.length})</div>
+          {/* Column 2 — Fields editor */}
+          <section className="flex-1 min-w-0 overflow-y-auto p-5 space-y-2">
+            <div className="ms-overline flex items-center justify-between">
+              <span>Champs du formulaire ({fields.length})</span>
+              <span className="text-[10px] normal-case font-normal text-[#94A3B8]">
+                Glissez, réordonnez avec les flèches
+              </span>
+            </div>
             {fields.length === 0 && (
               <div className="ms-card p-8 text-center text-sm text-[#475569]">
                 Aucun champ. Cliquez sur un type dans la colonne de gauche.
@@ -375,10 +457,45 @@ function FormEditor({ form, onClose, onSaved }) {
                 onMove={(dir) => moveField(i, dir)}
               />
             ))}
-          </div>
+          </section>
+
+          {/* Column 3 — Live preview (desktop only, toggleable) */}
+          {showPreview && (
+            <aside className="hidden lg:block lg:w-[380px] lg:shrink-0 lg:border-l border-[#071B34]/5 overflow-y-auto p-5 bg-[#F4F7FA]">
+              <div className="ms-overline mb-3 flex items-center gap-1.5">
+                <Eye className="h-3 w-3" /> Aperçu employé
+              </div>
+              <div className="rounded-2xl bg-white p-4 shadow-sm space-y-4">
+                <div>
+                  <h4 className="text-base font-bold text-[#071B34]">{title || "Titre du formulaire"}</h4>
+                  {description && (
+                    <p className="text-xs text-[#475569] mt-1 whitespace-pre-wrap">{description}</p>
+                  )}
+                </div>
+                <div className="space-y-3">
+                  {fields.length === 0 ? (
+                    <div className="text-xs text-[#94A3B8] italic">Ajoutez des champs pour prévisualiser…</div>
+                  ) : (
+                    fields.map((f) => <PreviewField key={f.id} field={f} />)
+                  )}
+                </div>
+                <button
+                  type="button"
+                  disabled
+                  className="w-full rounded-lg bg-[#3BA4FF] text-white text-sm font-semibold py-2.5 opacity-90"
+                >
+                  {submitLabel || "Envoyer"}
+                </button>
+              </div>
+              <p className="text-[10px] text-[#94A3B8] mt-3 text-center">
+                Ceci est un aperçu — les champs ne sont pas interactifs.
+              </p>
+            </aside>
+          )}
         </div>
 
-        <div className="p-5 border-t border-[#071B34]/5 flex justify-end gap-2">
+        {/* Footer */}
+        <div className="shrink-0 px-5 py-3 border-t border-[#071B34]/5 flex justify-end gap-2 bg-white">
           <button onClick={onClose} className="ms-btn-outline">Annuler</button>
           <button
             onClick={save}

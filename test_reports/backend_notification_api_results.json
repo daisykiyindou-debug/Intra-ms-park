@@ -1,0 +1,293 @@
+{
+  "run_id": "1784193260",
+  "api": "https://mspark-employee-hub.preview.emergentagent.com/api",
+  "checks": [
+    {
+      "name": "GET /notifications responds",
+      "ok": true,
+      "details": {
+        "status": 200,
+        "count": 16
+      }
+    },
+    {
+      "name": "POST /admin/news creates news",
+      "ok": true,
+      "details": {
+        "status": 200,
+        "id": "371e2faf-4953-4c00-bdeb-5517b5fcf5ce"
+      }
+    },
+    {
+      "name": "GET /notifications responds",
+      "ok": true,
+      "details": {
+        "status": 200,
+        "count": 17
+      }
+    },
+    {
+      "name": "news notification has type= news, content, icon, link",
+      "ok": true,
+      "details": {
+        "id": "86620afb-f0a6-449d-9087-b1ae05ceab4f",
+        "employee_id": "emp-idriss-malonga",
+        "type": "news",
+        "title": "Nouvelle actualité",
+        "content": "TEST notif actualité 1784193260",
+        "message": "TEST notif actualité 1784193260",
+        "icon": "megaphone",
+        "link": "/actualites/371e2faf-4953-4c00-bdeb-5517b5fcf5ce",
+        "read": false,
+        "ts": "2026-07-16T09:14:21.109031+00:00",
+        "created_at": "2026-07-16T09:14:21.109039+00:00"
+      }
+    },
+    {
+      "name": "POST /admin/events creates event",
+      "ok": true,
+      "details": {
+        "status": 200,
+        "id": "0433a1d1-bbee-4ada-878a-cacc40289cbe"
+      }
+    },
+    {
+      "name": "GET /notifications responds",
+      "ok": true,
+      "details": {
+        "status": 200,
+        "count": 18
+      }
+    },
+    {
+      "name": "event notification has type=event, content, icon, link",
+      "ok": true,
+      "details": {
+        "id": "d284d985-f240-4634-8d66-ed029bbc079f",
+        "employee_id": "emp-idriss-malonga",
+        "type": "event",
+        "title": "Nouvel événement",
+        "content": "TEST notif événement 1784193260 — 2026-07-31",
+        "message": "TEST notif événement 1784193260 — 2026-07-31",
+        "icon": "calendar",
+        "link": "/agenda/event/0433a1d1-bbee-4ada-878a-cacc40289cbe",
+        "read": false,
+        "ts": "2026-07-16T09:14:21.356026+00:00",
+        "created_at": "2026-07-16T09:14:21.356030+00:00"
+      }
+    },
+    {
+      "name": "POST /posts creates post",
+      "ok": true,
+      "details": {
+        "status": 200,
+        "id": "d536d0d6-c157-4cdf-afe2-9355a5ce398a"
+      }
+    },
+    {
+      "name": "GET /notifications responds",
+      "ok": true,
+      "details": {
+        "status": 200,
+        "count": 19
+      }
+    },
+    {
+      "name": "post notification has type=post, content, icon, link",
+      "ok": true,
+      "details": {
+        "id": "da9065fd-79b9-4bf9-afa3-73fbf17a04ec",
+        "employee_id": "emp-idriss-malonga",
+        "type": "post",
+        "title": "Nouvelle publication",
+        "content": "Marcus SIMÉO a publié : TEST notif post 1784193260",
+        "message": "Marcus SIMÉO a publié : TEST notif post 1784193260",
+        "icon": "megaphone",
+        "link": "/actualites/d536d0d6-c157-4cdf-afe2-9355a5ce398a",
+        "read": false,
+        "ts": "2026-07-16T09:14:21.555656+00:00",
+        "created_at": "2026-07-16T09:14:21.555665+00:00"
+      }
+    },
+    {
+      "name": "POST /admin/documents/payslip creates document",
+      "ok": true,
+      "details": {
+        "status": 200,
+        "id": "3b3baef5-5cd3-4842-a93f-95e54a5bd48f"
+      }
+    },
+    {
+      "name": "GET /notifications responds",
+      "ok": true,
+      "details": {
+        "status": 200,
+        "count": 20
+      }
+    },
+    {
+      "name": "payslip notification has icon=file-text and link=/documents",
+      "ok": true,
+      "details": {
+        "id": "0f1b5e85-0361-4d8a-8a07-88019942da57",
+        "employee_id": "emp-idriss-malonga",
+        "type": "document",
+        "title": "Nouvelle fiche de paie",
+        "content": "Votre bulletin de Juillet 2026 est disponible.",
+        "message": "Votre bulletin de Juillet 2026 est disponible.",
+        "icon": "file-text",
+        "link": "/documents",
+        "ts": "2026-07-16T09:14:21.756878+00:00",
+        "created_at": "2026-07-16T09:14:21.756884+00:00",
+        "read": false
+      }
+    },
+    {
+      "name": "POST /admin/broadcast creates broadcast",
+      "ok": true,
+      "details": {
+        "status": 200,
+        "id": "71a337e7-d105-46e5-9c04-32d3cd745fc8"
+      }
+    },
+    {
+      "name": "GET /notifications responds",
+      "ok": true,
+      "details": {
+        "status": 200,
+        "count": 21
+      }
+    },
+    {
+      "name": "broadcast message notification has content/icon/link",
+      "ok": true,
+      "details": {
+        "id": "4ca03cc6-24a3-411a-94b3-ffb6a65e3dec",
+        "employee_id": "emp-idriss-malonga",
+        "type": "message",
+        "title": "Annonce sur #Accueil",
+        "content": "TEST broadcast accueil 1784193260",
+        "message": "TEST broadcast accueil 1784193260",
+        "icon": "message-circle",
+        "link": "/messagerie?channel=ch-accueil",
+        "read": false,
+        "ts": "2026-07-16T09:14:21.947578+00:00",
+        "created_at": "2026-07-16T09:14:21.947582+00:00"
+      }
+    },
+    {
+      "name": "POST /channels/ch-accueil/messages works for new message action",
+      "ok": false,
+      "details": {
+        "status": 500,
+        "response": "Internal Server Error"
+      }
+    },
+    {
+      "name": "GET /notifications responds",
+      "ok": true,
+      "details": {
+        "status": 200,
+        "count": 21
+      }
+    },
+    {
+      "name": "/api/notifications rows all include non-empty content, link, icon",
+      "ok": false,
+      "details": {
+        "missing_count": 7,
+        "examples": [
+          {
+            "id": "c9ab2641-c24b-4c11-8a96-825ad04629d5",
+            "type": "comment",
+            "missing": [
+              "link"
+            ]
+          },
+          {
+            "id": "5fc8bdaf-5dae-401a-a9e7-9cc80c854bb3",
+            "type": "document",
+            "missing": [
+              "link"
+            ]
+          },
+          {
+            "id": "462fd8d8-a4c8-474a-bca0-ca42a979b2be",
+            "type": "post",
+            "missing": [
+              "link"
+            ]
+          },
+          {
+            "id": "1354da3b-d098-4770-9070-a406897faa0c",
+            "type": "planning",
+            "missing": [
+              "link"
+            ]
+          },
+          {
+            "id": "1439798f-6b80-4fa5-8ce3-a8e6c5e3bd66",
+            "type": "conge_valide",
+            "missing": [
+              "link"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "GET /notifications responds",
+      "ok": true,
+      "details": {
+        "status": 200,
+        "count": 21
+      }
+    },
+    {
+      "name": "POST /notifications/{id}/read marks one notification read",
+      "ok": true,
+      "details": {
+        "status": 200,
+        "id": "4ca03cc6-24a3-411a-94b3-ffb6a65e3dec",
+        "after": {
+          "id": "4ca03cc6-24a3-411a-94b3-ffb6a65e3dec",
+          "employee_id": "emp-idriss-malonga",
+          "type": "message",
+          "title": "Annonce sur #Accueil",
+          "content": "TEST broadcast accueil 1784193260",
+          "message": "TEST broadcast accueil 1784193260",
+          "icon": "message-circle",
+          "link": "/messagerie?channel=ch-accueil",
+          "read": true,
+          "ts": "2026-07-16T09:14:21.947578+00:00",
+          "created_at": "2026-07-16T09:14:21.947582+00:00"
+        }
+      }
+    },
+    {
+      "name": "GET /notifications responds",
+      "ok": true,
+      "details": {
+        "status": 200,
+        "count": 21
+      }
+    },
+    {
+      "name": "POST /notifications/read-all marks all Idriss notifications read",
+      "ok": true,
+      "details": {
+        "status": 200,
+        "remaining_unread_count": 0
+      }
+    }
+  ],
+  "created": {
+    "news_id": "371e2faf-4953-4c00-bdeb-5517b5fcf5ce",
+    "event_id": "0433a1d1-bbee-4ada-878a-cacc40289cbe",
+    "post_id": "d536d0d6-c157-4cdf-afe2-9355a5ce398a",
+    "payslip_doc_id": "3b3baef5-5cd3-4842-a93f-95e54a5bd48f",
+    "broadcast_msg_id": "71a337e7-d105-46e5-9c04-32d3cd745fc8"
+  },
+  "passed": 21,
+  "failed": 2
+}
