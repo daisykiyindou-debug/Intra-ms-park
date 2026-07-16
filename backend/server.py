@@ -1352,7 +1352,7 @@ async def me():
         emp = await db.employees.find_one({"id": CURRENT_EMPLOYEE_ID}, {"_id": 0})
         if not emp:
             raise HTTPException(404, "Current employee not found")
-    quota = ROLE_QUOTAS.get(emp.get("role_category", "employe"), 20)
+    quota = emp.get("daily_quota") or ROLE_QUOTAS.get(emp.get("role_category", "employe"), 20)
     emp["daily_quota"] = quota
     return emp
 
@@ -1695,7 +1695,7 @@ async def get_badging(filter_range: str = "month"):
 async def meal_points_today():
     today = date.today().isoformat()
     emp = await db.employees.find_one({"id": current_user()}, {"_id": 0})
-    quota = ROLE_QUOTAS.get(emp.get("role_category", "employe"), 20)
+    quota = emp.get("daily_quota") or ROLE_QUOTAS.get(emp.get("role_category", "employe"), 20)
 
     # Points are credited automatically every day (no badge required for MVP demo)
     today_sched = await db.schedules.find_one(
@@ -2723,7 +2723,7 @@ async def update_me(payload: ProfileUpdate):
     if updates:
         await db.employees.update_one({"id": current_user()}, {"$set": updates})
     emp = await db.employees.find_one({"id": current_user()}, {"_id": 0})
-    emp["daily_quota"] = ROLE_QUOTAS.get(emp.get("role_category", "employe"), 20)
+    emp["daily_quota"] = emp.get("daily_quota") or ROLE_QUOTAS.get(emp.get("role_category", "employe"), 20)
     return emp
 
 
@@ -3870,11 +3870,26 @@ async def _seed_extra_products():
          "points": 7, "price_eur": 5.5,
          "image": "https://customer-assets-jt897jd0.emergentagent.net/job_mspark-employee-hub/artifacts/v6zbpnyo_photo_flan_patissier_cuisinovores.webp",
          "allergens": ["gluten", "lait", "œuf"]},
+        {"store": "soccer_bar", "category": "Viandes", "name": "Côte de boeuf",
+         "description": "Côte de boeuf grillée à la braise, pommes de terre sautées et persil",
+         "points": 22, "price_eur": 18.5,
+         "image": "https://customer-assets-jt897jd0.emergentagent.net/job_mspark-employee-hub/artifacts/z993xner_cotedeboeufcuire.jpg.webp",
+         "allergens": []},
+        {"store": "soccer_bar", "category": "Poissons", "name": "Crevettes sautées",
+         "description": "Crevettes sautées aux poivrons colorés, oignons rouges et persil",
+         "points": 16, "price_eur": 13.5,
+         "image": "https://customer-assets-jt897jd0.emergentagent.net/job_mspark-employee-hub/artifacts/izddam7m_crevettes-sautees-aux-poivrons.webp",
+         "allergens": ["crustacés"]},
     ]
     for it in extras:
         existing = await db.products.find_one({"store": it["store"], "name": it["name"]})
         if not existing:
             await db.products.insert_one({"id": _id(), **it})
+    # Personal daily-quota override — Idriss demo employee = 25 points/day
+    await db.employees.update_one(
+        {"id": CURRENT_EMPLOYEE_ID},
+        {"$set": {"daily_quota": 25}},
+    )
 
 
 @app.on_event("shutdown")

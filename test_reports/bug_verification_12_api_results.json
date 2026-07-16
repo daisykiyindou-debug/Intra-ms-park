@@ -1,0 +1,109 @@
+{
+  "base": "https://mspark-employee-hub.preview.emergentagent.com",
+  "checks": [
+    {
+      "name": "GET /api/menu?store=soccer_bar status",
+      "passed": true,
+      "details": {
+        "status": 200
+      }
+    },
+    {
+      "name": "Soccer Bar item count",
+      "passed": true,
+      "details": {
+        "count": 17
+      }
+    },
+    {
+      "name": "Menu item Côte de boeuf",
+      "passed": true,
+      "details": {
+        "id": "881ebf5b-b1d4-4d42-8aa8-3707bb9dd656",
+        "store": "soccer_bar",
+        "category": "Viandes",
+        "name": "Côte de boeuf",
+        "description": "Côte de boeuf grillée à la braise, pommes de terre sautées et persil",
+        "points": 22,
+        "price_eur": 18.5,
+        "image": "https://customer-assets-jt897jd0.emergentagent.net/job_mspark-employee-hub/artifacts/z993xner_cotedeboeufcuire.jpg.webp",
+        "allergens": []
+      }
+    },
+    {
+      "name": "Menu item Crevettes sautées",
+      "passed": true,
+      "details": {
+        "id": "3ded7c24-d821-48da-910e-e8f00cae795e",
+        "store": "soccer_bar",
+        "category": "Poissons",
+        "name": "Crevettes sautées",
+        "description": "Crevettes sautées aux poivrons colorés, oignons rouges et persil",
+        "points": 16,
+        "price_eur": 13.5,
+        "image": "https://customer-assets-jt897jd0.emergentagent.net/job_mspark-employee-hub/artifacts/izddam7m_crevettes-sautees-aux-poivrons.webp",
+        "allergens": [
+          "crustacés"
+        ]
+      }
+    },
+    {
+      "name": "Menu categories include Viandes and Poissons",
+      "passed": true,
+      "details": {
+        "categories": [
+          "Accompagnements",
+          "Boissons",
+          "Burgers",
+          "Desserts",
+          "Entrées",
+          "Finger Food",
+          "Mocktails",
+          "Poissons",
+          "Salades",
+          "Tacos",
+          "Viandes"
+        ]
+      }
+    },
+    {
+      "name": "GET /api/me Idriss daily_quota",
+      "passed": true,
+      "details": {
+        "status": 200,
+        "daily_quota": 25,
+        "role_category": "employe"
+      }
+    },
+    {
+      "name": "GET /api/meal-points/today Idriss quota/credit",
+      "passed": true,
+      "details": {
+        "status": 200,
+        "daily_quota": 25,
+        "credited_points": 25,
+        "used": 0,
+        "remaining": 25
+      }
+    },
+    {
+      "name": "Idriss remaining is 25 when no spend",
+      "passed": true,
+      "details": {
+        "used": 0,
+        "remaining": 25,
+        "transactions": []
+      }
+    },
+    {
+      "name": "GET /api/me Marcus default role quota",
+      "passed": true,
+      "details": {
+        "status": 200,
+        "daily_quota": 35,
+        "role_category": "encadrement"
+      }
+    }
+  ],
+  "passed": true
+}
