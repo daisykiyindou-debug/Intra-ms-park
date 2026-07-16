@@ -1017,8 +1017,7 @@ function Lightbox({ images, startIndex = 0, onClose }) {
         data-testid="lightbox-image"
         className="max-w-[92vw] max-h-[88vh] object-contain rounded-lg shadow-2xl"
       />
-    </div>
-  );
-}
+    </div>,
+    document.body
   );
 }
