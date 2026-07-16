@@ -658,9 +658,52 @@ async def _seed_once() -> None:
             })
         cur += timedelta(days=1)
 
+    # ─── Schedule for Léa (comm editor, 35h/week, Mon–Fri 9h30-17h30)
+    lea_pattern = {
+        0: ("09:30", "17:30"),
+        1: ("09:30", "17:30"),
+        2: ("09:30", "17:30"),
+        3: ("09:30", "17:30"),
+        4: ("09:30", "17:30"),
+    }
+    cur = start_period
+    while cur <= end_period:
+        wd = cur.weekday()
+        d = cur.isoformat()
+        if wd in lea_pattern:
+            s, e = lea_pattern[wd]
+            schedule.append({
+                "id": _id(),
+                "employee_id": "emp-lea-comm",
+                "day": d,
+                "start": s,
+                "end": e,
+                "pause_start": "12:30",
+                "pause_end": "13:30",
+                "break_minutes": 60,
+                "type": "shift",
+                "location": "MS Park — Bureau communication",
+                "manager": "Marcus SIMÉO",
+                "service": "Communication interne",
+                "note": None,
+            })
+        else:
+            schedule.append({
+                "id": _id(),
+                "employee_id": "emp-lea-comm",
+                "day": d,
+                "start": None, "end": None,
+                "pause_start": None, "pause_end": None,
+                "break_minutes": 0,
+                "type": "off",
+                "location": None, "manager": None, "service": None,
+                "note": "Week-end",
+            })
+        cur += timedelta(days=1)
+
     await db.schedules.insert_many(schedule)
 
-    # ─── Badging history for past shifts (with pause records)
+    # ─── Badging history for past shifts (all employees, with pause records)
     badging: list[dict] = []
     for s in schedule:
         sd = date.fromisoformat(s["day"])
@@ -668,12 +711,13 @@ async def _seed_once() -> None:
             continue
         start_t = datetime.strptime(s["start"], "%H:%M")
         end_t = datetime.strptime(s["end"], "%H:%M")
-        # Simulate occasional anomalies
+        # Simulate occasional anomalies (deterministic mix per employee)
+        emp_seed = sum(ord(c) for c in s["employee_id"]) % 7
         anomaly = None
-        if (sd.toordinal() % 11) == 0:
+        if ((sd.toordinal() + emp_seed) % 11) == 0:
             start_t = start_t + timedelta(minutes=8)
             anomaly = "late"
-        if (sd.toordinal() % 17) == 0:
+        if ((sd.toordinal() + emp_seed) % 17) == 0:
             anomaly = "missed_clock"
         clock_in = start_t.strftime("%H:%M") if anomaly != "missed_clock" else None
         clock_out = end_t.strftime("%H:%M") if anomaly != "missed_clock" else None
@@ -682,7 +726,7 @@ async def _seed_once() -> None:
             worked = int((end_t - start_t).total_seconds() // 60) - s["break_minutes"]
         badging.append({
             "id": _id(),
-            "employee_id": CURRENT_EMPLOYEE_ID,
+            "employee_id": s["employee_id"],
             "day": s["day"],
             "clock_in": clock_in,
             "clock_out": clock_out,
@@ -693,26 +737,7 @@ async def _seed_once() -> None:
             "anomaly": anomaly,
             "note": None,
         })
-    # Add a clock-in for today if applicable
-    today_sched = next((s for s in schedule if s["day"] == today.isoformat()), None)
-    if today_sched and today_sched["type"] == "shift":
-        now_t = datetime.now()
-        st = datetime.strptime(today_sched["start"], "%H:%M").replace(year=now_t.year, month=now_t.month, day=now_t.day)
-        clock_in = st.strftime("%H:%M") if now_t > st else None
-        worked = max(0, int((now_t - st).total_seconds() // 60) - 0) if clock_in else 0
-        badging.append({
-            "id": _id(),
-            "employee_id": CURRENT_EMPLOYEE_ID,
-            "day": today.isoformat(),
-            "clock_in": clock_in,
-            "clock_out": None,
-            "pause_out": None,
-            "pause_in": None,
-            "break_minutes": 0,
-            "worked_minutes": worked,
-            "anomaly": None,
-            "note": "En cours",
-        })
+    # Today's live badging is computed dynamically via _compute_today_badging() — no seed needed
     if badging:
         await db.badging.insert_many(badging)
 
@@ -1223,14 +1248,14 @@ async def list_employees():
 # ─── Dashboard summary
 @api.get("/dashboard")
 async def dashboard():
-    today = date.today().isoformat()
+    today = _now_paris().date().isoformat()
     emp = await db.employees.find_one({"id": current_user()}, {"_id": 0})
     today_schedule = await db.schedules.find_one(
         {"employee_id": current_user(), "day": today}, {"_id": 0}
     )
-    today_badge = await db.badging.find_one(
-        {"employee_id": current_user(), "day": today}, {"_id": 0}
-    )
+    # Use the same intelligent live badging as `/badging` so the Dashboard
+    # card and the Badge page display exactly the same 4 timestamps.
+    today_badge = _compute_today_badging(today_schedule, current_user()) if today_schedule else None
 
     # Compute live status
     status = "off"  # off | service | pause | end | hors_site

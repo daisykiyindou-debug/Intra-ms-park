@@ -9,7 +9,8 @@ import { useApp } from "@/contexts/AppContext";
 import useLiveData, { notifyLiveRefresh } from "@/hooks/useLiveData";
 
 const TYPES = [
-  { k: "conge", l: "Congé", icon: CalIcon, color: "#3BA4FF" },
+  { k: "conge", l: "Congé payé", icon: CalIcon, color: "#3BA4FF" },
+  { k: "rtt", l: "RTT", icon: Sun, color: "#F59E0B" },
   { k: "absence", l: "Absence", icon: Clock, color: "#F59E0B" },
   { k: "echange", l: "Échange horaires", icon: ArrowLeftRight, color: "#A78BFA" },
   { k: "acompte", l: "Acompte", icon: Banknote, color: "#10B981" },

@@ -47,6 +47,13 @@ Intranet premium pour employés du parc MS Park + espace administrateur pour le 
 - `/app/frontend/src/lib/api.js` — interceptor axios ajoutant `X-Employee-Id` depuis localStorage
 
 ## Changelog
+### 2026-08 — Historique badgeage tous comptes + demande RTT
+- **Badgeage historique pour tous** : le seed génère désormais l'historique de badgeage pour **tous les employés** (Idriss + Marcus + Léa + tous les seeds), pas seulement pour Idriss. Chaque employé a ~21 jours d'entrées (mois roulant), anomalies déterministes par employé.
+- **Dashboard "Aujourd'hui" aligné sur le badgeage intelligent** : `/api/dashboard` utilise désormais `_compute_today_badging()` (même helper que `/api/badging`) → les 4 badges (entrée / sortie pause / reprise / sortie) affichés sur le tableau de bord correspondent exactement à ceux de la page Badge.
+- **Léa a désormais un planning** : Mon-Fri 09:30–17:30 avec pause 12:30–13:30 (35h/sem).
+- **Demandes RH — type RTT ajouté** dans le sélecteur (icône soleil orange) aux côtés de Congé payé, Absence, Échange horaires, Acompte, Matériel, Arrêt maladie. Le backend accepte déjà `type: "rtt"` (approved via `is_rtt`, décrémente `leave_balance.rtt`, crée un planning `type: "rtt"` sur les jours concernés).
+- **Attribution RTT admin** : déjà en place dans `LeaveGrantManager` (`/management/attributions`) — l'admin peut créditer N jours de RTT à N employés en un clic.
+
 ### 2026-08 — Générateur de formulaires personnalisés
 - **Backend** : nouveaux modèles `CustomForm`, `FormField`, `FormResponse` + endpoints CRUD :
   - `GET/POST/PUT/DELETE /admin/forms` (admin + comm editors)
