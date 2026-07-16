@@ -7,7 +7,7 @@ import {
   FileText, Receipt, Send, Megaphone,
 } from "lucide-react";
 import { toast } from "sonner";
-import { api, fr, formatMinutes } from "@/lib/api";
+import { api, fr, formatMinutes, absoluteUrl } from "@/lib/api";
 import { useApp } from "@/contexts/AppContext";
 import { notifyLiveRefresh } from "@/hooks/useLiveData";
 import FormBuilder from "@/pages/FormBuilder";
