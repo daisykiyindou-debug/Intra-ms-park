@@ -47,6 +47,16 @@ Intranet premium pour employés du parc MS Park + espace administrateur pour le 
 - `/app/frontend/src/lib/api.js` — interceptor axios ajoutant `X-Employee-Id` depuis localStorage
 
 ## Changelog
+### 2026-08 — Upload photos + agenda multi-jours + éditer/tronquer publications
+- **Upload local d'images (galerie/pellicule)** :
+  - Backend : `POST /api/uploads` (multipart, max 8 Mo) + `StaticFiles` monté sur `/api/uploads/{id}.ext` — sert les fichiers via l'ingress k8s.
+  - Frontend : nouveau composant réutilisable `ImageUpload.jsx` (bouton "Importer depuis la galerie", preview, retrait, fallback URL). Intégré dans composer d'actualités (mode multi), éditeur de posts, éditeur d'événement, éditeur de slide de carrousel.
+  - Helper `absoluteUrl()` dans `api.js` : transforme `/api/uploads/xxx.jpg` en URL absolue via `REACT_APP_BACKEND_URL`. Utilisé dans NewsDetail, Agenda modal, NewsCarousel et PostCard.
+- **Événements multi-jours dans le calendrier Agenda** : le hook `byDay` de `Agenda.jsx` itère de `date` à `end_date` (inclusif) et ajoute l'événement dans TOUTES les cellules concernées. Vérifié end-to-end : "Séminaire MS Park" du 7 au 11 septembre s'affiche dans les 5 cases consécutives.
+- **Troncature du fil d'actualité** : `PostCard` limite à **3 lignes** (`line-clamp-3`) quand le contenu dépasse 220 caractères, avec bouton **"En voir plus" / "Réduire"** en dessous.
+- **Édition de sa propre publication** : bouton crayon sur chaque post de l'auteur (ou admin). Modal `PostEditor` avec titre + `RichTextEditor` + `ImageUpload`. Backend : `PUT /api/posts/{id}` (auteur ou admin uniquement, tag `edited_at` visible en italique).
+- **Backend `PostUpdate`** modèle Pydantic dédié pour les mises à jour partielles.
+
 ### 2026-08 — Historique badgeage tous comptes + demande RTT
 - **Badgeage historique pour tous** : le seed génère désormais l'historique de badgeage pour **tous les employés** (Idriss + Marcus + Léa + tous les seeds), pas seulement pour Idriss. Chaque employé a ~21 jours d'entrées (mois roulant), anomalies déterministes par employé.
 - **Dashboard "Aujourd'hui" aligné sur le badgeage intelligent** : `/api/dashboard` utilise désormais `_compute_today_badging()` (même helper que `/api/badging`) → les 4 badges (entrée / sortie pause / reprise / sortie) affichés sur le tableau de bord correspondent exactement à ceux de la page Badge.

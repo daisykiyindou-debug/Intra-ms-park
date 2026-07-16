@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Calendar as CalIcon, ChevronLeft, ChevronRight, MapPin, Clock, X, ExternalLink, Users } from "lucide-react";
-import { api, fr, formatDateFr } from "@/lib/api";
+import { api, fr, formatDateFr, absoluteUrl } from "@/lib/api";
 import useLiveData from "@/hooks/useLiveData";
 
 const typeColor = {
@@ -40,7 +40,15 @@ export default function Agenda() {
   const byDay = useMemo(() => {
     const map = {};
     events.forEach((e) => {
-      (map[e.date] = map[e.date] || []).push(e);
+      // Multi-day events span every day from `date` → `end_date` (inclusive)
+      const start = new Date(e.date);
+      const end = e.end_date ? new Date(e.end_date) : start;
+      const cur = new Date(start);
+      while (cur <= end) {
+        const key = `${cur.getFullYear()}-${String(cur.getMonth() + 1).padStart(2, "0")}-${String(cur.getDate()).padStart(2, "0")}`;
+        (map[key] = map[key] || []).push(e);
+        cur.setDate(cur.getDate() + 1);
+      }
     });
     return map;
   }, [events]);
@@ -183,7 +191,7 @@ export default function Agenda() {
           >
             {selected.image && (
               <img
-                src={selected.image}
+                src={absoluteUrl(selected.image)}
                 alt=""
                 data-testid="event-image"
                 className="w-full h-56 object-cover"

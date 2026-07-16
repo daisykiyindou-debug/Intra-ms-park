@@ -2,14 +2,15 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   Heart, MessageCircle, Send, Filter, Eye, EyeOff,
-  Image as ImageIcon, Paperclip, Link2, Smile, Sparkles, Trash2, X,
+  Image as ImageIcon, Paperclip, Link2, Smile, Sparkles, Trash2, X, Pencil,
   FileText, User as UserIcon, Building2, ChevronDown,
 } from "lucide-react";
 import { toast } from "sonner";
-import { api, formatDateFr } from "@/lib/api";
+import { api, formatDateFr, absoluteUrl } from "@/lib/api";
 import { useApp } from "@/contexts/AppContext";
 import useLiveData, { notifyLiveRefresh } from "@/hooks/useLiveData";
 import RichTextEditor from "@/components/RichTextEditor";
+import ImageUpload from "@/components/ImageUpload";
 
 const FILTERS = [
   { k: "all", l: "Toutes" },
@@ -68,6 +69,7 @@ export default function Actualites() {
   const { me, findEmployee } = useApp();
   const [posts, setPosts] = useState([]);
   const [filter, setFilter] = useState("all");
+  const [editingPost, setEditingPost] = useState(null);
 
   const refresh = () => api.get("/posts").then((r) => setPosts(r.data));
   useLiveData(refresh, ["posts", "news"]);
@@ -131,9 +133,18 @@ export default function Actualites() {
             onLike={() => like(p.id)}
             findEmployee={findEmployee}
             refresh={refresh}
+            setEditingPost={setEditingPost}
           />
         ))}
       </div>
+
+      {editingPost && (
+        <PostEditor
+          post={editingPost}
+          onClose={() => setEditingPost(null)}
+          onSaved={() => { setEditingPost(null); refresh(); notifyLiveRefresh(["posts"]); }}
+        />
+      )}
     </div>
   );
 }
@@ -418,28 +429,41 @@ function AdminComposer({ me, onPublished }) {
         </div>
       )}
 
-      {/* Gallery */}
+      {/* Gallery — upload from device + curated MS Park gallery */}
       {showGallery && (
-        <div className="rounded-xl bg-[#F8FAFC] p-3">
-          <div className="text-[10px] uppercase tracking-wider text-[#475569] font-semibold mb-2">
-            Galerie MS Park — {images.length} sélectionnée{images.length > 1 ? "s" : ""}
+        <div className="rounded-xl bg-[#F8FAFC] p-3 space-y-3">
+          <div>
+            <div className="text-[10px] uppercase tracking-wider text-[#475569] font-semibold mb-2">
+              📱 Importer depuis votre galerie / pellicule ({images.length})
+            </div>
+            <ImageUpload
+              value={images}
+              onChange={setImages}
+              mode="multi"
+              testId="composer-image"
+            />
           </div>
-          <div className="grid grid-cols-4 gap-2">
-            {IMAGE_GALLERY.map((url) => {
-              const sel = images.includes(url);
-              return (
-                <button
-                  key={url}
-                  onClick={() => toggleImage(url)}
-                  data-testid={`gallery-${url.slice(-30, -10)}`}
-                  className={`aspect-square rounded-lg overflow-hidden border-2 transition-all ${
-                    sel ? "border-[#3BA4FF] scale-95" : "border-transparent hover:border-[#3BA4FF]/40"
-                  }`}
-                >
-                  <img src={url} alt="" className="w-full h-full object-cover" />
-                </button>
-              );
-            })}
+          <div className="pt-3 border-t border-[#071B34]/5">
+            <div className="text-[10px] uppercase tracking-wider text-[#475569] font-semibold mb-2">
+              🎨 …ou choisir dans la galerie MS Park
+            </div>
+            <div className="grid grid-cols-4 gap-2">
+              {IMAGE_GALLERY.map((url) => {
+                const sel = images.includes(url);
+                return (
+                  <button
+                    key={url}
+                    onClick={() => toggleImage(url)}
+                    data-testid={`gallery-${url.slice(-30, -10)}`}
+                    className={`aspect-square rounded-lg overflow-hidden border-2 transition-all ${
+                      sel ? "border-[#3BA4FF] scale-95" : "border-transparent hover:border-[#3BA4FF]/40"
+                    }`}
+                  >
+                    <img src={url} alt="" className="w-full h-full object-cover" />
+                  </button>
+                );
+              })}
+            </div>
           </div>
         </div>
       )}
@@ -559,7 +583,7 @@ function ToolBtn({ active, onClick, testid, children }) {
 
 // ────────────────────── Post card
 
-function PostCard({ post, me, onLike, findEmployee, refresh }) {
+function PostCard({ post, me, onLike, findEmployee, refresh, setEditingPost }) {
   const authorFromDb = findEmployee(post.author_id);
   const isOfficial = post.posted_as === "official";
   const author = isOfficial
@@ -578,6 +602,12 @@ function PostCard({ post, me, onLike, findEmployee, refresh }) {
   const liked = me ? post.likes.includes(me.id) : false;
   const [showComments, setShowComments] = useState(false);
   const [commentDraft, setCommentDraft] = useState("");
+  const [contentExpanded, setContentExpanded] = useState(false);
+
+  // Heuristic: if the plain-text version is long enough, we display a truncated
+  // block with "En voir plus" like Facebook/LinkedIn.
+  const plainLen = (post.content || "").replace(/<[^>]+>/g, "").length;
+  const canTruncate = plainLen > 220;
 
   const images = post.images?.length ? post.images : post.image ? [post.image] : [];
 
@@ -621,9 +651,20 @@ function PostCard({ post, me, onLike, findEmployee, refresh }) {
             </div>
             <div className="text-xs text-[#475569]">
               {author.role} · {formatDateFr(post.created_at.slice(0, 10))}
+              {post.edited_at && <span className="italic"> · modifiée</span>}
             </div>
           </div>
-          {(me?.is_admin || me?.can_manage_communication) && (
+          {(post.author_id === me?.id || me?.is_admin) && (
+            <button
+              onClick={() => setEditingPost(post)}
+              data-testid={`edit-post-${post.id}`}
+              className="flex h-8 w-8 items-center justify-center rounded-lg hover:bg-[#3BA4FF]/10 text-[#3BA4FF]"
+              title="Modifier"
+            >
+              <Pencil className="h-4 w-4" />
+            </button>
+          )}
+          {(post.author_id === me?.id || me?.is_admin || me?.can_manage_communication) && (
             <button
               onClick={async () => {
                 if (!window.confirm("Supprimer cette publication ?")) return;
@@ -652,10 +693,24 @@ function PostCard({ post, me, onLike, findEmployee, refresh }) {
         )}
 
         {post.content && (
-          <div
-            className="mt-2 ms-prose text-[15px] leading-relaxed text-[#071B34] break-words"
-            dangerouslySetInnerHTML={{ __html: post.content }}
-          />
+          <>
+            <div
+              className={`mt-2 ms-prose text-[15px] leading-relaxed text-[#071B34] break-words ${
+                canTruncate && !contentExpanded ? "line-clamp-3 overflow-hidden" : ""
+              }`}
+              data-testid={`post-content-${post.id}`}
+              dangerouslySetInnerHTML={{ __html: post.content }}
+            />
+            {canTruncate && (
+              <button
+                onClick={() => setContentExpanded((v) => !v)}
+                data-testid={`post-expand-${post.id}`}
+                className="mt-1 text-xs font-semibold text-[#3BA4FF] hover:text-[#1D70B8]"
+              >
+                {contentExpanded ? "Réduire" : "En voir plus"}
+              </button>
+            )}
+          </>
         )}
 
         {post.hashtags?.length > 0 && (
@@ -709,7 +764,7 @@ function PostCard({ post, me, onLike, findEmployee, refresh }) {
           {images.slice(0, 4).map((url, i) => (
             <img
               key={url + i}
-              src={url}
+              src={absoluteUrl(url)}
               alt=""
               className={`w-full object-cover ${images.length === 1 ? "max-h-96" : "h-48"}`}
             />
@@ -777,3 +832,91 @@ function PostCard({ post, me, onLike, findEmployee, refresh }) {
     </article>
   );
 }
+
+
+// ────────────────────── Edit post modal (author edits their own publication)
+function PostEditor({ post, onClose, onSaved }) {
+  const [title, setTitle] = useState(post.title || "");
+  const [content, setContent] = useState(post.content || "");
+  const [images, setImages] = useState(post.images || []);
+  const [saving, setSaving] = useState(false);
+
+  const save = async () => {
+    if (!title.trim()) {
+      toast.error("Un titre est requis");
+      return;
+    }
+    setSaving(true);
+    try {
+      await api.put(`/posts/${post.id}`, {
+        title: title.trim(),
+        content,
+        images,
+      });
+      toast.success("Publication mise à jour");
+      onSaved();
+    } catch (err) {
+      toast.error("Erreur", { description: err.response?.data?.detail });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      onClick={onClose}
+      className="fixed inset-0 z-50 bg-black/40 backdrop-blur-md flex items-center justify-center p-4"
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        data-testid="post-editor"
+        className="ms-card w-full max-w-2xl max-h-[92vh] overflow-y-auto p-6"
+      >
+        <div className="flex items-start justify-between mb-4">
+          <div>
+            <div className="ms-overline">Modifier</div>
+            <h3 className="text-xl font-bold text-[#071B34] mt-1">Édition de votre publication</h3>
+          </div>
+          <button onClick={onClose} className="flex h-9 w-9 items-center justify-center rounded-xl hover:bg-[#071B34]/5">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="space-y-3">
+          <div>
+            <label className="text-[10px] uppercase tracking-wider text-[#475569] font-semibold">Titre</label>
+            <input
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              maxLength={140}
+              data-testid="post-edit-title"
+              className="ms-input mt-1 font-semibold"
+            />
+          </div>
+          <div>
+            <label className="text-[10px] uppercase tracking-wider text-[#475569] font-semibold">Contenu</label>
+            <RichTextEditor value={content} onChange={setContent} testId="post-edit-content" />
+          </div>
+          <div>
+            <label className="text-[10px] uppercase tracking-wider text-[#475569] font-semibold">Images</label>
+            <ImageUpload value={images} onChange={setImages} mode="multi" testId="post-edit-image" />
+          </div>
+          <div className="flex gap-2 pt-2">
+            <button onClick={onClose} className="ms-btn-outline flex-1">Annuler</button>
+            <button
+              onClick={save}
+              disabled={saving}
+              data-testid="post-edit-save"
+              className="ms-btn-primary flex-1 disabled:opacity-50"
+            >
+              {saving ? "Enregistrement…" : "Enregistrer les modifications"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+

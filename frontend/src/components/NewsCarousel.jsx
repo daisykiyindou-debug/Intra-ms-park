@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback } from "react";
 import useEmblaCarousel from "embla-carousel-react";
 import { ChevronLeft, ChevronRight, ArrowUpRight } from "lucide-react";
 import { Link } from "react-router-dom";
-import { formatDateFr } from "@/lib/api";
+import { formatDateFr, absoluteUrl } from "@/lib/api";
 
 const categoryColor = {
   Communication: "bg-[#3BA4FF]/15 text-[#1D70B8]",
@@ -62,7 +62,7 @@ export default function NewsCarousel({ items = [] }) {
           {items.map((n) => (
             <div key={n.id} className="relative shrink-0 grow-0 basis-full">
               <div className="relative aspect-[16/8] md:aspect-[16/6] overflow-hidden">
-                <img src={n.image} alt={n.title} className="h-full w-full object-cover" />
+                <img src={absoluteUrl(n.image)} alt={n.title} className="h-full w-full object-cover" />
                 <div className="absolute inset-0 bg-gradient-to-t from-[#071B34] via-[#071B34]/70 to-transparent" />
               </div>
               <div className="absolute inset-0 flex flex-col justify-end p-6 md:p-10">

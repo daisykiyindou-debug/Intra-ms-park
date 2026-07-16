@@ -11,6 +11,7 @@ import { api, fr, formatMinutes } from "@/lib/api";
 import { useApp } from "@/contexts/AppContext";
 import { notifyLiveRefresh } from "@/hooks/useLiveData";
 import FormBuilder from "@/pages/FormBuilder";
+import ImageUpload from "@/components/ImageUpload";
 
 const subNav = [
   { to: "/management", label: "Vue d'ensemble", icon: BarChart3, end: true },
@@ -1318,14 +1319,14 @@ function NewsManager() {
             </select>
           </div>
           <div>
-            <label className="ms-overline">Image (URL)</label>
-            <input
-              value={form.image}
-              onChange={(e) => setForm({ ...form, image: e.target.value })}
-              data-testid="news-image"
-              placeholder="https://…"
-              className="ms-input mt-2"
-            />
+            <label className="ms-overline">Image</label>
+            <div className="mt-2">
+              <ImageUpload
+                value={form.image}
+                onChange={(v) => setForm({ ...form, image: v })}
+                testId="news-image"
+              />
+            </div>
           </div>
           <div>
             <label className="ms-overline">Contenu</label>
@@ -1413,7 +1414,7 @@ function NewsManager() {
                 }`}
               >
                 {n.image && (
-                  <img src={n.image} alt="" className="h-14 w-20 rounded-lg object-cover shrink-0" />
+                  <img src={absoluteUrl(n.image)} alt="" className="h-14 w-20 rounded-lg object-cover shrink-0" />
                 )}
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-1.5 flex-wrap">
@@ -1671,15 +1672,14 @@ function SlideEditor({ slide, news, events, onClose, onSaved }) {
             />
           </div>
           <div>
-            <label className="ms-overline">Image (URL)</label>
-            <input
-              value={form.image}
-              onChange={(e) => setForm({ ...form, image: e.target.value })}
-              className="ms-input mt-2"
-            />
-            {form.image && (
-              <img src={form.image} alt="" className="mt-2 w-full h-40 rounded-lg object-cover" />
-            )}
+            <label className="ms-overline">Image</label>
+            <div className="mt-2">
+              <ImageUpload
+                value={form.image}
+                onChange={(v) => setForm({ ...form, image: v })}
+                testId="slide-image"
+              />
+            </div>
           </div>
           <div>
             <label className="ms-overline">Contenu</label>
@@ -2582,13 +2582,14 @@ function EventEditor({ event, news, onClose, onSaved }) {
           </div>
 
           <div>
-            <label className="ms-overline">Image (URL, optionnel)</label>
-            <input
-              value={form.image}
-              onChange={(e) => setForm({ ...form, image: e.target.value })}
-              placeholder="https://…"
-              className="ms-input mt-2"
-            />
+            <label className="ms-overline">Image de l'événement</label>
+            <div className="mt-2">
+              <ImageUpload
+                value={form.image}
+                onChange={(v) => setForm({ ...form, image: v })}
+                testId="event-image"
+              />
+            </div>
           </div>
 
           <div>

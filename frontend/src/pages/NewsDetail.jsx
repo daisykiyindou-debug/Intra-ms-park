@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { ArrowLeft, Calendar, Clock, MapPin, ExternalLink, FileText } from "lucide-react";
-import { api, formatDateFr } from "@/lib/api";
+import { api, formatDateFr, absoluteUrl } from "@/lib/api";
 import { useApp } from "@/contexts/AppContext";
 
 /**
@@ -54,7 +54,7 @@ export default function NewsDetail() {
       </Link>
 
       <article className="ms-card overflow-hidden" data-testid={`news-detail-${item.id}`}>
-        {item.image && <img src={item.image} alt="" className="w-full h-64 object-cover" />}
+        {item.image && <img src={absoluteUrl(item.image)} alt="" className="w-full h-64 object-cover" />}
         <div className="p-6 md:p-8">
           <div className="ms-overline">{item.category || "Actualité"}</div>
           <h1 className="text-3xl md:text-4xl font-bold text-[#071B34] mt-2 tracking-tight">
@@ -164,7 +164,7 @@ export function EventDetail() {
 
       <article className="ms-card overflow-hidden" data-testid={`event-detail-${item.id}`}>
         {item.image && (
-          <img src={item.image} alt="" className="w-full h-64 object-cover" />
+          <img src={absoluteUrl(item.image)} alt="" className="w-full h-64 object-cover" />
         )}
         <div className="p-6 md:p-8">
           <div className="ms-overline">{item.category || "Événement"}</div>

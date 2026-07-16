@@ -3,6 +3,16 @@ import axios from "axios";
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 export const API = `${BACKEND_URL}/api`;
 
+/**
+ * Turn a relative asset URL (from POST /api/uploads) into an absolute URL
+ * hitting the backend through the ingress. External URLs pass through.
+ */
+export const absoluteUrl = (u) => {
+  if (!u) return u;
+  if (u.startsWith("http") || u.startsWith("data:")) return u;
+  return `${BACKEND_URL}${u.startsWith("/") ? "" : "/"}${u}`;
+};
+
 export const api = axios.create({
   baseURL: API,
   headers: { "Content-Type": "application/json" },

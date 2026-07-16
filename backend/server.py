@@ -16,7 +16,8 @@ from typing import Any, List, Optional
 from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
-from fastapi import APIRouter, FastAPI, HTTPException, Request
+from fastapi import APIRouter, FastAPI, HTTPException, Request, UploadFile, File
+from fastapi.staticfiles import StaticFiles
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.middleware.cors import CORSMiddleware
@@ -30,6 +31,12 @@ db = client[os.environ["DB_NAME"]]
 
 app = FastAPI(title="MS Park Intranet API")
 api = APIRouter(prefix="/api")
+
+# ─── Local file uploads (images from device gallery)
+# Mounted under /api/uploads so it goes through the k8s ingress (which routes /api/* to backend)
+UPLOAD_DIR = Path("/app/backend/uploads")
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+app.mount("/api/uploads", StaticFiles(directory=str(UPLOAD_DIR)), name="uploads")
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s — %(message)s")
 log = logging.getLogger("mspark")
@@ -72,6 +79,32 @@ async def require_communication_editor() -> dict:
     if emp.get("is_admin") or emp.get("can_manage_communication"):
         return emp
     raise HTTPException(403, "Accès communication requis")
+
+
+@api.post("/uploads")
+async def upload_file(file: UploadFile = File(...)):
+    """Accept an image (or any file) from the user's device gallery/pellicule and
+    return a permanent URL. Used by the news composer, event editor, carousel
+    slide editor and profile picture uploader."""
+    ext = ""
+    if file.filename and "." in file.filename:
+        ext = "." + file.filename.rsplit(".", 1)[-1].lower()[:10]
+    # Guard against absurdly large uploads (server-side safety)
+    max_bytes = 8 * 1024 * 1024  # 8 MB
+    contents = await file.read()
+    if len(contents) > max_bytes:
+        raise HTTPException(413, "Fichier trop volumineux (max 8 Mo)")
+    name = f"{uuid.uuid4().hex}{ext}"
+    path = UPLOAD_DIR / name
+    path.write_bytes(contents)
+    return {
+        "url": f"/api/uploads/{name}",
+        "name": file.filename,
+        "content_type": file.content_type,
+        "size": len(contents),
+    }
+
+
 
 # ───────────────────────────────── Models ────────────────────────────────────
 
@@ -1783,11 +1816,48 @@ async def get_post(post_id: str):
     return p
 
 
+class PostUpdate(BaseModel):
+    title: Optional[str] = None
+    content: Optional[str] = None
+    category: Optional[str] = None
+    image: Optional[str] = None
+    images: Optional[List[str]] = None
+    attachments: Optional[List[dict]] = None
+    links: Optional[List[str]] = None
+
+
+@api.put("/posts/{post_id}")
+async def update_post(post_id: str, payload: PostUpdate):
+    me = await db.employees.find_one({"id": current_user()}, {"_id": 0})
+    if not me:
+        raise HTTPException(403, "Accès refusé")
+    p = await db.posts.find_one({"id": post_id}, {"_id": 0})
+    if not p:
+        raise HTTPException(404, "Publication introuvable")
+    # Only the author OR an admin can edit — a comm editor can only edit posts
+    # they authored themselves (not other people's).
+    is_author = p.get("author_id") == me["id"]
+    if not is_author and not me.get("is_admin"):
+        raise HTTPException(403, "Vous ne pouvez modifier que vos propres publications")
+    updates = {k: v for k, v in payload.model_dump().items() if v is not None}
+    if updates:
+        updates["edited_at"] = _now()
+        await db.posts.update_one({"id": post_id}, {"$set": updates})
+    item = await db.posts.find_one({"id": post_id}, {"_id": 0})
+    return item
+
+
 @api.delete("/posts/{post_id}")
 async def delete_post(post_id: str):
     me = await db.employees.find_one({"id": current_user()}, {"_id": 0})
-    if not me or not (me.get("is_admin") or me.get("can_manage_communication")):
-        raise HTTPException(403, "Seuls les administrateurs et responsables communication peuvent supprimer")
+    if not me:
+        raise HTTPException(403, "Accès refusé")
+    p = await db.posts.find_one({"id": post_id}, {"_id": 0})
+    if not p:
+        return {"ok": True}
+    is_author = p.get("author_id") == me["id"]
+    if not is_author and not (me.get("is_admin") or me.get("can_manage_communication")):
+        raise HTTPException(403, "Vous ne pouvez supprimer que vos propres publications")
     await db.posts.delete_one({"id": post_id})
     return {"ok": True}
 
