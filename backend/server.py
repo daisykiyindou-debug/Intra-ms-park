@@ -2617,6 +2617,88 @@ async def admin_delete_schedule(schedule_id: str):
     return {"ok": True}
 
 
+class WeekEntry(BaseModel):
+    day_offset: int  # 0..6 relative to week_start
+    type: str = "shift"  # shift | off | leave | training | meeting
+    start: Optional[str] = None
+    end: Optional[str] = None
+    pause_start: Optional[str] = None
+    pause_end: Optional[str] = None
+    break_minutes: int = 0
+    location: Optional[str] = None
+    service: Optional[str] = None
+    note: Optional[str] = None
+
+
+class BulkWeekPayload(BaseModel):
+    employee_id: str
+    week_start: str  # YYYY-MM-DD (Monday)
+    entries: List[WeekEntry]  # up to 7 items — one per day of the week
+    duplicate_weeks: int = 0  # 0 = single week; N = also apply to next N weeks
+
+
+@api.post("/admin/schedule/week")
+async def admin_save_week(payload: BulkWeekPayload):
+    """Upsert a whole week — and optionally duplicate it to N following weeks.
+    Off-days (`type=off`) do not create horaires but are stored so the display
+    is consistent. Existing rows for those days are replaced."""
+    await require_admin()
+    try:
+        base = date.fromisoformat(payload.week_start)
+    except Exception:
+        raise HTTPException(400, "week_start invalide (YYYY-MM-DD attendu)")
+
+    total_saved = 0
+    weeks_processed = 0
+    for w in range(0, max(1, payload.duplicate_weeks + 1)):
+        week_offset = timedelta(days=7 * w)
+        for e in payload.entries:
+            day_iso = (base + week_offset + timedelta(days=e.day_offset)).isoformat()
+            if e.type == "shift" and (not e.start or not e.end):
+                # Skip incomplete shift rows (admin left them blank)
+                continue
+            record = {
+                "employee_id": payload.employee_id,
+                "day": day_iso,
+                "type": e.type,
+                "start": e.start if e.type == "shift" else None,
+                "end": e.end if e.type == "shift" else None,
+                "pause_start": e.pause_start if e.type == "shift" else None,
+                "pause_end": e.pause_end if e.type == "shift" else None,
+                "break_minutes": e.break_minutes if e.type == "shift" else 0,
+                "location": e.location,
+                "service": e.service,
+                "note": e.note,
+            }
+            existing = await db.schedules.find_one(
+                {"employee_id": payload.employee_id, "day": day_iso}, {"_id": 0}
+            )
+            if existing:
+                # Don't overwrite validated leaves — user's explicit rule
+                if existing.get("type") in ("leave", "rtt"):
+                    continue
+                await db.schedules.update_one(
+                    {"employee_id": payload.employee_id, "day": day_iso},
+                    {"$set": record},
+                )
+            else:
+                record["id"] = _id()
+                await db.schedules.insert_one(record.copy())
+            total_saved += 1
+        weeks_processed += 1
+
+    await db.notifications.insert_one({
+        "id": _id(),
+        "employee_id": payload.employee_id,
+        "type": "planning",
+        "title": "Planning mis à jour",
+        "message": f"{weeks_processed} semaine(s) planifiée(s) par votre responsable.",
+        "ts": _now(),
+        "read": False,
+    })
+    return {"ok": True, "days_saved": total_saved, "weeks_applied": weeks_processed}
+
+
 @api.get("/admin/contract-status/{employee_id}")
 async def admin_contract_status(employee_id: str, week_start: Optional[str] = None):
     """Return contract vs planned hours (shift + leave + rtt count as covered)."""

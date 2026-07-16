@@ -47,6 +47,17 @@ Intranet premium pour employés du parc MS Park + espace administrateur pour le 
 - `/app/frontend/src/lib/api.js` — interceptor axios ajoutant `X-Employee-Id` depuis localStorage
 
 ## Changelog
+### 2026-08 — Éditeur semaine complète + duplication planning
+- **Backend** : nouveau `POST /admin/schedule/week` — accepte un `employee_id`, `week_start` (lundi), `entries[]` (jusqu'à 7 jours avec type/horaires/lieu/service), et `duplicate_weeks` (0..N). Congés/RTT validés préservés (jamais écrasés). Notification push envoyée à l'employé.
+- **Frontend** : bouton "Éditer la semaine complète" dans le toolbar `PlanningManager`. Modal `WeekEditor` :
+  - 7 lignes pré-remplies depuis les entrées existantes OU depuis le `weekly_pattern` de l'employé (OFF automatique le weekend).
+  - Type toggle par ligne (Shift/OFF/Formation), horaires début/fin/pause/reprise, lieu.
+  - Congés/RTT validés affichés en lecture seule ("Congé validé (verrouillé)").
+  - Compteur total planifié vs contrat en temps réel (badge Conforme / -Xh / +Xh).
+  - Menu "Dupliquer sur" : cette semaine / +1 / +2 / +3 (~mois) / +4 / +7 / +11 (~3 mois).
+  - **Bouton unique "Enregistrer la semaine"** ou "Enregistrer N semaines" selon la duplication.
+- Testé end-to-end : 28 jours créés en 1 clic (7×4 semaines) pour Marcus.
+
 ### 2026-08 — Bouton d'événement personnalisable + historique badgeage
 - **Bouton d'événement 100% personnalisable** :
   - Toggle activation/désactivation

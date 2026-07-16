@@ -3,7 +3,7 @@ import { NavLink, Route, Routes, Navigate } from "react-router-dom";
 import {
   BarChart3, ClipboardList, Inbox, Newspaper, ShieldCheck, ArrowRight,
   Users as UsersIcon, AlertTriangle, CheckCircle2, TrendingUp, ChevronLeft, ChevronRight,
-  Plus, Trash2, Save, X, CalendarDays, Clock, MessageCircle, Gift, Sparkles,
+  Plus, Trash2, Save, X, CalendarDays, CalendarClock, Clock, MessageCircle, Gift, Sparkles,
   FileText, Receipt, Send, Megaphone,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -278,6 +278,7 @@ function PlanningManager() {
   const [entries, setEntries] = useState([]);
   const [contract, setContract] = useState(null);
   const [editEntry, setEditEntry] = useState(null);
+  const [weekEditorOpen, setWeekEditorOpen] = useState(false);
 
   useEffect(() => {
     api.get("/admin/employees").then((r) => {
@@ -402,7 +403,16 @@ function PlanningManager() {
               Semaine du {weekStart.toLocaleDateString("fr-FR", { day: "numeric", month: "long" })}
             </div>
           </div>
-          {contract && selectedEmp && (
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              onClick={() => setWeekEditorOpen(true)}
+              data-testid="week-editor-open"
+              className="ms-btn-primary"
+              disabled={!selectedId}
+            >
+              <CalendarClock className="h-3.5 w-3.5" /> Éditer la semaine complète
+            </button>
+            {contract && selectedEmp && (
             <div
               data-testid="contract-alert"
               className="flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold"
@@ -420,6 +430,7 @@ function PlanningManager() {
               </span>
             </div>
           )}
+          </div>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-7 gap-2">
@@ -485,6 +496,20 @@ function PlanningManager() {
           onSave={saveEntry}
         />
       )}
+
+      {weekEditorOpen && selectedEmp && (
+        <WeekEditor
+          employee={selectedEmp}
+          weekStart={weekStart}
+          existingEntries={entries}
+          onClose={() => setWeekEditorOpen(false)}
+          onSaved={() => {
+            setWeekEditorOpen(false);
+            loadWeek();
+            notifyLiveRefresh(["schedule", "me"]);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -538,6 +563,294 @@ function EntryCard({ entry, onEdit, onDelete }) {
     </div>
   );
 }
+
+// ─────────────────────────────────────────── Weekly bulk editor
+const DAY_LABELS = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche"];
+
+function WeekEditor({ employee, weekStart, existingEntries, onClose, onSaved }) {
+  // Seed 7 rows from either existing entries or the employee's weekly_pattern
+  const seedRows = () => {
+    const pattern = employee.weekly_pattern || {};
+    return Array.from({ length: 7 }, (_, i) => {
+      const day = addDays(weekStart, i);
+      const iso = isoDate(day);
+      const existing = existingEntries.find((e) => e.day === iso);
+      if (existing) {
+        return {
+          day_offset: i,
+          type: existing.type || "shift",
+          start: existing.start || "",
+          end: existing.end || "",
+          pause_start: existing.pause_start || "",
+          pause_end: existing.pause_end || "",
+          break_minutes: existing.break_minutes || 0,
+          location: existing.location || "MS Park",
+          service: existing.service || employee.department,
+          note: existing.note || "",
+          _locked_leave: existing.type === "leave" || existing.type === "rtt",
+        };
+      }
+      const patt = pattern[String(i)] || { type: "off" };
+      return {
+        day_offset: i,
+        type: patt.type || "off",
+        start: patt.start || "",
+        end: patt.end || "",
+        pause_start: patt.pause_start || "",
+        pause_end: patt.pause_end || "",
+        break_minutes: patt.break_minutes || 0,
+        location: "MS Park",
+        service: employee.department,
+        note: "",
+        _locked_leave: false,
+      };
+    });
+  };
+
+  const [rows, setRows] = useState(seedRows);
+  const [duplicate, setDuplicate] = useState(0);
+  const [saving, setSaving] = useState(false);
+
+  const updateRow = (i, patch) => {
+    setRows((rs) => rs.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
+  };
+
+  const totalMinutes = rows.reduce((sum, r) => {
+    if (r.type !== "shift" || !r.start || !r.end) return sum;
+    const [sh, sm] = r.start.split(":").map(Number);
+    const [eh, em] = r.end.split(":").map(Number);
+    let minutes = (eh * 60 + em) - (sh * 60 + sm);
+    if (r.pause_start && r.pause_end) {
+      const [psh, psm] = r.pause_start.split(":").map(Number);
+      const [peh, pem] = r.pause_end.split(":").map(Number);
+      minutes -= Math.max(0, (peh * 60 + pem) - (psh * 60 + psm));
+    }
+    return sum + Math.max(0, minutes);
+  }, 0);
+  const contractH = employee.contract_hours_weekly || 35;
+  const diff = totalMinutes / 60 - contractH;
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const payload = {
+        employee_id: employee.id,
+        week_start: isoDate(weekStart),
+        entries: rows
+          .filter((r) => !r._locked_leave)
+          .map(({ _locked_leave, ...rest }) => rest),
+        duplicate_weeks: Number(duplicate) || 0,
+      };
+      const { data } = await api.post("/admin/schedule/week", payload);
+      toast.success(
+        `${data.days_saved} jour(s) enregistré(s) sur ${data.weeks_applied} semaine(s)`,
+        { description: duplicate > 0 ? `Semaine dupliquée sur ${duplicate} semaine(s) suivante(s)` : undefined }
+      );
+      onSaved();
+    } catch (err) {
+      toast.error("Erreur d'enregistrement", { description: err.response?.data?.detail });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      onClick={onClose}
+      className="fixed inset-0 z-50 bg-black/40 backdrop-blur-md flex items-center justify-center p-4"
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        data-testid="week-editor"
+        className="ms-card max-w-5xl w-full max-h-[92vh] overflow-y-auto"
+      >
+        <div className="sticky top-0 z-10 bg-white/95 backdrop-blur border-b border-[#071B34]/5 p-5 flex items-start justify-between">
+          <div>
+            <div className="ms-overline">Éditeur semaine complète</div>
+            <h3 className="text-xl font-bold text-[#071B34] mt-1">
+              {employee.first_name} {employee.last_name} — Semaine du {weekStart.toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" })}
+            </h3>
+            <div className="mt-1 text-xs text-[#475569]">
+              Contrat {contractH}h/sem · Modifiez tous les jours puis <strong>enregistrez d'un coup</strong>.
+              Les jours <strong>OFF</strong> sont pré-remplis depuis le pattern hebdomadaire de l'employé.
+            </div>
+          </div>
+          <button onClick={onClose} className="flex h-9 w-9 items-center justify-center rounded-xl hover:bg-[#071B34]/5">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="p-5 space-y-2">
+          {rows.map((r, i) => {
+            const day = addDays(weekStart, i);
+            return (
+              <WeekRow
+                key={i}
+                dayLabel={DAY_LABELS[i]}
+                dayDate={day}
+                row={r}
+                onChange={(patch) => updateRow(i, patch)}
+              />
+            );
+          })}
+        </div>
+
+        <div className="sticky bottom-0 z-10 bg-white/95 backdrop-blur border-t border-[#071B34]/5 p-5">
+          <div className="flex items-center justify-between flex-wrap gap-3 mb-3">
+            <div className="text-sm">
+              <span className="text-[#475569]">Total planifié : </span>
+              <strong className="text-[#071B34]">{Math.floor(totalMinutes / 60)}h{String(totalMinutes % 60).padStart(2, "0")}</strong>
+              <span className="text-[#475569]"> · Contrat </span>
+              <strong className="text-[#071B34]">{contractH}h</strong>
+              {" "}
+              <span
+                className="ml-2 ms-chip"
+                style={{
+                  background: Math.abs(diff) < 0.1 ? "#D1FAE5" : diff < 0 ? "#FEE2E2" : "#FEF3C7",
+                  color: Math.abs(diff) < 0.1 ? "#065F46" : diff < 0 ? "#B91C1C" : "#B45309",
+                }}
+              >
+                {Math.abs(diff) < 0.1 ? "Conforme" : diff < 0 ? `-${Math.abs(diff).toFixed(1)}h` : `+${diff.toFixed(1)}h`}
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <label className="text-xs font-semibold text-[#475569]">Dupliquer sur</label>
+              <select
+                value={duplicate}
+                onChange={(e) => setDuplicate(Number(e.target.value))}
+                data-testid="week-duplicate-count"
+                className="ms-input text-xs !py-1.5 !w-auto"
+              >
+                <option value={0}>Cette semaine seulement</option>
+                <option value={1}>+ 1 semaine (soit 2)</option>
+                <option value={2}>+ 2 semaines (soit 3)</option>
+                <option value={3}>+ 3 semaines (~1 mois)</option>
+                <option value={4}>+ 4 semaines</option>
+                <option value={7}>+ 7 semaines (~2 mois)</option>
+                <option value={11}>+ 11 semaines (~3 mois)</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="flex gap-2">
+            <button onClick={onClose} className="ms-btn-outline flex-1">Annuler</button>
+            <button
+              onClick={save}
+              disabled={saving}
+              data-testid="week-save"
+              className="ms-btn-primary flex-1 disabled:opacity-50"
+            >
+              <Save className="h-4 w-4" />
+              {saving ? "Enregistrement…" : duplicate > 0 ? `Enregistrer ${duplicate + 1} semaines` : "Enregistrer la semaine"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const WEEK_TYPES = [
+  { v: "shift", label: "Shift", color: "#3BA4FF", bg: "#3BA4FF1F" },
+  { v: "off", label: "OFF", color: "#64748B", bg: "#F1F5F9" },
+  { v: "training", label: "Formation", color: "#B45309", bg: "#FEF3C7" },
+];
+
+function WeekRow({ dayLabel, dayDate, row, onChange }) {
+  const isLocked = row._locked_leave;
+  const isShift = row.type === "shift";
+  const meta = WEEK_TYPES.find((t) => t.v === row.type) || WEEK_TYPES[0];
+  return (
+    <div
+      className="grid grid-cols-12 items-center gap-2 rounded-xl border border-[#071B34]/5 p-3 hover:bg-[#F4F7FA]/40"
+      data-testid={`week-row-${row.day_offset}`}
+    >
+      <div className="col-span-2">
+        <div className="text-xs font-bold text-[#071B34]">{dayLabel}</div>
+        <div className="text-[10px] text-[#475569]">
+          {dayDate.toLocaleDateString("fr-FR", { day: "numeric", month: "short" })}
+        </div>
+      </div>
+      <div className="col-span-3 flex gap-1 flex-wrap">
+        {isLocked ? (
+          <span className="ms-chip bg-[#A78BFA]/15 text-[#7C3AED]">
+            Congé validé (verrouillé)
+          </span>
+        ) : (
+          WEEK_TYPES.map((t) => (
+            <button
+              key={t.v}
+              type="button"
+              onClick={() => onChange({ type: t.v })}
+              className={`text-[10px] font-semibold rounded-md px-2 py-1 transition-colors ${
+                row.type === t.v
+                  ? "text-white"
+                  : "hover:opacity-80"
+              }`}
+              style={{
+                background: row.type === t.v ? t.color : t.bg,
+                color: row.type === t.v ? "#fff" : t.color,
+              }}
+            >
+              {t.label}
+            </button>
+          ))
+        )}
+      </div>
+      {isShift && !isLocked ? (
+        <>
+          <input
+            type="time"
+            value={row.start}
+            onChange={(e) => onChange({ start: e.target.value })}
+            placeholder="Début"
+            data-testid={`week-start-${row.day_offset}`}
+            className="col-span-1 ms-input !py-1.5 !text-xs"
+          />
+          <input
+            type="time"
+            value={row.end}
+            onChange={(e) => onChange({ end: e.target.value })}
+            placeholder="Fin"
+            data-testid={`week-end-${row.day_offset}`}
+            className="col-span-1 ms-input !py-1.5 !text-xs"
+          />
+          <input
+            type="time"
+            value={row.pause_start}
+            onChange={(e) => onChange({ pause_start: e.target.value })}
+            placeholder="Pause"
+            className="col-span-1 ms-input !py-1.5 !text-xs"
+          />
+          <input
+            type="time"
+            value={row.pause_end}
+            onChange={(e) => onChange({ pause_end: e.target.value })}
+            placeholder="Reprise"
+            className="col-span-1 ms-input !py-1.5 !text-xs"
+          />
+          <input
+            value={row.location}
+            onChange={(e) => onChange({ location: e.target.value })}
+            placeholder="Lieu"
+            className="col-span-3 ms-input !py-1.5 !text-xs"
+          />
+        </>
+      ) : (
+        <div
+          className="col-span-8 text-[11px] text-[#475569] italic"
+          style={{ color: meta.color }}
+        >
+          {isLocked ? "Congé approuvé — ne sera pas écrasé lors de l'enregistrement." : `Journée ${meta.label.toLowerCase()} — aucun horaire`}
+        </div>
+      )}
+    </div>
+  );
+}
+
+
 
 function EntryEditor({ entry, employeeName, onClose, onSave }) {
   const [form, setForm] = useState(entry);
