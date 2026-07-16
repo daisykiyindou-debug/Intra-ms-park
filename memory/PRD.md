@@ -164,3 +164,18 @@ Intranet premium pour employés du parc MS Park + espace administrateur pour le 
 - Pièces jointes réelles dans news (upload d'images/PDF, actuellement seulement URL)
 - Drag-and-drop pour réordonner le carrousel (actuellement flèches ± 10)
 - Pauses dans planning : lookup table au lieu de milieu-22min (bug iter3 encore ouvert)
+- Refactor `server.py` (3800 lignes) → routes/ + models/
+
+## Changelog
+
+### 2026-02-XX — Notifications interactives + Form Builder aperçu (iter 6)
+- **Notifications interactives** : clic sur notification → redirection vers page cible (`/actualites/:id`, `/agenda`, `/documents`, `/messagerie?channel=…`, `/rh/demandes`, etc.) + marquage `read=true` automatique.
+- **Déclencheurs de notifications** ajoutés : création d'actualité, événement, post fil, message channel, broadcast admin, fiche de paie, document RH, planning bulk/edit/delete, réponse à formulaire, décisions demandes.
+- **Helpers backend** : `_push_notification()` / `_broadcast_notification()` + `_normalize_notif()` qui garantit `content`/`icon`/`link` non-null sur tous les items retournés par `GET /api/notifications`.
+- **Fix POST /api/channels/{cid}/messages** : ne plantait plus (channel.members est un compteur, pas une liste) — bascule sur broadcast général.
+- **Form Builder — modal "Modifier"** :
+  - Root cause identifiée : le parent `.ms-fade-up` avec `animation-fill-mode: both` conserve `transform: translateY(0)` qui crée un containing block CSS et capture `position:fixed`.
+  - Fix : rendu via `createPortal(document.body)` (FormEditor + ResponsesModal).
+  - Layout refait : 3 colonnes indépendamment scrollables (settings/palette | éditeur de champs | aperçu employé en direct), header/footer fixes, toggle "Masquer/Afficher aperçu".
+  - Nouveau composant `PreviewField` : rendu WYSIWYG de chaque type de champ.
+
