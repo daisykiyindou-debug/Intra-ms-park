@@ -1720,9 +1720,6 @@ async def availability(month: Optional[str] = None):
         if iso < today_iso:
             status, selectable = "past", False
             label = "Passé"
-        elif iso in holidays:
-            status, selectable = "holiday", False
-            label = f"Férié — {holidays[iso]}"
         elif r and r["status"] == "approved" and r["type"] in ("conge", "rtt"):
             status = "cp_approved" if r["type"] == "conge" else "rtt_approved"
             selectable = False
@@ -1734,13 +1731,20 @@ async def availability(month: Optional[str] = None):
         elif sched and sched.get("type") == "off":
             status, selectable = "off", False
             label = "Jour OFF"
+            if iso in holidays:
+                label = f"OFF · {holidays[iso]}"
         elif sched and sched.get("type") == "shift":
-            status, selectable = "worked", True  # can still request CP/RTT on a worked day
+            status, selectable = "worked", True
             label = f"Travail {sched.get('start', '')}–{sched.get('end', '')}"
+            if iso in holidays:
+                label = f"{label} · Férié ({holidays[iso]})"
         elif sched and sched.get("type") in ("cp", "rtt"):
             status = "cp_approved" if sched["type"] == "cp" else "rtt_approved"
             selectable = False
             label = "CP" if sched["type"] == "cp" else "RTT"
+        elif iso in holidays:
+            status, selectable = "holiday", False
+            label = f"Férié — {holidays[iso]}"
 
         days.append({
             "date": iso,

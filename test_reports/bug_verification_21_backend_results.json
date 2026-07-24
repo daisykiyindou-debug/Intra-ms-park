@@ -1,0 +1,160 @@
+{
+  "passed": false,
+  "passed_pattern_precedence": true,
+  "passed_status_regression": true,
+  "passed_no_pattern_holiday_fallback": false,
+  "steps": [
+    {
+      "name": "GET /availability?month=2026-11 pattern user",
+      "status_code": 200
+    },
+    {
+      "name": "GET /availability?month=2026-11 after request seeds",
+      "status_code": 200
+    },
+    {
+      "name": "GET /availability?month=2026-06 past regression",
+      "status_code": 200
+    },
+    {
+      "name": "GET /availability?month=2026-11 no-pattern user",
+      "status_code": 200
+    }
+  ],
+  "errors": [],
+  "calendar_note": "November 2026 has 21 Mon-Fri work days and 9 weekend days.",
+  "pattern_user": {
+    "id": "b3c3a2e5-be4e-46a4-a1ec-a7ba4d11aaa2",
+    "weekly_pattern": {
+      "0": {
+        "type": "shift",
+        "start": "09:00",
+        "end": "17:00"
+      },
+      "1": {
+        "type": "shift",
+        "start": "09:00",
+        "end": "17:00"
+      },
+      "2": {
+        "type": "shift",
+        "start": "09:00",
+        "end": "17:00"
+      },
+      "3": {
+        "type": "shift",
+        "start": "09:00",
+        "end": "17:00"
+      },
+      "4": {
+        "type": "shift",
+        "start": "09:00",
+        "end": "17:00"
+      },
+      "5": {
+        "type": "off"
+      },
+      "6": {
+        "type": "off"
+      }
+    }
+  },
+  "pattern_availability": {
+    "counts": {
+      "worked": 21,
+      "off": 9,
+      "holiday": 0,
+      "total": 30
+    },
+    "2026-11-01": {
+      "date": "2026-11-01",
+      "status": "off",
+      "label": "OFF · Toussaint",
+      "selectable": false,
+      "weekday": 6
+    },
+    "2026-11-02": {
+      "date": "2026-11-02",
+      "status": "worked",
+      "label": "Travail 09:00–17:00",
+      "selectable": true,
+      "weekday": 0
+    },
+    "2026-11-07": {
+      "date": "2026-11-07",
+      "status": "off",
+      "label": "Jour OFF",
+      "selectable": false,
+      "weekday": 5
+    },
+    "2026-11-11": {
+      "date": "2026-11-11",
+      "status": "worked",
+      "label": "Travail 09:00–17:00 · Férié (Armistice 1918)",
+      "selectable": true,
+      "weekday": 2
+    },
+    "holiday_days": []
+  },
+  "pattern_failures": [],
+  "status_regression": {
+    "2026-11-03": {
+      "date": "2026-11-03",
+      "status": "cp_approved",
+      "label": "CP validé",
+      "selectable": false,
+      "weekday": 1
+    },
+    "2026-11-04": {
+      "date": "2026-11-04",
+      "status": "rtt_approved",
+      "label": "RTT validé",
+      "selectable": false,
+      "weekday": 2
+    },
+    "2026-11-05": {
+      "date": "2026-11-05",
+      "status": "pending",
+      "label": "Demande en attente (CONGE)",
+      "selectable": false,
+      "weekday": 3
+    },
+    "past_month": "2026-06",
+    "past_sample": {
+      "date": "2026-06-01",
+      "status": "past",
+      "label": "Passé",
+      "selectable": false,
+      "weekday": 0
+    },
+    "failures": []
+  },
+  "no_pattern_user": {
+    "id": "7ca7a6ce-39ef-4bfb-9cce-bce7176d70b1",
+    "weekly_pattern": {},
+    "work_days": [],
+    "off_days": []
+  },
+  "no_pattern_holiday_fallback": {
+    "2026-11-01": {
+      "date": "2026-11-01",
+      "status": "off",
+      "label": "OFF · Toussaint",
+      "selectable": false,
+      "weekday": 6
+    },
+    "2026-11-11": {
+      "date": "2026-11-11",
+      "status": "off",
+      "label": "OFF · Armistice 1918",
+      "selectable": false,
+      "weekday": 2
+    },
+    "holiday_count": 0,
+    "off_count": 30,
+    "failures": [
+      "2026-11-01 expected holiday for no-pattern user, got {'date': '2026-11-01', 'status': 'off', 'label': 'OFF · Toussaint', 'selectable': False, 'weekday': 6}",
+      "2026-11-11 expected holiday for no-pattern user, got {'date': '2026-11-11', 'status': 'off', 'label': 'OFF · Armistice 1918', 'selectable': False, 'weekday': 2}"
+    ]
+  }
+}
