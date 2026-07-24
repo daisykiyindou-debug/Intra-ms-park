@@ -128,6 +128,7 @@ export default function RestaurationManager() {
           <Filter className="h-4 w-4 text-[#475569] mx-1" />
           <button
             onClick={() => setStoreFilter("all")}
+            data-testid="filter-store-all"
             className={`rounded-full px-3 py-1.5 text-xs font-semibold transition-colors ${
               storeFilter === "all"
                 ? "bg-[#071B34] text-white"

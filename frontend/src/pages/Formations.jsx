@@ -41,6 +41,13 @@ export default function FormationsList() {
     } else {
       await api.post(`/formations/${f.id}/register`);
       toast.success("Inscrit !");
+      // If an external form URL is provided, open it in a new tab so the
+      // employee can complete the additional information required by the
+      // organisation.
+      if (f.form_url) {
+        const url = /^https?:\/\//i.test(f.form_url) ? f.form_url : `https://${f.form_url}`;
+        window.open(url, "_blank", "noopener,noreferrer");
+      }
     }
     load();
   };

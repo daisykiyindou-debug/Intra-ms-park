@@ -811,40 +811,62 @@ function AvatarCropper({ src, onCancel, onCrop }) {
   const [pos, setPos] = useState({ x: 0, y: 0 });
   const [dragging, setDragging] = useState(false);
   const [startDrag, setStartDrag] = useState(null);
+  const [imgSize, setImgSize] = useState(null); // natural size {w, h}
 
   const BOX = 320; // preview size in pixels
   const OUTPUT = 512; // output resolution
 
-  const onMouseDown = (e) => {
+  // Base "cover" scale so at zoom=1 the image fills the preview circle
+  const baseScale = imgSize
+    ? Math.max(BOX / imgSize.w, BOX / imgSize.h)
+    : 1;
+
+  useEffect(() => {
+    const img = new window.Image();
+    img.onload = () => setImgSize({ w: img.naturalWidth, h: img.naturalHeight });
+    img.src = src;
+  }, [src]);
+
+  const beginDrag = (cx, cy) => {
     setDragging(true);
-    setStartDrag({ x: e.clientX - pos.x, y: e.clientY - pos.y });
+    setStartDrag({ x: cx - pos.x, y: cy - pos.y });
   };
-  const onMouseMove = (e) => {
+  const moveDrag = (cx, cy) => {
     if (!dragging || !startDrag) return;
-    setPos({ x: e.clientX - startDrag.x, y: e.clientY - startDrag.y });
+    setPos({ x: cx - startDrag.x, y: cy - startDrag.y });
   };
-  const onMouseUp = () => { setDragging(false); setStartDrag(null); };
+  const endDrag = () => { setDragging(false); setStartDrag(null); };
+
+  const onMouseDown = (e) => beginDrag(e.clientX, e.clientY);
+  const onMouseMove = (e) => moveDrag(e.clientX, e.clientY);
+  const onTouchStart = (e) => {
+    if (!e.touches[0]) return;
+    beginDrag(e.touches[0].clientX, e.touches[0].clientY);
+  };
+  const onTouchMove = (e) => {
+    if (!e.touches[0]) return;
+    moveDrag(e.touches[0].clientX, e.touches[0].clientY);
+  };
 
   const applyCrop = () => {
-    const img = new Image();
+    if (!imgSize) return;
+    const img = new window.Image();
     img.crossOrigin = "anonymous";
     img.onload = () => {
       const canvas = document.createElement("canvas");
       canvas.width = OUTPUT;
       canvas.height = OUTPUT;
       const ctx = canvas.getContext("2d");
-      // scale factor from preview → output
+      // Preview → output scale
       const scale = OUTPUT / BOX;
-      // Fit image "cover"-style at zoom=1
-      const ratio = Math.max(BOX / img.width, BOX / img.height) * zoom;
-      const drawW = img.width * ratio;
-      const drawH = img.height * ratio;
+      // Effective scale applied to the source image inside the preview box
+      const ratio = baseScale * zoom;
+      const drawW = imgSize.w * ratio;
+      const drawH = imgSize.h * ratio;
       const cx = BOX / 2 + pos.x;
       const cy = BOX / 2 + pos.y;
-      // Fill white background
       ctx.fillStyle = "#fff";
       ctx.fillRect(0, 0, OUTPUT, OUTPUT);
-      // Draw scaled image centered
       ctx.drawImage(
         img,
         (cx - drawW / 2) * scale,
@@ -855,6 +877,13 @@ function AvatarCropper({ src, onCancel, onCrop }) {
       onCrop(canvas.toDataURL("image/jpeg", 0.92));
     };
     img.src = src;
+  };
+
+  // Wheel zoom for extra precision
+  const onWheel = (e) => {
+    e.preventDefault();
+    const delta = e.deltaY > 0 ? -0.05 : 0.05;
+    setZoom((z) => Math.min(4, Math.max(0.4, +(z + delta).toFixed(2))));
   };
 
   return createPortal(
@@ -870,46 +899,79 @@ function AvatarCropper({ src, onCancel, onCrop }) {
       >
         <h3 className="text-lg font-bold text-[#071B34]">Recadrer la photo</h3>
         <p className="text-xs text-[#475569] mt-1">
-          Faites glisser pour repositionner, utilisez le curseur pour zoomer.
+          Faites glisser pour repositionner, zoomez / dézoomez avec le curseur ou la molette.
         </p>
         <div className="mt-4 flex justify-center">
           <div
-            className="relative overflow-hidden rounded-full bg-[#071B34]/5 select-none"
+            className="relative overflow-hidden rounded-full bg-[#071B34]/5 select-none touch-none"
             style={{ width: BOX, height: BOX, cursor: dragging ? "grabbing" : "grab" }}
             onMouseDown={onMouseDown}
             onMouseMove={onMouseMove}
-            onMouseUp={onMouseUp}
-            onMouseLeave={onMouseUp}
+            onMouseUp={endDrag}
+            onMouseLeave={endDrag}
+            onTouchStart={onTouchStart}
+            onTouchMove={onTouchMove}
+            onTouchEnd={endDrag}
+            onWheel={onWheel}
           >
-            <img
-              src={src}
-              alt=""
-              draggable={false}
-              className="absolute pointer-events-none"
-              style={{
-                left: "50%",
-                top: "50%",
-                transform: `translate(-50%, -50%) translate(${pos.x}px, ${pos.y}px) scale(${zoom})`,
-                maxWidth: "none",
-                minWidth: BOX,
-                minHeight: BOX,
-                objectFit: "cover",
-              }}
-            />
+            {imgSize && (
+              <img
+                src={src}
+                alt=""
+                draggable={false}
+                className="absolute pointer-events-none"
+                style={{
+                  width: imgSize.w,
+                  height: imgSize.h,
+                  left: "50%",
+                  top: "50%",
+                  transformOrigin: "center center",
+                  transform: `translate(-50%, -50%) translate(${pos.x}px, ${pos.y}px) scale(${baseScale * zoom})`,
+                  maxWidth: "none",
+                }}
+              />
+            )}
           </div>
         </div>
         <div className="mt-4">
-          <label className="ms-overline">Zoom</label>
-          <input
-            type="range"
-            min={1}
-            max={3}
-            step={0.05}
-            value={zoom}
-            onChange={(e) => setZoom(parseFloat(e.target.value))}
-            data-testid="cropper-zoom"
-            className="w-full accent-[#3BA4FF]"
-          />
+          <div className="flex items-center justify-between">
+            <label className="ms-overline">Zoom</label>
+            <span className="text-[11px] text-[#475569] font-semibold">{zoom.toFixed(2)}×</span>
+          </div>
+          <div className="flex items-center gap-2 mt-1">
+            <button
+              type="button"
+              onClick={() => setZoom((z) => Math.max(0.4, +(z - 0.1).toFixed(2)))}
+              className="h-8 w-8 rounded-lg bg-[#F4F7FA] hover:bg-[#071B34]/5 text-lg font-bold text-[#071B34]"
+              data-testid="cropper-zoom-out"
+              aria-label="Dézoomer"
+            >−</button>
+            <input
+              type="range"
+              min={0.4}
+              max={4}
+              step={0.05}
+              value={zoom}
+              onChange={(e) => setZoom(parseFloat(e.target.value))}
+              data-testid="cropper-zoom"
+              className="flex-1 accent-[#3BA4FF]"
+            />
+            <button
+              type="button"
+              onClick={() => setZoom((z) => Math.min(4, +(z + 0.1).toFixed(2)))}
+              className="h-8 w-8 rounded-lg bg-[#F4F7FA] hover:bg-[#071B34]/5 text-lg font-bold text-[#071B34]"
+              data-testid="cropper-zoom-in"
+              aria-label="Zoomer"
+            >+</button>
+            <button
+              type="button"
+              onClick={() => { setZoom(1); setPos({ x: 0, y: 0 }); }}
+              className="text-[11px] font-semibold text-[#475569] hover:text-[#3BA4FF] px-2"
+              data-testid="cropper-reset"
+            >
+              Réinit.
+            </button>
+          </div>
         </div>
         <div className="mt-4 flex justify-end gap-2">
           <button type="button" onClick={onCancel} className="ms-btn-outline">Annuler</button>

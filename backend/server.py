@@ -1476,10 +1476,21 @@ async def dashboard():
         status = "off"
 
     # Upcoming days
-    upcoming = await db.schedules.find(
+    upcoming_raw = await db.schedules.find(
         {"employee_id": current_user(), "day": {"$gte": today}},
         {"_id": 0},
-    ).sort("day", 1).to_list(7)
+    ).sort("day", 1).to_list(50)
+    # Defensive dedupe — legacy data may contain multiple entries for the same
+    # day; keep only the first (highest priority) occurrence per day.
+    seen_days: set[str] = set()
+    upcoming: list[dict] = []
+    for s in upcoming_raw:
+        if s["day"] in seen_days:
+            continue
+        seen_days.add(s["day"])
+        upcoming.append(s)
+        if len(upcoming) >= 7:
+            break
 
     # Week hours — based on REAL planning shifts (not only badging) + badging adjustments
     today_d = date.today()
@@ -4691,6 +4702,32 @@ async def on_start():
         })
     # Simulate a realistic work week for Marcus (35h/week = 7h/day) — idempotent
     await _seed_marcus_week()
+    # Clean up any duplicate schedule rows for the same (employee_id, day)
+    await _dedupe_schedules()
+
+
+async def _dedupe_schedules():
+    """Remove duplicate schedule entries for the same (employee_id, day).
+    Keeps the entry with the most concrete data (shift > training > leave > off)."""
+    priority = {"shift": 4, "training": 3, "leave": 3, "recovery": 3, "off": 2}
+    seen: dict[tuple[str, str], dict] = {}
+    to_remove_ids: list[str] = []
+    async for s in db.schedules.find({}, {"_id": 0}):
+        key = (s.get("employee_id"), s.get("day"))
+        cur = seen.get(key)
+        if cur is None:
+            seen[key] = s
+            continue
+        # Keep the one with higher priority; drop the other
+        cur_p = priority.get(cur.get("type"), 1)
+        new_p = priority.get(s.get("type"), 1)
+        loser = cur if new_p > cur_p else s
+        winner = s if new_p > cur_p else cur
+        seen[key] = winner
+        if loser.get("id"):
+            to_remove_ids.append(loser["id"])
+    if to_remove_ids:
+        await db.schedules.delete_many({"id": {"$in": to_remove_ids}})
 
 
 async def _seed_marcus_week():

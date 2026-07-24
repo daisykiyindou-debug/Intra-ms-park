@@ -245,3 +245,20 @@ Intranet premium pour employés du parc MS Park + espace administrateur pour le 
   - Layout refait : 3 colonnes indépendamment scrollables (settings/palette | éditeur de champs | aperçu employé en direct), header/footer fixes, toggle "Masquer/Afficher aperçu".
   - Nouveau composant `PreviewField` : rendu WYSIWYG de chaque type de champ.
 
+
+
+### 2026-07-24 — Restauration Admin + Formations enhancements + bugfixes (iter 22)
+- **Restauration admin CRUD** — nouvelle page `/management/restauration` :
+  - Backend : `POST/PUT/DELETE/GET /api/admin/products` (protégés par `require_admin()`) + `ProductPayload`. `GET /api/menu` public reflète les changements immédiatement.
+  - Frontend : `/app/frontend/src/pages/RestaurationManager.jsx` (nouveau) — recherche, chips par stand (Soccer Bar, Donut House, Stand Crêpes, Stand Bonbons), grille groupée par stand, éditeur modale via `PortalModal` avec `ImageUpload` (upload local), catégorie libre + datalist (Plats, Desserts, Burgers, Bonbons…), points, prix €, allergènes multi-select, toggle disponibilité. Bouton "Ajouter un produit" en tête.
+  - Sidebar (admin) : entrée "Restauration (menu)" `/management/restauration`. SubNav Management aussi mis à jour.
+- **Formations** :
+  - Backend : `FormationCreate.form_url` ajouté (Optional). Round-trip via GET/PUT.
+  - Frontend `Formations.jsx` : `isAdmin` désormais gaté par `adminMode` (Context) ; `FormationsManager` affiche une carte "Mode administrateur désactivé" si Admin Mode = OFF. `FormationEditor` remplace le champ URL de couverture par `ImageUpload` (upload local) et ajoute un champ `form_url`. Carte formation affiche le badge rouge "Formation complète" (avec bouton d'inscription désactivé + libellé) quand `registrations_count >= max_participants`. Les inscrits voient un bouton "Formulaire d'inscription" (ouverture en nouvel onglet) si `form_url` défini.
+  - **Register → form URL** : cliquer sur "S'inscrire" enregistre l'employé ET ouvre automatiquement `form_url` (target=_blank) si configuré.
+- **CSE MS Group CTA** : bandeau externe premium en haut de `/avantages` (dégradé bleu nuit → cyan) qui ouvre `https://ms-group-rewards.preview.emergentagent.com` dans un nouvel onglet.
+- **Bugfixes** :
+  - Dashboard "Planning des prochains jours" : plus de doublons (samedi affiché 2×). Ajout de `_dedupe_schedules()` au startup + dédoublonnage défensif dans `/api/dashboard`.
+  - Cropper avatar (`UserManager.jsx > AvatarCropper`) réécrit : zoom out possible (min 0.4×) + zoom in (max 4×), boutons − / + / Réinit., support tactile (`onTouchStart/Move`), zoom molette, taille naturelle de l'image utilisée pour un vrai "cover fit" (l'ancien `objectFit: cover` sans width/height cassait le rendu et empêchait de recadrer proprement une photo portrait).
+- Tests : iteration_22 verrouille 100% (12/12 pytest backend + 10/10 flows frontend). Aucune régression identifiée.
+
