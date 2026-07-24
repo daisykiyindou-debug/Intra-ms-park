@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from "react";
-import { Bell, Menu, Search, LogOut, User } from "lucide-react";
+import { Bell, Menu, Search, LogOut, User, ShieldCheck } from "lucide-react";
 import { useNavigate, Link } from "react-router-dom";
 import { useApp } from "@/contexts/AppContext";
 import { setAuthId } from "@/lib/api";
 
 export default function Header({ onMenuClick, onNotifClick }) {
-  const { me, notifications } = useApp();
+  const { me, notifications, adminMode, toggleAdminMode } = useApp();
+  const canToggleAdmin = !!me && (me.is_admin || me.can_manage_communication);
   const unread = notifications.filter((n) => !n.read).length;
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
@@ -54,6 +55,24 @@ export default function Header({ onMenuClick, onNotifClick }) {
       </div>
 
       <div className="ml-auto flex items-center gap-2 md:gap-3">
+        {canToggleAdmin && (
+          <button
+            onClick={toggleAdminMode}
+            data-testid="admin-mode-toggle"
+            title={adminMode ? "Passer en vue employé" : "Activer le mode administrateur"}
+            className={`hidden sm:inline-flex items-center gap-2 rounded-xl px-3 h-10 border transition-all ${
+              adminMode
+                ? "bg-[#3BA4FF] border-[#3BA4FF] text-white shadow-[0_4px_14px_rgba(59,164,255,0.35)]"
+                : "bg-white border-[#071B34]/8 text-[#475569] hover:border-[#3BA4FF]/40"
+            }`}
+          >
+            <ShieldCheck className="h-4 w-4" />
+            <span className="text-xs font-semibold">Admin</span>
+            <span className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${adminMode ? "bg-white/30" : "bg-[#94A3B8]/30"}`}>
+              <span className={`inline-block h-4 w-4 rounded-full bg-white shadow transform transition-transform ${adminMode ? "translate-x-4" : "translate-x-0.5"}`} />
+            </span>
+          </button>
+        )}
         <button
           onClick={onNotifClick}
           data-testid="notif-button"

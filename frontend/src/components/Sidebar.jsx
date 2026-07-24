@@ -79,6 +79,8 @@ const adminNav = [
   { to: "/management/utilisateurs", label: "Utilisateurs", icon: Users, key: "mgmt-users" },
   { to: "/management/documents", label: "Fichiers RH", icon: FileText, key: "mgmt-docs" },
   { to: "/management/documents-editor", label: "Rédiger documents", icon: Edit3, key: "mgmt-hrdocs" },
+  { to: "/newsletters", label: "Newsletters", icon: Mail, key: "mgmt-newsletters" },
+  { to: "/actualites", label: "Actualités (rédaction)", icon: Newspaper, key: "mgmt-news" },
 ];
 
 const commNav = [
@@ -92,20 +94,23 @@ const commNav = [
 const superAdminBase = [
   { to: "/dashboard", label: "Tableau de bord", icon: LayoutDashboard, key: "dashboard" },
   { to: "/profil", label: "Mon profil", icon: User, key: "profil" },
+  { to: "/newsletters", label: "Newsletters (compte MS Park)", icon: Mail, key: "sa-newsletters" },
+  { to: "/actualites", label: "Actualités (compte MS Park)", icon: Newspaper, key: "sa-news" },
 ];
 
 export default function Sidebar({ open, onClose }) {
-  const { me } = useApp();
+  const { me, adminMode } = useApp();
   const isSuperAdmin = !!me?.is_super_admin;
   const isAdmin = !!me?.is_admin;
   const isComm = !!me?.can_manage_communication && !isAdmin;
+  const showAdmin = adminMode !== false; // default true; when toggled off, hide admin nav
 
   const items = isSuperAdmin
-    ? [...superAdminBase, ...adminNav]
+    ? [...superAdminBase, ...(showAdmin ? adminNav : [])]
     : isAdmin
-    ? [...employeeNav, ...adminNav]
+    ? [...employeeNav, ...(showAdmin ? adminNav : [])]
     : isComm
-    ? [...employeeNav, ...commNav]
+    ? [...employeeNav, ...(showAdmin ? commNav : [])]
     : employeeNav;
 
   return (

@@ -42,6 +42,15 @@ function App() {
   const [me, setMe] = useState(null);
   const [employees, setEmployees] = useState([]);
   const [notifications, setNotifications] = useState([]);
+  const [adminMode, setAdminMode] = useState(() => localStorage.getItem("adminMode") !== "false");
+
+  const toggleAdminMode = () => {
+    setAdminMode((v) => {
+      const nv = !v;
+      localStorage.setItem("adminMode", String(nv));
+      return nv;
+    });
+  };
 
   const refreshMe = async () => {
     const { data } = await api.get("/me");
@@ -80,6 +89,8 @@ function App() {
         refreshEmployees,
         refreshNotifications,
         findEmployee,
+        adminMode,
+        toggleAdminMode,
       }}
     >
       <div className="App">
