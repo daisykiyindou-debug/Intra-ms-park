@@ -3,11 +3,19 @@ import { useSearchParams } from "react-router-dom";
 import {
   Send, Smile, Paperclip, Phone, Video, Search, Users, Plus, X, ArrowLeft,
   Info, MoreVertical, MessageSquare, SlidersHorizontal, Star, Pencil, Trash2, Archive,
-  Cake, Check, BellOff, CheckCheck, User as UserIcon,
+  Cake, Check, BellOff, CheckCheck, User as UserIcon, FileText, Image as ImageIcon,
+  UserPlus, UserMinus, Camera,
 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
+import { absoluteUrl } from "@/lib/api";
 import { useApp } from "@/contexts/AppContext";
+
+// A small handpicked set of 20 emojis for the chat picker
+const QUICK_EMOJIS = [
+  "😀", "😂", "🥰", "😎", "🤩", "😍", "😉", "🤔", "😮", "😴",
+  "👍", "🙏", "👏", "🎉", "🔥", "💯", "❤️", "🚀", "✨", "🍕",
+];
 
 function formatTimestamp(iso) {
   if (!iso) return "";
@@ -60,9 +68,16 @@ export default function Messagerie() {
   const [showFilters, setShowFilters] = useState(false);
   const [showActions, setShowActions] = useState(false);
   const [showInfo, setShowInfo] = useState(false);
+  const [showEmoji, setShowEmoji] = useState(false);
+  const [addMember, setAddMember] = useState(false);
+  const [addMemberSearch, setAddMemberSearch] = useState("");
+  const [pendingAttachments, setPendingAttachments] = useState([]); // [{url,name,type}]
+  const [uploading, setUploading] = useState(false);
   const [filterKind, setFilterKind] = useState("all"); // all | dm | group | unread | archived
   const scrollRef = useRef(null);
   const inputRef = useRef(null);
+  const fileInputRef = useRef(null);
+  const avatarInputRef = useRef(null);
 
   const toggleFav = (cid) => {
     const next = new Set(favorites);
@@ -136,7 +151,7 @@ export default function Messagerie() {
           ...c,
           _display_name: displayName,
           _subtitle: subtitle,
-          _avatar: isDm ? (other?.avatar || null) : null,
+          _avatar: isDm ? (other?.avatar || null) : (c.avatar_url || null),
           _other: other,
           _kind: isDm ? "dm" : c.is_group ? "group" : "team",
           _is_birthday: isBirthdayToday(other),
@@ -169,12 +184,100 @@ export default function Messagerie() {
   const currentDisplay = useMemo(() => conversations.find((c) => c.id === active), [conversations, active]);
 
   const send = async () => {
-    if (!draft.trim() || !active) return;
-    const { data } = await api.post(`/channels/${active}/messages`, { content: draft.trim() });
-    setMessages((m) => [...m, data]);
-    setDraft("");
+    if (!active) return;
+    const content = draft.trim();
+    if (!content && pendingAttachments.length === 0) return;
+    try {
+      const { data } = await api.post(`/channels/${active}/messages`, {
+        content,
+        attachments: pendingAttachments,
+      });
+      setMessages((m) => [...m, data]);
+      setDraft("");
+      setPendingAttachments([]);
+      setShowEmoji(false);
+      inputRef.current?.focus();
+      loadChannels();
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Impossible d'envoyer le message");
+    }
+  };
+
+  const insertEmoji = (emoji) => {
+    setDraft((d) => d + emoji);
     inputRef.current?.focus();
-    loadChannels();
+  };
+
+  const onPickFiles = async (e) => {
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
+    setUploading(true);
+    try {
+      const uploaded = [];
+      for (const f of files) {
+        const form = new FormData();
+        form.append("file", f);
+        const { data } = await api.post("/uploads", form, {
+          headers: { "Content-Type": "multipart/form-data" },
+        });
+        uploaded.push({
+          url: data.url,
+          name: data.name || f.name,
+          type: data.content_type || f.type || "",
+          size: data.size || f.size || 0,
+        });
+      }
+      setPendingAttachments((prev) => [...prev, ...uploaded]);
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Échec de l'envoi du fichier");
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
+
+  const onPickAvatar = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file || !active) return;
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const { data: up } = await api.post("/uploads", form, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+      await api.patch(`/channels/${active}`, { avatar_url: up.url });
+      toast.success("Photo du groupe mise à jour");
+      loadChannels();
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Impossible de mettre à jour la photo");
+    } finally {
+      if (avatarInputRef.current) avatarInputRef.current.value = "";
+    }
+  };
+
+  const addMemberToGroup = async (empId) => {
+    if (!active) return;
+    try {
+      await api.post(`/channels/${active}/members`, { employee_id: empId });
+      toast.success("Membre ajouté");
+      setAddMember(false);
+      setAddMemberSearch("");
+      loadChannels();
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Impossible d'ajouter ce membre");
+    }
+  };
+
+  const removeMemberFromGroup = async (empId) => {
+    if (!active) return;
+    if (!window.confirm("Retirer ce membre du groupe ?")) return;
+    try {
+      await api.delete(`/channels/${active}/members/${empId}`);
+      toast.success("Membre retiré");
+      loadChannels();
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Impossible de retirer ce membre");
+    }
   };
 
   const archiveActive = async () => {
@@ -537,13 +640,39 @@ export default function Messagerie() {
                     </button>
                   </div>
                   <div className="p-4 flex flex-col items-center text-center border-b border-[#071B34]/5">
-                    {currentDisplay._avatar ? (
-                      <img src={currentDisplay._avatar} alt="" className="h-20 w-20 rounded-full object-cover" />
-                    ) : (
-                      <div className="h-20 w-20 rounded-full bg-[#3BA4FF]/15 text-[#1D70B8] flex items-center justify-center font-bold text-2xl">
-                        {initials(currentDisplay._display_name)}
-                      </div>
-                    )}
+                    <div className="relative">
+                      {currentDisplay._avatar ? (
+                        <img src={currentDisplay._avatar} alt="" className="h-20 w-20 rounded-full object-cover" />
+                      ) : currentDisplay._kind === "dm" ? (
+                        <div className="h-20 w-20 rounded-full bg-[#3BA4FF]/15 text-[#1D70B8] flex items-center justify-center font-bold text-2xl">
+                          {initials(currentDisplay._display_name)}
+                        </div>
+                      ) : (
+                        <div className="h-20 w-20 rounded-full bg-[#EEF2FF] text-[#4338CA] flex items-center justify-center">
+                          <Users className="h-8 w-8" />
+                        </div>
+                      )}
+                      {currentDisplay._kind !== "dm" && (
+                        <>
+                          <button
+                            onClick={() => avatarInputRef.current?.click()}
+                            data-testid="msg-change-avatar"
+                            title="Changer la photo"
+                            className="absolute -bottom-1 -right-1 h-8 w-8 rounded-full bg-[#3BA4FF] hover:bg-[#2A8DE0] text-white flex items-center justify-center shadow-lg ring-2 ring-white"
+                          >
+                            <Camera className="h-4 w-4" />
+                          </button>
+                          <input
+                            ref={avatarInputRef}
+                            type="file"
+                            accept="image/*"
+                            onChange={onPickAvatar}
+                            className="hidden"
+                            data-testid="msg-avatar-input"
+                          />
+                        </>
+                      )}
+                    </div>
                     <h3 className="mt-3 text-lg font-bold text-[#071B34] inline-flex items-center gap-1.5">
                       {currentDisplay._display_name}
                       {currentDisplay._is_birthday && <Cake className="h-4 w-4 text-[#A78BFA]" />}
@@ -569,7 +698,65 @@ export default function Messagerie() {
                     <InfoRow label="Type" value={currentDisplay._kind === "dm" ? "Message privé" : currentDisplay._kind === "group" ? "Groupe" : "Équipe"} />
                     <InfoRow label="Créée le" value={currentDisplay.created_at ? new Date(currentDisplay.created_at).toLocaleDateString("fr-FR") : "—"} />
                   </dl>
-                  <div className="p-4 space-y-2">
+
+                  {/* Group / team member management */}
+                  {currentDisplay._kind !== "dm" && (
+                    <div className="p-4 border-t border-[#071B34]/5">
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="text-xs uppercase tracking-widest font-semibold text-[#475569]">
+                          Membres ({(currentDisplay.members_ids || []).length})
+                        </div>
+                        {currentDisplay._kind === "group" && (
+                          <button
+                            onClick={() => setAddMember(true)}
+                            data-testid="msg-add-member-btn"
+                            className="text-xs font-semibold text-[#1D70B8] hover:underline inline-flex items-center gap-1"
+                          >
+                            <UserPlus className="h-3.5 w-3.5" /> Ajouter
+                          </button>
+                        )}
+                      </div>
+                      <div className="space-y-1 max-h-64 overflow-y-auto pr-1" data-testid="msg-members-list">
+                        {(currentDisplay.members_ids || []).length === 0 && (
+                          <div className="text-xs text-[#94A3B8] py-2">Aucun membre.</div>
+                        )}
+                        {(currentDisplay.members_ids || []).map((mid) => {
+                          const m = findEmployee(mid);
+                          if (!m) return null;
+                          const isMe = mid === me?.id;
+                          return (
+                            <div
+                              key={mid}
+                              data-testid={`msg-member-${mid}`}
+                              className="flex items-center gap-2 rounded-xl px-2 py-1.5 hover:bg-[#F4F7FA] group"
+                            >
+                              {m.avatar
+                                ? <img src={m.avatar} alt="" className="h-8 w-8 rounded-full object-cover" />
+                                : <div className="h-8 w-8 rounded-full bg-[#3BA4FF]/15 text-[#1D70B8] text-[10px] font-bold flex items-center justify-center">{initials(m.first_name)}</div>}
+                              <div className="flex-1 min-w-0 text-left">
+                                <div className="text-sm font-semibold text-[#071B34] truncate">
+                                  {m.first_name} {m.last_name} {isMe && <span className="text-[10px] text-[#94A3B8] font-normal">(vous)</span>}
+                                </div>
+                                <div className="text-xs text-[#475569] truncate">{m.role || "—"}</div>
+                              </div>
+                              {currentDisplay._kind === "group" && !isMe && (
+                                <button
+                                  onClick={() => removeMemberFromGroup(mid)}
+                                  data-testid={`msg-remove-${mid}`}
+                                  title="Retirer du groupe"
+                                  className="opacity-0 group-hover:opacity-100 h-8 w-8 rounded-lg hover:bg-[#FEE2E2] text-[#B91C1C] inline-flex items-center justify-center transition-opacity"
+                                >
+                                  <UserMinus className="h-4 w-4" />
+                                </button>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="p-4 space-y-2 border-t border-[#071B34]/5">
                     <button
                       onClick={() => toggleFav(currentDisplay.id)}
                       className="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-[#F4F7FA] hover:bg-[#071B34]/5 py-2 text-sm font-semibold text-[#334155]"
@@ -625,7 +812,16 @@ export default function Messagerie() {
                                 ? "bg-[#DBEAFE] text-[#0B2545] rounded-br-sm"
                                 : "bg-[#F1F5F9] text-[#0B2545] rounded-bl-sm"
                             }`}>
-                              <div className="whitespace-pre-wrap break-words">{m.content}</div>
+                              {m.content && (
+                                <div className="whitespace-pre-wrap break-words">{m.content}</div>
+                              )}
+                              {(m.attachments || []).length > 0 && (
+                                <div className={`${m.content ? "mt-2" : ""} space-y-1.5`}>
+                                  {(m.attachments || []).map((a, i) => (
+                                    <MessageAttachment key={i} att={a} />
+                                  ))}
+                                </div>
+                              )}
                               <div className={`mt-1 text-[10px] ${mine ? "text-[#1D4ED8]/70" : "text-[#94A3B8]"} text-right`}>
                                 {new Date(m.ts).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}
                                 {mine && <span className="ml-1">✓✓</span>}
@@ -647,35 +843,103 @@ export default function Messagerie() {
               </div>
 
               {/* Composer */}
-              <div className="border-t border-[#071B34]/5 p-3 flex items-center gap-2 bg-white">
-                <button className="h-10 w-10 rounded-xl bg-[#F4F7FA] hover:bg-[#071B34]/5 inline-flex items-center justify-center text-[#475569]" aria-label="Joindre">
-                  <Paperclip className="h-4 w-4" />
-                </button>
-                <div className="flex-1 relative">
+              <div className="border-t border-[#071B34]/5 bg-white">
+                {pendingAttachments.length > 0 && (
+                  <div className="px-3 pt-3 flex flex-wrap gap-2" data-testid="msg-pending-attachments">
+                    {pendingAttachments.map((a, i) => {
+                      const isImg = (a.type || "").startsWith("image/");
+                      return (
+                        <div key={i} className="relative rounded-xl border border-[#071B34]/10 bg-[#F4F7FA] p-2 pr-8 flex items-center gap-2 max-w-[220px]">
+                          {isImg ? (
+                            <img src={absoluteUrl(a.url)} alt="" className="h-10 w-10 rounded-lg object-cover" />
+                          ) : (
+                            <div className="h-10 w-10 rounded-lg bg-white text-[#3BA4FF] flex items-center justify-center">
+                              <FileText className="h-5 w-5" />
+                            </div>
+                          )}
+                          <div className="text-xs text-[#0B2545] truncate max-w-[120px]" title={a.name}>{a.name}</div>
+                          <button
+                            onClick={() => setPendingAttachments((prev) => prev.filter((_, j) => j !== i))}
+                            className="absolute top-1 right-1 h-6 w-6 rounded-full bg-white shadow hover:bg-[#FEE2E2] text-[#B91C1C] inline-flex items-center justify-center"
+                            aria-label="Retirer"
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+                <div className="p-3 flex items-center gap-2 relative">
                   <input
-                    ref={inputRef}
-                    value={draft}
-                    onChange={(e) => setDraft(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
-                    placeholder="Écrire un message…"
-                    data-testid="msg-input"
-                    className="w-full h-11 pl-4 pr-11 rounded-xl bg-[#F4F7FA] focus:bg-white focus:ring-2 focus:ring-[#3BA4FF]/30 outline-none text-sm"
+                    ref={fileInputRef}
+                    type="file"
+                    multiple
+                    onChange={onPickFiles}
+                    className="hidden"
+                    data-testid="msg-file-input"
                   />
                   <button
-                    className="absolute right-2 top-1/2 -translate-y-1/2 h-8 w-8 rounded-lg hover:bg-[#071B34]/5 inline-flex items-center justify-center text-[#475569]"
-                    aria-label="Emoji"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={uploading}
+                    data-testid="msg-attach"
+                    title="Joindre un fichier"
+                    className="h-10 w-10 rounded-xl bg-[#F4F7FA] hover:bg-[#071B34]/5 disabled:opacity-40 inline-flex items-center justify-center text-[#475569]"
+                    aria-label="Joindre"
                   >
-                    <Smile className="h-4 w-4" />
+                    <Paperclip className="h-4 w-4" />
+                  </button>
+                  <div className="flex-1 relative">
+                    <input
+                      ref={inputRef}
+                      value={draft}
+                      onChange={(e) => setDraft(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
+                      placeholder={uploading ? "Envoi du fichier…" : "Écrire un message…"}
+                      data-testid="msg-input"
+                      className="w-full h-11 pl-4 pr-11 rounded-xl bg-[#F4F7FA] focus:bg-white focus:ring-2 focus:ring-[#3BA4FF]/30 outline-none text-sm"
+                    />
+                    <button
+                      onClick={() => setShowEmoji((s) => !s)}
+                      data-testid="msg-emoji-btn"
+                      className={`absolute right-2 top-1/2 -translate-y-1/2 h-8 w-8 rounded-lg inline-flex items-center justify-center transition-colors ${showEmoji ? "bg-[#3BA4FF]/15 text-[#1D70B8]" : "hover:bg-[#071B34]/5 text-[#475569]"}`}
+                      aria-label="Emoji"
+                    >
+                      <Smile className="h-4 w-4" />
+                    </button>
+                    {showEmoji && (
+                      <div
+                        className="absolute right-0 bottom-12 z-40 w-64 rounded-2xl bg-white shadow-2xl ring-1 ring-[#071B34]/10 p-3"
+                        data-testid="msg-emoji-panel"
+                      >
+                        <div className="text-[10px] uppercase tracking-widest font-semibold text-[#475569] mb-2">
+                          Insérer un emoji
+                        </div>
+                        <div className="grid grid-cols-5 gap-1">
+                          {QUICK_EMOJIS.map((emo) => (
+                            <button
+                              key={emo}
+                              onClick={() => insertEmoji(emo)}
+                              data-testid={`msg-emoji-${emo}`}
+                              className="h-9 w-full text-xl rounded-lg hover:bg-[#F4F7FA]"
+                              type="button"
+                            >
+                              {emo}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  <button
+                    onClick={send}
+                    disabled={(!draft.trim() && pendingAttachments.length === 0) || uploading}
+                    data-testid="msg-send"
+                    className="h-11 w-11 rounded-xl bg-[#3BA4FF] hover:bg-[#2A8DE0] disabled:opacity-40 disabled:cursor-not-allowed text-white inline-flex items-center justify-center transition-colors"
+                  >
+                    <Send className="h-4 w-4" />
                   </button>
                 </div>
-                <button
-                  onClick={send}
-                  disabled={!draft.trim()}
-                  data-testid="msg-send"
-                  className="h-11 w-11 rounded-xl bg-[#3BA4FF] hover:bg-[#2A8DE0] disabled:opacity-40 disabled:cursor-not-allowed text-white inline-flex items-center justify-center transition-colors"
-                >
-                  <Send className="h-4 w-4" />
-                </button>
               </div>
             </>
           )}
@@ -767,7 +1031,93 @@ export default function Messagerie() {
           </div>
         </div>
       )}
+      {/* Add member to group modal */}
+      {addMember && currentDisplay && currentDisplay._kind === "group" && (
+        <div
+          onClick={() => setAddMember(false)}
+          className="fixed inset-0 z-[60] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4"
+        >
+          <div onClick={(e) => e.stopPropagation()} className="bg-white rounded-3xl w-full max-w-md max-h-[80vh] overflow-hidden flex flex-col" data-testid="msg-add-member-modal">
+            <div className="flex items-center justify-between px-5 py-3 border-b border-[#071B34]/5">
+              <h3 className="text-base font-bold text-[#071B34]">Ajouter des membres</h3>
+              <button onClick={() => setAddMember(false)} className="h-9 w-9 rounded-lg hover:bg-[#F4F7FA] inline-flex items-center justify-center">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="p-5 flex-1 overflow-y-auto">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[#94A3B8]" />
+                <input
+                  value={addMemberSearch}
+                  onChange={(e) => setAddMemberSearch(e.target.value)}
+                  placeholder="Rechercher un collègue…"
+                  data-testid="msg-add-member-search"
+                  className="w-full h-10 pl-9 pr-3 rounded-xl bg-[#F4F7FA] outline-none text-sm"
+                />
+              </div>
+              <div className="mt-2 space-y-1 max-h-80 overflow-y-auto pr-1">
+                {(employees || [])
+                  .filter((e) => !e.is_super_admin)
+                  .filter((e) => !(currentDisplay.members_ids || []).includes(e.id))
+                  .filter((e) => {
+                    if (!addMemberSearch.trim()) return true;
+                    const n = addMemberSearch.toLowerCase();
+                    return `${e.first_name} ${e.last_name} ${e.role || ""}`.toLowerCase().includes(n);
+                  })
+                  .map((e) => (
+                    <button
+                      key={e.id}
+                      onClick={() => addMemberToGroup(e.id)}
+                      data-testid={`msg-add-member-${e.id}`}
+                      className="w-full flex items-center gap-2 rounded-xl px-2 py-2 hover:bg-[#F4F7FA]"
+                    >
+                      {e.avatar
+                        ? <img src={e.avatar} alt="" className="h-8 w-8 rounded-full object-cover" />
+                        : <div className="h-8 w-8 rounded-full bg-[#3BA4FF]/15 text-[#1D70B8] text-[10px] font-bold flex items-center justify-center">{initials(e.first_name)}</div>}
+                      <div className="flex-1 text-left min-w-0">
+                        <div className="text-sm font-semibold text-[#071B34] truncate">{e.first_name} {e.last_name}</div>
+                        <div className="text-xs text-[#475569] truncate">{e.role || "—"}</div>
+                      </div>
+                      <UserPlus className="h-4 w-4 text-[#3BA4FF]" />
+                    </button>
+                  ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
+  );
+}
+
+function MessageAttachment({ att }) {
+  const url = absoluteUrl(att?.url);
+  const type = att?.type || "";
+  const name = att?.name || "Fichier";
+  const isImage = type.startsWith("image/");
+  if (isImage) {
+    return (
+      <a href={url} target="_blank" rel="noreferrer" data-testid="msg-attachment-image">
+        <img
+          src={url}
+          alt={name}
+          className="max-h-56 max-w-full rounded-lg border border-black/5 object-cover"
+        />
+      </a>
+    );
+  }
+  return (
+    <a
+      href={url}
+      target="_blank"
+      rel="noreferrer"
+      download
+      data-testid="msg-attachment-file"
+      className="flex items-center gap-2 rounded-lg bg-white/70 hover:bg-white ring-1 ring-black/5 px-2.5 py-1.5 text-xs text-[#0B2545]"
+    >
+      <FileText className="h-4 w-4 shrink-0 text-[#3BA4FF]" />
+      <span className="truncate max-w-[180px]">{name}</span>
+    </a>
   );
 }
 

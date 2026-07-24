@@ -1,0 +1,28 @@
+{
+  "summary": "Iter 26 — Messagerie group/attachments/emoji polish tested end-to-end. Backend: 14/14 pytest tests PASS in /app/backend/tests/test_iter26_messagerie_groups_attachments.py covering (a) POST /api/channels/group persists members under 'members_ids' (bug fix confirmed — creator + selected members all appear, GET /api/channels shows correct count for both creator and invitees), (b) POST /api/channels/{cid}/members adds & persists / rejects duplicates / 404 on unknown employee / 400 on DM, (c) DELETE /api/channels/{cid}/members/{eid} removes & persists, (d) PATCH /api/channels/{cid} updates name & avatar_url (400 on DM), (e) POST /api/uploads returns /api/uploads/<uuid>.ext URL, (f) POST /api/channels/{cid}/messages accepts attachments list (image + non-image), persists them, allows attachment-only send, rejects fully-empty payload, (g) DM send + read regression still 200. Frontend Playwright (logged as Marcus admin via localStorage bypass): 5/5 flows PASS — group created via '+ new message → Groupe' shows in sidebar with correct member count and 3 members (creator+2 selected) in msg-info-panel msg-members-list; msg-add-member-btn opens modal that filters out existing members (14 in composer, 12 available to add — 2 already in group) and adding emp-sophie closes the modal and persists; msg-emoji-btn opens msg-emoji-panel with exactly 20 emoji buttons and clicking 😀 inserts it into msg-input; msg-file-input accepts a PNG, msg-pending-attachments preview shows, msg-send posts message and msg-attachment-image renders the uploaded image inline. No console errors during flow beyond two harmless 404s (favicon).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iter26_messagerie_groups_attachments.py",
+    "/app/test_reports/pytest/iter26.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py is now 7003 lines — still needs to be split into modules (channels, messages, uploads, ideas, birthdays, notifications). Every iteration keeps growing this file.",
+    "Messagerie.jsx is 1155 lines and mixes composer modal, info panel, attachments, emoji picker and add-member modal — should be broken into sub-components (ChatComposer, ChatInfoPanel, AddMemberModal, MessageAttachment already extracted).",
+    "POST /api/uploads has no auth check nor MIME allow-list — any authenticated employee can upload up to 8 MB of any file type; consider content-type allow-list for /api/uploads used from chat.",
+    "PATCH /api/channels/{cid} and member add/remove endpoints do not check that current_user() is a member (or creator) of the group — any authenticated employee can rename, change avatar or add/remove members of any group. Consider authorization guard.",
+    "Message post accepts arbitrary attachments payload (list of dict) with no schema validation — should be a Pydantic model with url/name/type fields to prevent oversize/malformed data being stored."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter26_messagerie_groups_attachments.py",
+    "/app/test_reports/iteration_26.json"
+  ],
+  "success_rate": {"backend": "100% (14/14)", "frontend": "100% (5/5 flows)"},
+  "test_credentials": "Marcus admin (emp-marcus-simeo) used for UI test via localStorage ms_employee_id bypass. Idriss (emp-idriss-malonga) used for backend member-visibility check.",
+  "seed_data_creation": "Backend test creates a TEST_iter26_grp_<hex> group and a TEST_iter26.png upload; UI test creates 'TEST_iter26_ui_grp'. These persist in the mocked DB until next reseed.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iter 26 backend tests live in /app/backend/tests/test_iter26_messagerie_groups_attachments.py (14 tests, all green). All 5 new/changed messagerie surfaces work: group member persistence, add/remove members, PATCH channel name+avatar, /api/uploads, attachments on POST message, 20-emoji picker. Note authz gap: any authenticated user can modify any non-DM channel — flagged in review comments, not fixed.",
+  "rca of the issue": "The original bug ('member_ids' vs 'members_ids' mismatch) is verified fixed at server.py:4258. Group creation now writes 'members_ids' which is the same key list_channels + notification fan-out read from. Both creator-view and invitee-view of GET /api/channels show correct membership."
+}

@@ -382,7 +382,8 @@ class CommentCreate(BaseModel):
 
 
 class MessageCreate(BaseModel):
-    content: str
+    content: str = ""
+    attachments: List[dict] = []  # [{url, name, type}]
 
 
 # ───────────────────────────────── Helpers ───────────────────────────────────
@@ -3694,11 +3695,14 @@ async def list_messages(cid: str):
 
 @api.post("/channels/{cid}/messages")
 async def post_message(cid: str, payload: MessageCreate):
+    if not (payload.content or "").strip() and not (payload.attachments or []):
+        raise HTTPException(400, "Message vide")
     msg = {
         "id": _id(),
         "channel_id": cid,
         "author_id": current_user(),
-        "content": payload.content,
+        "content": payload.content or "",
+        "attachments": payload.attachments or [],
         "ts": _now(),
     }
     await db.messages.insert_one(msg.copy())
@@ -4240,18 +4244,92 @@ async def create_group(payload: GroupCreate):
     if not payload.name.strip() or len(payload.member_ids) < 1:
         raise HTTPException(400, "Nom et membres requis")
     cid = f"grp-{_id()[:8]}"
+    # De-dupe members and always include the creator
+    all_members = list({*payload.member_ids, current_user()})
     ch = {
         "id": cid,
         "name": payload.name.strip(),
         "icon": "users",
-        "members": len(payload.member_ids) + 1,
+        "members": len(all_members),
         "unread": 0,
         "is_dm": False,
         "is_group": True,
         "archived": False,
-        "member_ids": payload.member_ids + [current_user()],
+        "members_ids": all_members,
+        "created_by": current_user(),
+        "avatar_url": None,
+        "created_at": _now(),
     }
     await db.channels.insert_one(ch.copy())
+    return await _strip(ch)
+
+
+# ─── Group management: add / remove members, rename, change avatar
+class MemberAdd(BaseModel):
+    employee_id: str
+
+
+class ChannelPatch(BaseModel):
+    name: Optional[str] = None
+    avatar_url: Optional[str] = None
+
+
+@api.post("/channels/{cid}/members")
+async def add_channel_member(cid: str, payload: MemberAdd):
+    ch = await db.channels.find_one({"id": cid}, {"_id": 0})
+    if not ch:
+        raise HTTPException(404, "Conversation introuvable")
+    if ch.get("is_dm"):
+        raise HTTPException(400, "Impossible d'ajouter un membre à une discussion privée")
+    emp = await db.employees.find_one({"id": payload.employee_id}, {"_id": 0})
+    if not emp:
+        raise HTTPException(404, "Employé introuvable")
+    members = list(ch.get("members_ids") or [])
+    if payload.employee_id in members:
+        raise HTTPException(400, "Ce membre est déjà dans le groupe")
+    members.append(payload.employee_id)
+    await db.channels.update_one(
+        {"id": cid},
+        {"$set": {"members_ids": members, "members": len(members)}},
+    )
+    ch["members_ids"] = members
+    ch["members"] = len(members)
+    return await _strip(ch)
+
+
+@api.delete("/channels/{cid}/members/{eid}")
+async def remove_channel_member(cid: str, eid: str):
+    ch = await db.channels.find_one({"id": cid}, {"_id": 0})
+    if not ch:
+        raise HTTPException(404, "Conversation introuvable")
+    if ch.get("is_dm"):
+        raise HTTPException(400, "Impossible de retirer un membre d'une discussion privée")
+    members = [m for m in (ch.get("members_ids") or []) if m != eid]
+    await db.channels.update_one(
+        {"id": cid},
+        {"$set": {"members_ids": members, "members": len(members)}},
+    )
+    ch["members_ids"] = members
+    ch["members"] = len(members)
+    return await _strip(ch)
+
+
+@api.patch("/channels/{cid}")
+async def patch_channel(cid: str, payload: ChannelPatch):
+    ch = await db.channels.find_one({"id": cid}, {"_id": 0})
+    if not ch:
+        raise HTTPException(404, "Conversation introuvable")
+    if ch.get("is_dm"):
+        raise HTTPException(400, "Impossible de modifier une discussion privée")
+    updates = {}
+    if payload.name is not None and payload.name.strip():
+        updates["name"] = payload.name.strip()
+    if payload.avatar_url is not None:
+        updates["avatar_url"] = payload.avatar_url or None
+    if not updates:
+        return await _strip(ch)
+    await db.channels.update_one({"id": cid}, {"$set": updates})
+    ch.update(updates)
     return await _strip(ch)
 
 
