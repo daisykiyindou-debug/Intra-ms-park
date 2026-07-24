@@ -78,7 +78,7 @@ const adminNav = [
   { to: "/management/agenda", label: "Agenda", icon: Calendar, key: "mgmt-agenda" },
   { to: "/management/formulaires", label: "Formulaires", icon: ListChecks, key: "mgmt-forms" },
   { to: "/management/utilisateurs", label: "Utilisateurs", icon: Users, key: "mgmt-users" },
-  { to: "/management/documents", label: "Fichiers RH", icon: FileText, key: "mgmt-docs" },
+  { to: "/management/fiches-de-paie", label: "Fiches de paie", icon: FileText, key: "mgmt-payslips" },
   { to: "/management/documents-editor", label: "Rédiger documents", icon: Edit3, key: "mgmt-hrdocs" },
   { to: "/newsletters", label: "Newsletters", icon: Mail, key: "mgmt-newsletters" },
   { to: "/actualites", label: "Actualités (rédaction)", icon: Newspaper, key: "mgmt-news" },

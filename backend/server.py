@@ -332,6 +332,7 @@ class PostCreate(BaseModel):
     links: Optional[List[str]] = None
     hashtags: List[str] = []
     posted_as: Optional[str] = "personal"
+    publish_at: Optional[str] = None  # ISO datetime — if in the future the post is scheduled
 
 
 class Comment(BaseModel):
@@ -2277,10 +2278,71 @@ async def cancel_order(oid: str):
 
 
 # ─── Posts
+async def _dispatch_scheduled_posts():
+    """Send broadcast notifications for scheduled posts whose publish_at just
+    passed. Idempotent — flag `scheduled_broadcast_sent` prevents double-sending."""
+    now_iso = _now()
+    due = await db.posts.find(
+        {"publish_at": {"$ne": None, "$lte": now_iso},
+         "$or": [{"scheduled_broadcast_sent": {"$exists": False}}, {"scheduled_broadcast_sent": False}]},
+        {"_id": 0},
+    ).to_list(100)
+    for p in due:
+        author = await db.employees.find_one({"id": p.get("author_id")}, {"_id": 0}) or {}
+        me_name = f"{author.get('first_name', '')} {author.get('last_name', '')}".strip() or "MS Park"
+        await _broadcast_notification(
+            type="post",
+            title="Nouvelle publication",
+            content=f"{me_name} a publié : {p.get('title', '')}",
+            icon="megaphone",
+            link=f"/actualites/{p['id']}",
+            exclude_ids=[p.get("author_id")] if p.get("author_id") else [],
+        )
+        await db.posts.update_one({"id": p["id"]}, {"$set": {"scheduled_broadcast_sent": True}})
+
+
+async def _dispatch_scheduled_newsletters():
+    """Same, for newsletters."""
+    now_iso = _now()
+    due = await db.newsletters.find(
+        {"published": True, "archived": False, "publish_at": {"$ne": None, "$lte": now_iso},
+         "$or": [{"scheduled_broadcast_sent": {"$exists": False}}, {"scheduled_broadcast_sent": False}]},
+        {"_id": 0},
+    ).to_list(100)
+    for n in due:
+        await _broadcast_notification(
+            type="news",
+            title=f"Nouvelle newsletter · {n.get('title', '')}",
+            content=n.get("preheader") or n.get("subject") or "",
+            icon="megaphone",
+            link=f"/newsletters/{n['id']}",
+            exclude_ids=[n.get("author_id")] if n.get("author_id") else [],
+        )
+        await db.newsletters.update_one({"id": n["id"]}, {"$set": {"scheduled_broadcast_sent": True}})
+
+
 @api.get("/posts")
 async def list_posts():
-    items = await db.posts.find({}, {"_id": 0}).sort("created_at", -1).to_list(50)
-    return items
+    # Fire any scheduled broadcast whose time has come, so employees see the
+    # publication AND the notification within seconds of the scheduled moment.
+    await _dispatch_scheduled_posts()
+    me = await db.employees.find_one({"id": current_user()}, {"_id": 0}) or {}
+    items = await db.posts.find({}, {"_id": 0}).sort("created_at", -1).to_list(100)
+    # Filter out scheduled posts whose publish_at is still in the future,
+    # except for the author (so they see their own drafts) and admins.
+    now_iso = _now()
+    is_admin = me.get("is_admin") or me.get("can_manage_communication")
+    visible: list[dict] = []
+    for p in items:
+        pub = p.get("publish_at")
+        if pub and pub > now_iso:
+            if not is_admin and p.get("author_id") != me.get("id"):
+                continue
+            p["is_scheduled"] = True
+        else:
+            p["is_scheduled"] = False
+        visible.append(p)
+    return visible[:50]
 
 
 @api.post("/posts")
@@ -2292,6 +2354,8 @@ async def create_post(payload: PostCreate):
     posted_as = payload.posted_as or "personal"
     if not me.get("is_admin") and me.get("can_manage_communication"):
         posted_as = "official"
+    now_iso = _now()
+    publish_at = (payload.publish_at or "").strip() or None
     p = {
         "id": _id(),
         "author_id": current_user(),
@@ -2304,30 +2368,43 @@ async def create_post(payload: PostCreate):
         "links": payload.links or [],
         "hashtags": payload.hashtags or [],
         "posted_as": posted_as,
+        "publish_at": publish_at,
         "likes": [],
         "comments": [],
-        "created_at": _now(),
+        "created_at": now_iso,
     }
     await db.posts.insert_one(p.copy())
-    # Broadcast notification to every other employee
-    me_name = f"{me.get('first_name', '')} {me.get('last_name', '')}".strip() or "MS Park"
-    await _broadcast_notification(
-        type="post",
-        title="Nouvelle publication",
-        content=f"{me_name} a publié : {p['title']}",
-        icon="megaphone",
-        link=f"/actualites/{p['id']}",
-        exclude_ids=[current_user()],
-    )
+    # Broadcast notification to every other employee (skip when the post is
+    # scheduled — notification will be sent later by the scheduler tick).
+    is_future = bool(publish_at and publish_at > now_iso)
+    if not is_future:
+        me_name = f"{me.get('first_name', '')} {me.get('last_name', '')}".strip() or "MS Park"
+        await _broadcast_notification(
+            type="post",
+            title="Nouvelle publication",
+            content=f"{me_name} a publié : {p['title']}",
+            icon="megaphone",
+            link=f"/actualites/{p['id']}",
+            exclude_ids=[current_user()],
+        )
     return await _strip(p)
 
 
 @api.get("/posts/{post_id}")
 async def get_post(post_id: str):
     """Public read of a single post — used by `/actualites/:id` detail page."""
+    me = await db.employees.find_one({"id": current_user()}, {"_id": 0}) or {}
     p = await db.posts.find_one({"id": post_id}, {"_id": 0})
     if not p:
         raise HTTPException(404, "Publication introuvable")
+    pub = p.get("publish_at")
+    if pub and pub > _now():
+        is_admin = me.get("is_admin") or me.get("can_manage_communication")
+        if not is_admin and p.get("author_id") != me.get("id"):
+            raise HTTPException(404, "Publication introuvable")
+        p["is_scheduled"] = True
+    else:
+        p["is_scheduled"] = False
     return p
 
 
@@ -2339,6 +2416,7 @@ class PostUpdate(BaseModel):
     images: Optional[List[str]] = None
     attachments: Optional[List[dict]] = None
     links: Optional[List[str]] = None
+    publish_at: Optional[str] = None
 
 
 @api.put("/posts/{post_id}")
@@ -2648,6 +2726,273 @@ class PayslipGenerate(BaseModel):
     employee_id: str
     year: int
     month: int
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Full payslip management (drafts, custom lines, sending)
+# ═══════════════════════════════════════════════════════════════════
+class PayslipLine(BaseModel):
+    label: str
+    kind: str = "auto"  # auto | overtime | premium | indemnity | deduction
+    base: Optional[float] = None
+    rate: Optional[float] = None
+    amount: float = 0.0
+
+
+class PayslipPayload(BaseModel):
+    employee_id: str
+    year: int
+    month: int
+    period_from: Optional[str] = None
+    period_to: Optional[str] = None
+    payment_date: Optional[str] = None
+    base_hours: Optional[float] = None
+    hourly_rate: Optional[float] = None
+    lines: List[PayslipLine] = []  # gross-side lines (base + HS + primes + indemnités)
+    deductions: List[PayslipLine] = []  # explicit deductions overriding the auto ~22%
+    attachments: List[dict] = []
+    message_subject: Optional[str] = ""
+    message_body: Optional[str] = ""
+    status: Optional[str] = "draft"  # draft | pending | sent
+
+
+def _compute_payslip_totals(p: dict) -> dict:
+    """Sum gross lines, apply auto ~22% deductions unless overridden, compute net."""
+    gross = sum((l.get("amount") or 0) for l in (p.get("lines") or []))
+    deductions_lines = p.get("deductions") or []
+    if not deductions_lines:
+        # auto ~22 % breakdown
+        deductions_lines = [
+            {"label": "Sécurité sociale", "rate": 15.0, "amount": round(gross * 0.15, 2)},
+            {"label": "Retraite complémentaire", "rate": 4.0, "amount": round(gross * 0.04, 2)},
+            {"label": "Prévoyance", "rate": 2.0, "amount": round(gross * 0.02, 2)},
+            {"label": "Autres cotisations", "rate": 1.0, "amount": round(gross * 0.01, 2)},
+        ]
+    total_deductions = round(sum((l.get("amount") or 0) for l in deductions_lines), 2)
+    net = round(gross - total_deductions, 2)
+    return {
+        "gross": round(gross, 2),
+        "deductions_lines": deductions_lines,
+        "total_deductions": total_deductions,
+        "net": net,
+    }
+
+
+@api.get("/admin/payslips")
+async def admin_list_payslips(month: Optional[str] = None, status: Optional[str] = None):
+    """List all payslips. `month` = YYYY-MM filter."""
+    await require_admin()
+    q: dict = {}
+    if month:
+        try:
+            y, m = month.split("-")
+            q["year"] = int(y); q["month"] = int(m)
+        except Exception:
+            raise HTTPException(400, "Format `month` attendu : YYYY-MM")
+    if status:
+        q["status"] = status
+    items = await db.payslips.find(q, {"_id": 0}).sort("created_at", -1).to_list(500)
+    # Attach employee snapshot
+    emp_ids = list({p["employee_id"] for p in items})
+    emps = {e["id"]: e async for e in db.employees.find({"id": {"$in": emp_ids}}, {"_id": 0})}
+    for p in items:
+        e = emps.get(p["employee_id"], {})
+        p["employee_snapshot"] = {
+            "first_name": e.get("first_name"),
+            "last_name": e.get("last_name"),
+            "avatar": e.get("avatar"),
+            "role": e.get("role"),
+            "department": e.get("department"),
+            "badge_number": e.get("badge_number"),
+        }
+    return items
+
+
+@api.get("/admin/payslips/stats")
+async def admin_payslip_stats(month: Optional[str] = None):
+    """Aggregate counters for the KPI cards."""
+    await require_admin()
+    q: dict = {}
+    if month:
+        try:
+            y, m = month.split("-")
+            q["year"] = int(y); q["month"] = int(m)
+        except Exception:
+            raise HTTPException(400, "Format `month` attendu : YYYY-MM")
+    items = await db.payslips.find(q, {"_id": 0}).to_list(500)
+    return {
+        "total": len(items),
+        "employees": len({p["employee_id"] for p in items}),
+        "sent": sum(1 for p in items if p.get("status") == "sent"),
+        "pending": sum(1 for p in items if p.get("status") in ("pending", "draft")),
+    }
+
+
+@api.get("/admin/payslips/{pid}")
+async def admin_get_payslip(pid: str):
+    await require_admin()
+    p = await db.payslips.find_one({"id": pid}, {"_id": 0})
+    if not p:
+        raise HTTPException(404, "Fiche introuvable")
+    emp = await db.employees.find_one({"id": p["employee_id"]}, {"_id": 0}) or {}
+    p["employee_snapshot"] = {
+        "first_name": emp.get("first_name"), "last_name": emp.get("last_name"),
+        "avatar": emp.get("avatar"), "role": emp.get("role"),
+        "department": emp.get("department"), "badge_number": emp.get("badge_number"),
+        "personal_email": emp.get("personal_email") or emp.get("email"),
+        "hire_date": emp.get("hire_date"),
+    }
+    return p
+
+
+def _default_lines_for(emp: dict, contract_h: float, hourly: float) -> list[dict]:
+    monthly_h = round(contract_h * 4.33, 2)
+    return [{
+        "label": "Salaire de base",
+        "kind": "auto",
+        "base": monthly_h,
+        "rate": hourly,
+        "amount": round(monthly_h * hourly, 2),
+    }]
+
+
+@api.post("/admin/payslips/preview")
+async def admin_preview_payslip(payload: PayslipPayload):
+    """Compute totals without persisting — used by the live preview panel."""
+    await require_admin()
+    doc = payload.model_dump()
+    if not doc.get("lines"):
+        emp = await db.employees.find_one({"id": payload.employee_id}, {"_id": 0}) or {}
+        contract_h = payload.base_hours or emp.get("contract_hours_weekly") or 35
+        role_cat = emp.get("role_category")
+        hourly = payload.hourly_rate or (21.50 if role_cat == "encadrement" else 13.20 if role_cat == "restauration" else 12.85)
+        doc["lines"] = _default_lines_for(emp, contract_h, hourly)
+    return {**doc, "totals": _compute_payslip_totals(doc)}
+
+
+@api.post("/admin/payslips")
+async def admin_create_payslip(payload: PayslipPayload):
+    await require_admin()
+    emp = await db.employees.find_one({"id": payload.employee_id}, {"_id": 0})
+    if not emp:
+        raise HTTPException(404, "Employé introuvable")
+    # Prevent duplicate month for the same employee (draft still allowed)
+    existing = await db.payslips.find_one({
+        "employee_id": payload.employee_id, "year": payload.year, "month": payload.month,
+        "status": "sent",
+    })
+    if existing:
+        raise HTTPException(400, f"Une fiche de paie a déjà été envoyée à {emp.get('first_name','')} pour cette période.")
+    contract_h = payload.base_hours or emp.get("contract_hours_weekly") or 35
+    role_cat = emp.get("role_category")
+    hourly = payload.hourly_rate or (21.50 if role_cat == "encadrement" else 13.20 if role_cat == "restauration" else 12.85)
+    doc = payload.model_dump()
+    if not doc["lines"]:
+        doc["lines"] = _default_lines_for(emp, contract_h, hourly)
+    doc["base_hours"] = contract_h
+    doc["hourly_rate"] = hourly
+    if not doc.get("period_from"):
+        doc["period_from"] = date(payload.year, payload.month, 1).isoformat()
+    if not doc.get("period_to"):
+        # last day of the month
+        if payload.month == 12:
+            last = date(payload.year + 1, 1, 1) - timedelta(days=1)
+        else:
+            last = date(payload.year, payload.month + 1, 1) - timedelta(days=1)
+        doc["period_to"] = last.isoformat()
+    if not doc.get("payment_date"):
+        doc["payment_date"] = doc["period_to"]
+    doc["id"] = _id()
+    doc["status"] = doc.get("status") or "draft"
+    doc["created_at"] = _now()
+    totals = _compute_payslip_totals(doc)
+    doc["totals"] = totals
+    await db.payslips.insert_one(doc.copy())
+    doc.pop("_id", None)
+    return doc
+
+
+@api.put("/admin/payslips/{pid}")
+async def admin_update_payslip(pid: str, payload: PayslipPayload):
+    await require_admin()
+    p = await db.payslips.find_one({"id": pid}, {"_id": 0})
+    if not p:
+        raise HTTPException(404, "Fiche introuvable")
+    if p.get("status") == "sent":
+        raise HTTPException(400, "Impossible de modifier une fiche déjà envoyée.")
+    upd = payload.model_dump()
+    if not upd["lines"]:
+        upd["lines"] = p.get("lines") or []
+    upd["totals"] = _compute_payslip_totals(upd)
+    upd["updated_at"] = _now()
+    await db.payslips.update_one({"id": pid}, {"$set": upd})
+    return await db.payslips.find_one({"id": pid}, {"_id": 0})
+
+
+@api.delete("/admin/payslips/{pid}")
+async def admin_delete_payslip(pid: str):
+    await require_admin()
+    p = await db.payslips.find_one({"id": pid}, {"_id": 0})
+    if not p:
+        raise HTTPException(404, "Fiche introuvable")
+    if p.get("status") == "sent":
+        # Also remove the linked document from the employee's Documents.
+        await db.documents.delete_many({"payslip_id": pid})
+    await db.payslips.delete_one({"id": pid})
+    return {"ok": True}
+
+
+@api.post("/admin/payslips/{pid}/send")
+async def admin_send_payslip(pid: str):
+    """Mark payslip as sent and publish it as a Document to the employee."""
+    await require_admin()
+    p = await db.payslips.find_one({"id": pid}, {"_id": 0})
+    if not p:
+        raise HTTPException(404, "Fiche introuvable")
+    if p.get("status") == "sent":
+        return p
+    emp = await db.employees.find_one({"id": p["employee_id"]}, {"_id": 0}) or {}
+    label = f"{_FR_MONTHS[p['month'] - 1]} {p['year']}"
+    now_iso = _now()
+    await db.payslips.update_one({"id": pid}, {"$set": {
+        "status": "sent",
+        "sent_at": now_iso,
+    }})
+    # Publish as a Document visible in the employee's /documents page.
+    doc = {
+        "id": _id(),
+        "name": f"Fiche de paie — {label}",
+        "category": "Paie",
+        "url": f"/documents/payslip/{p['employee_id']}/{p['year']}/{p['month']}",
+        "description": (p.get("message_subject") or f"Bulletin de salaire — {label}"),
+        "target_employee_id": p["employee_id"],
+        "issued_at": now_iso[:10],
+        "size_kb": 248,
+        "read": False,
+        "is_payslip": True,
+        "payslip_year": p["year"],
+        "payslip_month": p["month"],
+        "payslip_id": pid,
+    }
+    await db.documents.insert_one(doc.copy())
+    await _push_notification(
+        employee_id=p["employee_id"],
+        type="document",
+        title="Nouvelle fiche de paie",
+        content=(p.get("message_subject") or f"Votre bulletin de {label} est disponible."),
+        icon="file-text",
+        link="/documents",
+    )
+    return await db.payslips.find_one({"id": pid}, {"_id": 0})
+
+
+@api.get("/payslips/mine")
+async def list_my_payslips():
+    """Return all payslips sent to the current employee."""
+    items = await db.payslips.find(
+        {"employee_id": current_user(), "status": "sent"}, {"_id": 0},
+    ).sort("sent_at", -1).to_list(60)
+    return items
 
 
 @api.post("/admin/documents/payslip")
@@ -4841,22 +5186,33 @@ class NewsletterCreate(BaseModel):
     archived: bool = False
     published: bool = False
     published_at: Optional[str] = None
+    publish_at: Optional[str] = None  # scheduled publication — ISO datetime; when reached, the newsletter becomes visible to all employees
 
 
 @api.get("/newsletters")
 async def list_newsletters(archived: bool = False, category: Optional[str] = None, q: Optional[str] = None):
+    await _dispatch_scheduled_newsletters()
     me = await _me()
     query: dict = {"archived": archived}
     if category:
         query["category"] = category
     items = await db.newsletters.find(query, {"_id": 0}).sort("published_at", -1).to_list(200)
-    # Draft visibility: only author (or admin) can see unpublished newsletters
+    now_iso = _now()
+    is_admin = me.get("is_admin") or me.get("can_manage_communication")
+    # Draft visibility: only author (or admin) can see unpublished newsletters.
+    # Scheduled visibility: hide from employees until publish_at is reached.
     def _visible(n):
-        if n.get("published"):
-            return True
-        # Draft — only author or admin
-        return n.get("author_id") == me["id"] or me.get("is_admin")
+        if not n.get("published"):
+            return n.get("author_id") == me["id"] or is_admin
+        pub_at = n.get("publish_at")
+        if pub_at and pub_at > now_iso:
+            # scheduled — admins & author can see, others cannot
+            return n.get("author_id") == me["id"] or is_admin
+        return True
     items = [n for n in items if _visible(n)]
+    for n in items:
+        pub_at = n.get("publish_at")
+        n["is_scheduled"] = bool(pub_at and pub_at > now_iso)
     if q:
         needle = q.lower()
         items = [n for n in items if needle in (n.get("title", "") + n.get("subject", "") + n.get("category", "")).lower()]
@@ -4920,7 +5276,9 @@ async def create_newsletter(payload: NewsletterCreate):
     if n.get("published") and not n.get("published_at"):
         n["published_at"] = _now()
     await db.newsletters.insert_one(n.copy())
-    if n.get("published") and not n.get("archived"):
+    now_iso = _now()
+    is_future = bool(n.get("publish_at") and n["publish_at"] > now_iso)
+    if n.get("published") and not n.get("archived") and not is_future:
         await _broadcast_notification(
             type="news",
             title=f"Nouvelle newsletter · {n['title']}",
@@ -4939,11 +5297,13 @@ async def update_newsletter(nid: str, payload: NewsletterCreate):
     if not old:
         raise HTTPException(404, "Newsletter introuvable")
     upd = payload.model_dump()
+    now_iso = _now()
+    is_future = bool(upd.get("publish_at") and upd["publish_at"] > now_iso)
     if upd.get("published") and not old.get("published"):
         upd["published_at"] = _now()
     await db.newsletters.update_one({"id": nid}, {"$set": upd})
     n = await db.newsletters.find_one({"id": nid}, {"_id": 0})
-    if upd.get("published") and not old.get("published"):
+    if upd.get("published") and not old.get("published") and not is_future:
         await _broadcast_notification(
             type="news",
             title=f"Nouvelle newsletter · {n['title']}",

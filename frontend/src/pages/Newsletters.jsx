@@ -568,7 +568,14 @@ export function NewsletterEditor() {
   useEffect(() => {
     if (!isNew) {
       api.get(`/newsletters/${id}`).then((r) => {
-        setF({ ...r.data, blocks: r.data.blocks || [] });
+        const nl = r.data;
+        // Convert publish_at ISO → datetime-local (YYYY-MM-DDTHH:MM in local time)
+        if (nl.publish_at) {
+          const d = new Date(nl.publish_at);
+          const pad = (n) => String(n).padStart(2, "0");
+          nl.publish_at = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+        }
+        setF({ ...nl, blocks: nl.blocks || [] });
         setLoading(false);
       });
     }
@@ -683,15 +690,23 @@ export function NewsletterEditor() {
 
   const save = async (publish = false) => {
     if (!f.title.trim()) { toast.error("Le titre est requis"); return; }
-    const payload = { ...f, published: publish || f.published };
+    // If a future publish_at is set AND we're publishing, keep publish_at.
+    // If publishing immediately (no schedule), clear publish_at.
+    const now = new Date();
+    const scheduled = publish && f.publish_at && new Date(f.publish_at) > now;
+    const payload = {
+      ...f,
+      published: publish || f.published,
+      publish_at: scheduled ? new Date(f.publish_at).toISOString() : null,
+    };
     try {
       if (isNew) {
         const { data } = await api.post("/admin/newsletters", payload);
-        toast.success(publish ? "Newsletter publiée" : "Brouillon enregistré");
+        toast.success(scheduled ? "Newsletter programmée" : (publish ? "Newsletter publiée" : "Brouillon enregistré"));
         navigate(`/newsletters/${data.id}/edit`, { replace: true });
       } else {
         await api.put(`/admin/newsletters/${id}`, payload);
-        toast.success(publish ? "Newsletter publiée" : "Enregistré");
+        toast.success(scheduled ? "Newsletter programmée" : (publish ? "Newsletter publiée" : "Enregistré"));
         if (publish) navigate("/newsletters");
       }
     } catch (err) {
@@ -707,12 +722,41 @@ export function NewsletterEditor() {
       <div className="ms-card p-3 flex items-center justify-between gap-3 flex-wrap sticky top-0 z-20">
         <Link to="/newsletters" className="ms-btn-outline text-xs"><ArrowLeft className="h-3 w-3" /> Retour</Link>
         <div className="flex-1 text-center text-sm font-semibold text-[#071B34] truncate">
-          {f.title || "Nouvelle newsletter"} {!f.published && <span className="ms-chip !text-[10px] bg-[#F59E0B]/15 text-[#B45309]">Brouillon</span>}
+          {f.title || "Nouvelle newsletter"}
+          {!f.published && <span className="ml-2 ms-chip !text-[10px] bg-[#F59E0B]/15 text-[#B45309]">Brouillon</span>}
+          {f.publish_at && new Date(f.publish_at) > new Date() && (
+            <span className="ml-2 ms-chip !text-[10px] bg-[#F59E0B]/15 text-[#B45309]">
+              <Clock className="h-3 w-3" /> Programmée
+            </span>
+          )}
         </div>
-        <div className="flex gap-2 flex-wrap">
+        <div className="flex gap-2 flex-wrap items-center">
+          <div className="flex items-center gap-1.5 rounded-xl bg-[#F4F7FA] px-2 py-1.5">
+            <Clock className="h-3.5 w-3.5 text-[#475569]" />
+            <input
+              type="datetime-local"
+              value={f.publish_at || ""}
+              onChange={(e) => setF((s) => ({ ...s, publish_at: e.target.value }))}
+              data-testid="nl-publish-at"
+              className="bg-transparent text-xs outline-none text-[#071B34]"
+              title="Date & heure de publication programmée (vide = immédiat)"
+            />
+            {f.publish_at && (
+              <button
+                type="button"
+                onClick={() => setF((s) => ({ ...s, publish_at: "" }))}
+                className="text-[10px] font-semibold text-[#475569] hover:text-[#EF4444]"
+              >
+                ✕
+              </button>
+            )}
+          </div>
           <button onClick={() => setPreviewMode((v) => !v)} data-testid="nl-preview-toggle" className="ms-btn-outline"><Eye className="h-4 w-4" /> {previewMode ? "Éditer" : "Aperçu"}</button>
           <button onClick={() => save(false)} data-testid="nl-save-draft" className="ms-btn-outline"><Save className="h-4 w-4" /> Brouillon</button>
-          <button onClick={() => save(true)} data-testid="nl-publish" className="ms-btn-primary"><Send className="h-4 w-4" /> Publier</button>
+          <button onClick={() => save(true)} data-testid="nl-publish" className="ms-btn-primary">
+            <Send className="h-4 w-4" />
+            {f.publish_at && new Date(f.publish_at) > new Date() ? "Programmer" : "Publier"}
+          </button>
         </div>
       </div>
 

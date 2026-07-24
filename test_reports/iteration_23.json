@@ -1,0 +1,34 @@
+{
+  "summary": "Iteration 23 — full verification of (1) Scheduled publishing for Actualités posts & Newsletters and (2) new Fiches de paie management (CRUD + preview + send + document integration). Backend: 10/10 pytest cases pass, including scheduled-post visibility gating, scheduler lazy-dispatch on GET /posts, scheduled newsletter gating, payslip preview auto ~22% deductions (1000€ gross → 220€ retenues → 780€ net), auto base line for Idriss (24h × 4.33 × 12.85€ = 1335.37€), full create → list → stats → send lifecycle producing a Document with payslip_id on Idriss's /documents, duplicate-send guard, non-admin 403 on /admin/payslips, delete cascading removal of linked Document. Frontend: (a) Marcus admin /actualites — composer opened, tool-schedule toggle revealed composer-publish-at, setting a future datetime switched publish button label to 'Programmer', clicking it produced toast 'Publication programmée !', and the post appeared in Marcus's feed with a 'PROGRAMMÉE · <date>' pill. Idriss reloaded /actualites → the scheduled post is NOT visible (correct). (b) /management/fiches-de-paie renders KPI cards (Fiches générées / Employés / Envoyées / En attente), filters, empty table, right rail. new-payslip modal shows all tabs (payslip-tab-auto/overtime/premium/indemnity/deduction), employee select populates, live preview updates in real time with the auto base line (1335,37 € brut) and cotisations breakdown (Sécurité 200,31 · Retraite 53,41 · Prévoyance 26,71 · Autres 13,35 → -293,78 €) yielding NET À PAYER 1041,59 €. Clicking payslip-save-send yields toast 'Fiche générée et envoyée à l'employé' and the row appears with statut 'Envoyée'. (c) As Idriss, /documents shows a new 'Fiche de paie — Juillet 2026' PAIE card. (d) Deleting the row from admin removes it from list (0 rows) and removes the corresponding document from Idriss's /documents (backend test also confirms). (e) With adminMode OFF, /management/fiches-de-paie shows the 'Mode administrateur désactivé' card. SubNav shows the renamed 'Fiches de paie' tab. All flows behave as specified.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_scheduling_and_payslips.py",
+    "/app/test_reports/pytest/iter23_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py list_posts / list_newsletters correctly gate scheduled items on `publish_at > now` for non-authors/non-admins and expose is_scheduled=true for authors/admins — matches spec.",
+    "_dispatch_scheduled_posts / _dispatch_scheduled_newsletters are idempotent via `scheduled_broadcast_sent` flag; both are triggered lazily on GET, so notifications fire within seconds of publish_at being reached (verified by test test_scheduler_publishes_when_publish_at_passes with a 3s scheduled post).",
+    "PayslipPayload/_compute_payslip_totals correctly compute gross → deductions (auto 15+4+2+1 = 22%) → net; explicit deductions override the auto list.",
+    "admin_send_payslip inserts a Document with `payslip_id` and `is_payslip=true` — deleting the payslip removes the linked Document (delete_many by payslip_id). Verified by test.",
+    "Duplicate guard blocks two sent payslips for the same (employee, year, month) with HTTP 400.",
+    "server.py file is ~6.3k lines; splitting into feature routers (posts, newsletters, payslips) would improve maintainability but is out of scope."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_scheduling_and_payslips.py",
+    "/app/test_reports/pytest/iter23_results.xml",
+    "/app/test_reports/iteration_23.json"
+  ],
+  "success_rate": {"backend": "100% (10/10 pytest)", "frontend": "100% (10/10 UI flows verified)"},
+  "test_credentials": "Admin X-Employee-Id: emp-marcus-simeo (adminMode=true). Employee X-Employee-Id: emp-idriss-malonga.",
+  "seed_data_creation": "Backend tests create + delete transient posts/newsletters/payslips (prefixed TEST_SCHED / TEST_PS / TEST_UI). All cleanup performed. UI test also created and deleted a Juillet 2026 payslip for Idriss.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Payslip auto base for Idriss (24h contract, hourly=12.85 default for non-encadrement / non-restauration) = 24 * 4.33 * 12.85 = 1335.37 €. Preview endpoint auto-fills the base line when payload.lines is empty. `payslip-employee` is a native SELECT — use select_option with value='emp-idriss-malonga'. Scheduler is lazy (on GET), no cron. Composer schedule uses testid composer-publish-at (datetime-local). Newsletter editor uses nl-publish-at. Once publish_at is set the composer's publish button label becomes 'Programmer' (see button:has-text('Programmer')).",
+  "rca_of_the_issue": "N/A — feature verification passed, no bugs uncovered."
+}

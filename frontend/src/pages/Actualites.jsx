@@ -4,7 +4,7 @@ import { Link } from "react-router-dom";
 import {
   Heart, MessageCircle, Send, Filter, Eye, EyeOff,
   Image as ImageIcon, Paperclip, Link2, Smile, Sparkles, Trash2, X, Pencil,
-  FileText, User as UserIcon, Building2, ChevronDown,
+  FileText, User as UserIcon, Building2, ChevronDown, Clock,
 } from "lucide-react";
 import { toast } from "sonner";
 import { api, formatDateFr, absoluteUrl } from "@/lib/api";
@@ -179,6 +179,8 @@ function AdminComposer({ me, onPublished }) {
   const [showAttachments, setShowAttachments] = useState(false);
   const [showEmojis, setShowEmojis] = useState(false);
   const [showLinkInput, setShowLinkInput] = useState(false);
+  const [showSchedule, setShowSchedule] = useState(false);
+  const [publishAt, setPublishAt] = useState(""); // datetime-local value
   const textareaRef = useRef(null);
 
   const publish = async () => {
@@ -194,6 +196,8 @@ function AdminComposer({ me, onPublished }) {
     }
     setPublishing(true);
     try {
+      // Convert local datetime input to ISO. Empty string = publish now.
+      const publishIso = publishAt ? new Date(publishAt).toISOString() : null;
       await api.post("/posts", {
         title: title.trim(),
         content, // HTML from the rich-text editor
@@ -202,17 +206,22 @@ function AdminComposer({ me, onPublished }) {
         attachments,
         links,
         posted_as: postedAs,
+        publish_at: publishIso,
       });
-      toast.success("Publication mise en ligne !");
+      toast.success(publishIso && new Date(publishIso) > new Date()
+        ? "Publication programmée !"
+        : "Publication mise en ligne !");
       setTitle("");
       setContent("");
       setImages([]);
       setAttachments([]);
       setLinks([]);
+      setPublishAt("");
       setShowGallery(false);
       setShowAttachments(false);
       setShowLinkInput(false);
       setShowEmojis(false);
+      setShowSchedule(false);
       setOpen(false);
       onPublished();
       notifyLiveRefresh(["posts", "news"]);
@@ -549,6 +558,36 @@ function AdminComposer({ me, onPublished }) {
         </div>
       )}
 
+      {/* Schedule input */}
+      {showSchedule && (
+        <div className="rounded-xl bg-[#F8FAFC] p-3">
+          <div className="text-[10px] uppercase tracking-wider text-[#475569] font-semibold mb-2">
+            Programmer la publication
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              type="datetime-local"
+              value={publishAt}
+              onChange={(e) => setPublishAt(e.target.value)}
+              data-testid="composer-publish-at"
+              className="ms-input text-sm flex-1 min-w-[220px]"
+            />
+            {publishAt && (
+              <button
+                type="button"
+                onClick={() => setPublishAt("")}
+                className="text-xs font-semibold text-[#475569] hover:text-[#EF4444]"
+              >
+                Effacer
+              </button>
+            )}
+          </div>
+          <p className="text-[11px] text-[#475569] mt-1.5">
+            Laissez vide pour publier immédiatement. Sinon, la publication apparaîtra automatiquement à la date & heure exactes.
+          </p>
+        </div>
+      )}
+
       {/* Actions bar */}
       <div className="flex items-center justify-between gap-2 border-t border-[#071B34]/5 pt-3">
         <div className="flex items-center gap-1">
@@ -568,6 +607,10 @@ function AdminComposer({ me, onPublished }) {
             <Link2 className="h-4 w-4" />
             <span className="hidden sm:inline">Lien</span>
           </ToolBtn>
+          <ToolBtn active={showSchedule || !!publishAt} onClick={() => setShowSchedule((s) => !s)} testid="tool-schedule">
+            <Clock className="h-4 w-4" />
+            <span className="hidden sm:inline">{publishAt ? "Programmée" : "Programmer"}</span>
+          </ToolBtn>
         </div>
         <button
           onClick={publish}
@@ -576,7 +619,11 @@ function AdminComposer({ me, onPublished }) {
           className="ms-btn-primary disabled:opacity-40"
         >
           <Send className="h-4 w-4" />
-          {publishing ? "Publication…" : "Publier"}
+          {publishing
+            ? "Publication…"
+            : publishAt && new Date(publishAt) > new Date()
+            ? "Programmer"
+            : "Publier"}
         </button>
       </div>
     </div>
@@ -672,6 +719,11 @@ function PostCard({ post, me, onLike, findEmployee, refresh, setEditingPost, set
             <div className="text-xs text-[#475569]">
               {author.role} · {formatDateFr(post.created_at.slice(0, 10))}
               {post.edited_at && <span className="italic"> · modifiée</span>}
+              {post.is_scheduled && post.publish_at && (
+                <span className="ml-2 inline-flex items-center gap-1 text-[10px] uppercase tracking-widest bg-[#F59E0B]/15 text-[#B45309] px-2 py-0.5 rounded-full font-bold">
+                  <Clock className="h-3 w-3" /> Programmée · {new Date(post.publish_at).toLocaleString("fr-FR", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
+                </span>
+              )}
             </div>
           </div>
           {(post.author_id === me?.id || (me?.is_admin && canModerate)) && (

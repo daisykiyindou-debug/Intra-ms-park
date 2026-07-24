@@ -36,6 +36,7 @@ import OvertimeManager from "@/pages/OvertimeManager";
 import { FormationsManager } from "@/pages/Formations";
 import SupportITList from "@/pages/Support";
 import RestaurationManager from "@/pages/RestaurationManager";
+import PayslipsManager from "@/pages/PayslipsManager";
 import ImageUpload from "@/components/ImageUpload";
 
 const subNav = [
@@ -50,7 +51,7 @@ const subNav = [
   { to: "/management/agenda", label: "Agenda", icon: CalendarDays },
   { to: "/management/formulaires", label: "Formulaires", icon: FileText },
   { to: "/management/utilisateurs", label: "Utilisateurs", icon: UsersIcon },
-  { to: "/management/documents", label: "Fichiers RH", icon: FileText },
+  { to: "/management/fiches-de-paie", label: "Fiches de paie", icon: FileText },
   { to: "/management/documents-editor", label: "Rédiger documents", icon: FileText },
 ];
 
@@ -148,6 +149,7 @@ export default function ManagementShell() {
         {isAdmin && <Route path="heures-supp" element={<OvertimeManager />} />}
         {isAdmin && <Route path="formations" element={<FormationsManager />} />}
         {isAdmin && <Route path="restauration" element={<RestaurationManager />} />}
+        {isAdmin && <Route path="fiches-de-paie" element={<PayslipsManager />} />}
         {isAdmin && <Route path="support" element={<SupportITList />} />}
         {isAdmin && <Route path="documents-editor" element={<HRDocsManager />} />}
         {isAdmin && <Route path="documents-editor/:id" element={<HRDocEditor />} />}
