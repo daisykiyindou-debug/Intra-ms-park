@@ -65,22 +65,23 @@ const BLOCK_CATEGORIES = ["Texte", "Média", "Action", "Layout", "Structure"];
 // LIST PAGE
 // ═══════════════════════════════════════════════════════════════════
 export default function NewslettersList() {
-  const { me } = useApp();
+  const { me, adminMode } = useApp();
   const [items, setItems] = useState([]);
   const [q, setQ] = useState("");
   const [category, setCategory] = useState("all");
   const [tab, setTab] = useState("published");
   const navigate = useNavigate();
-  const isEditor = me?.is_admin || me?.can_manage_communication;
+  const isEditor = (me?.is_admin || me?.can_manage_communication) && adminMode !== false;
 
   const load = async () => {
     const params = new URLSearchParams({ archived: tab === "archived" });
     if (category !== "all") params.set("category", category);
     if (q) params.set("q", q);
     const { data } = await api.get(`/newsletters?${params}`);
-    setItems(data);
+    // Hide drafts when not in admin/editor mode (even if backend returned them for own author)
+    setItems(isEditor ? data : data.filter((n) => n.published));
   };
-  useEffect(() => { load(); }, [tab, category, q]); // eslint-disable-line
+  useEffect(() => { load(); }, [tab, category, q, isEditor]); // eslint-disable-line
 
   return (
     <div className="space-y-5 ms-fade-up">
@@ -554,7 +555,15 @@ function hexAlpha(hex, a) {
 export function NewsletterEditor() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const { me, adminMode } = useApp();
   const isNew = !id || id === "new";
+  const canEdit = (me?.is_admin || me?.can_manage_communication) && adminMode !== false;
+
+  useEffect(() => {
+    // Guard: if user disabled admin mode, kick back to list
+    if (me && !canEdit) navigate("/newsletters", { replace: true });
+  }, [me, canEdit, navigate]);
+
   const [f, setF] = useState({
     title: "", subject: "", preheader: "", cover_image: "", category: "Général",
     reading_time: 3, body_html: "", blocks: [], attachments: [], archived: false, published: false,

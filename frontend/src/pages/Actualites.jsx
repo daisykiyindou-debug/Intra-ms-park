@@ -67,7 +67,8 @@ const OFFICIAL_AVATAR =
   "https://customer-assets-jt897jd0.emergentagent.net/job_mspark-employee-hub/artifacts/7vgenyd4_MS%20PARK%20LOGO%20FOND%20BLEU.png";
 
 export default function Actualites() {
-  const { me, findEmployee } = useApp();
+  const { me, findEmployee, adminMode } = useApp();
+  const canPublishAsMSPark = (me?.is_admin || me?.can_manage_communication) && adminMode !== false;
   const [posts, setPosts] = useState([]);
   const [filter, setFilter] = useState("all");
   const [editingPost, setEditingPost] = useState(null);
@@ -101,7 +102,7 @@ export default function Actualites() {
         </p>
       </div>
 
-      {(me?.is_admin || me?.can_manage_communication) && <AdminComposer me={me} onPublished={refresh} />}
+      {canPublishAsMSPark && <AdminComposer me={me} onPublished={refresh} />}
 
       <div className="ms-card p-3 flex flex-wrap items-center gap-1.5">
         <Filter className="h-4 w-4 text-[#475569] mx-1" />
@@ -137,6 +138,7 @@ export default function Actualites() {
             refresh={refresh}
             setEditingPost={setEditingPost}
             setLightbox={setLightbox}
+            canModerate={canPublishAsMSPark}
           />
         ))}
       </div>
@@ -599,7 +601,7 @@ function ToolBtn({ active, onClick, testid, children }) {
 
 // ────────────────────── Post card
 
-function PostCard({ post, me, onLike, findEmployee, refresh, setEditingPost, setLightbox }) {
+function PostCard({ post, me, onLike, findEmployee, refresh, setEditingPost, setLightbox, canModerate = true }) {
   const authorFromDb = findEmployee(post.author_id);
   const isOfficial = post.posted_as === "official";
   const author = isOfficial
@@ -672,7 +674,7 @@ function PostCard({ post, me, onLike, findEmployee, refresh, setEditingPost, set
               {post.edited_at && <span className="italic"> · modifiée</span>}
             </div>
           </div>
-          {(post.author_id === me?.id || me?.is_admin) && (
+          {(post.author_id === me?.id || (me?.is_admin && canModerate)) && (
             <button
               onClick={() => setEditingPost(post)}
               data-testid={`edit-post-${post.id}`}
@@ -682,7 +684,7 @@ function PostCard({ post, me, onLike, findEmployee, refresh, setEditingPost, set
               <Pencil className="h-4 w-4" />
             </button>
           )}
-          {(post.author_id === me?.id || me?.is_admin || me?.can_manage_communication) && (
+          {(post.author_id === me?.id || ((me?.is_admin || me?.can_manage_communication) && canModerate)) && (
             <button
               onClick={async () => {
                 if (!window.confirm("Supprimer cette publication ?")) return;
