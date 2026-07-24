@@ -330,3 +330,61 @@ Dépendance ajoutée : `canvas-confetti` (yarn add).
 - Sidebar admin + subNav Management enrichis avec l'entrée "Boîte à idées" (icône `Lightbulb`).
 
 
+
+
+### 2026-07-24 — Messagerie enrichie (fichiers, emojis, gestion des membres) (iter 29)
+- **Backend fix** : `create_group` sauvegardait sous `member_ids` alors que le reste du code lit `members_ids` — les groupes n'affichaient donc jamais leurs membres. Corrigé + création idempotente (auteur toujours inclus, dédupliqué).
+- **Nouveaux endpoints** : `POST /api/channels/{cid}/members`, `DELETE /api/channels/{cid}/members/{eid}`, `PATCH /api/channels/{cid}` (rename / avatar_url).
+- **MessageCreate** accepte désormais `attachments: List[dict]`, persistés sur le message ; ajoute une garde "message vide" (ni texte ni pièce jointe → 400).
+- **Frontend `/app/frontend/src/pages/Messagerie.jsx`** :
+  - Sélecteur d'emojis léger : 20 émojis populaires, popup accroché à l'input, insertion à la position du curseur (`msg-emoji-btn` / `msg-emoji-panel`).
+  - Pièces jointes : bouton trombone → upload via `/api/uploads` → chips de prévisualisation au-dessus du composer, envoi conjoint avec le texte. Images rendues inline dans la bulle du message ; autres fichiers en lien de téléchargement.
+  - Panneau "Infos" enrichi : bouton caméra sur l'avatar du groupe (upload d'image → PATCH `avatar_url`), liste des membres avec role, action "Retirer" au survol pour un groupe, modale "Ajouter des membres" filtrant ceux déjà présents.
+  - Les DM continuent d'utiliser l'avatar de l'autre personne, les groupes/équipes utilisent désormais `channel.avatar_url` lorsque défini (sidebar + header + panneau info).
+
+### 2026-07-24 — Anniversaires : souhaits en 1 clic vers la messagerie (iter 29)
+- **Backend** : nouvelle collection `birthday_wishes {from_id,to_id,year,channel_id,message}` + endpoint `POST /api/birthdays/wish` (idempotent par `(from_id,to_id,year)`).
+  - Crée automatiquement le DM entre les deux personnes s'il n'existe pas.
+  - Poste le message côté recipient et pousse une notification "🎂 X vous souhaite un joyeux anniversaire".
+  - `GET /api/birthdays` renvoie `already_wished` par ligne pour l'utilisateur courant.
+- **Frontend `/app/frontend/src/pages/Birthdays.jsx`** :
+  - Bouton "Souhaiter" ouvre un `PortalModal` violet festif avec message pré-rempli ("🎂 Joyeux anniversaire {prénom} ! …"), éditable, envoyé via `/birthdays/wish`.
+  - États du bouton :
+    - `Souhaiter` (actif) uniquement si `days_until === 0` ET pas encore souhaité ET pas soi-même,
+    - `Souhaité` (vert, disabled) si déjà souhaité cette année,
+    - grisé pour anniversaires à venir OU passés OU pour soi-même.
+  - Message livré dans la messagerie de la personne concernée, référencé dans son fil `dm-{a}--{b}`.
+
+### 2026-07-24 — Documents : upload de PDF (admin) (iter 29)
+- **Frontend `/app/frontend/src/pages/Documents.jsx`** :
+  - CTA "Uploader un PDF" visible uniquement quand `me.is_admin && adminMode !== false`.
+  - Modale d'upload (`data-testid=doc-upload-modal`) : drop-zone `<input type="file" accept=".pdf">`, nom, catégorie, destinataire (Tous / un employé), description optionnelle.
+  - Enchaînement : `POST /api/uploads` (fichier) → `POST /api/admin/documents` (métadonnées + URL). Recharge la liste à la publication.
+
+### 2026-07-24 — Galerie : lightbox avec navigation gauche/droite (iter 29)
+- **Frontend `/app/frontend/src/pages/Galerie.jsx`** : lightbox refactoré autour d'un index (`{index}`) sur `filtered`.
+  - Flèches gauche/droite + touches clavier (`ArrowLeft`, `ArrowRight`, `Escape`).
+  - Compteur "X / Y" en haut de l'overlay, boucle sur la liste, sous-titre affiché sous l'image.
+  - `data-testid` : `lightbox-close`, `lightbox-prev`, `lightbox-next`.
+
+### 2026-07-24 — Actualités : Marcus publie en son nom en vue utilisateur (iter 29)
+- **Frontend `/app/frontend/src/pages/Actualites.jsx`** : le composeur est désormais rendu pour tout admin/comm (`isPoster`), pas seulement quand le mode Admin est activé.
+  - Prop `canUseOfficial` transmise à `AdminComposer` : si `false`, force `postedAs = "personal"`, masque la bascule "Mon compte / MS Park", affiche un bandeau bleu "Publication à votre nom personnel. Activez le mode Admin pour publier au nom de MS Park." et remplace le chip "Admin" par "Personnel".
+  - Impact secondaire : Marcus peut modifier/supprimer ses propres publications en vue utilisateur (route conditionnée par `author_id === me.id`).
+
+### 2026-07-24 — CSE & Avantages : gestion admin + e-commerce (iter 29)
+- **Backend** :
+  - `PartnerPayload` élargi : `partner`, `type` (`code|discount|product`), `original_price`, `discount_price`, `discount_pct` (auto-calculé si absent), `promo_code`, `conditions`, `valid_until`, `image`.
+  - CRUD admin : `POST/PUT/DELETE /api/admin/partners`.
+  - Mini e-commerce dédié : `POST /api/cse/orders`, `GET /api/cse/orders` (collection `cse_orders`) — récapitulatif sous-total / réduction totale / total, référence auto `MSC-XXXXXXXX`, notification de confirmation.
+- **Frontend admin `/app/frontend/src/pages/PartnersManager.jsx`** (route `/management/avantages`) :
+  - Grille des avantages avec badges type (Produit / Réduction / Code promo), filtres catégorie/recherche.
+  - Éditeur modal complet (image upload, titre, description, catégorie, type, prix, remise auto, code, conditions, validité).
+- **Frontend user `/app/frontend/src/pages/Avantages.jsx`** :
+  - Filtres par type + catégorie + recherche, cards adaptées au type (produit → prix + "Ajouter" ; codes/réductions → "Copier").
+  - Fiche détail (image, prix, conditions, code copiable, CTA panier).
+  - Drawer panier persisté en localStorage (`ms_cse_cart_v1`) : +/- quantité, suppression, sous-total, réductions appliquées, total.
+- **Frontend commande `/app/frontend/src/pages/AvantagesShop.jsx`** :
+  - `/avantages/checkout` : adresse optionnelle, choix carte/prélèvement, simulation → écran de confirmation avec référence.
+  - `/avantages/commandes` : historique par référence, statut, articles, réductions, paiement, adresse.
+

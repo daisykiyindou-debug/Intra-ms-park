@@ -3720,10 +3720,155 @@ async def read_all_notifs():
     return {"ok": True}
 
 
-# ─── Partners (Avantages)
+# ─── Partners (Avantages / CSE)
 @api.get("/partners")
 async def list_partners():
-    return await db.partners.find({}, {"_id": 0}).to_list(100)
+    items = await db.partners.find({}, {"_id": 0}).sort("created_at", -1).to_list(200)
+    return items
+
+
+class PartnerPayload(BaseModel):
+    name: str
+    partner: Optional[str] = ""
+    description: Optional[str] = ""
+    image: Optional[str] = ""
+    category: Optional[str] = "Loisirs"
+    type: Optional[str] = "code"  # code | discount | product
+    original_price: Optional[float] = None
+    discount_price: Optional[float] = None
+    discount_pct: Optional[int] = None
+    discount: Optional[str] = ""  # display label (e.g. "-30%")
+    promo_code: Optional[str] = ""
+    qr_code: Optional[str] = ""  # legacy field used by user-facing card
+    conditions: Optional[str] = ""
+    valid_until: Optional[str] = ""
+
+
+def _compute_partner_display(p: dict) -> dict:
+    """Fill display fields (discount label, pct) from prices when possible."""
+    ptype = p.get("type") or "code"
+    orig = p.get("original_price")
+    disc = p.get("discount_price")
+    pct = p.get("discount_pct")
+    if pct is None and orig and disc is not None and orig > 0:
+        pct = max(0, round((float(orig) - float(disc)) / float(orig) * 100))
+    p["discount_pct"] = pct
+    if not p.get("discount"):
+        if ptype == "product" and disc is not None:
+            p["discount"] = f"{float(disc):.2f} €".replace(".", ",")
+        elif pct:
+            p["discount"] = f"-{pct}%"
+        elif p.get("promo_code"):
+            p["discount"] = "PROMO"
+    # Keep legacy `qr_code` field mirroring promo_code so old UI still shows something
+    if p.get("promo_code") and not p.get("qr_code"):
+        p["qr_code"] = p["promo_code"]
+    return p
+
+
+@api.post("/admin/partners")
+async def admin_create_partner(payload: PartnerPayload):
+    await require_admin()
+    p = payload.model_dump()
+    p["id"] = _id()
+    p["created_at"] = _now()
+    _compute_partner_display(p)
+    await db.partners.insert_one(p.copy())
+    return p
+
+
+@api.put("/admin/partners/{pid}")
+async def admin_update_partner(pid: str, payload: PartnerPayload):
+    await require_admin()
+    existing = await db.partners.find_one({"id": pid}, {"_id": 0})
+    if not existing:
+        raise HTTPException(404, "Avantage introuvable")
+    updated = {**existing, **payload.model_dump(exclude_unset=True)}
+    _compute_partner_display(updated)
+    await db.partners.update_one({"id": pid}, {"$set": updated})
+    return updated
+
+
+@api.delete("/admin/partners/{pid}")
+async def admin_delete_partner(pid: str):
+    await require_admin()
+    res = await db.partners.delete_one({"id": pid})
+    if res.deleted_count == 0:
+        raise HTTPException(404, "Avantage introuvable")
+    return {"ok": True, "id": pid}
+
+
+# ─── Orders (mini e-commerce for CSE products/tickets)
+class OrderItem(BaseModel):
+    partner_id: str
+    name: str
+    image: Optional[str] = ""
+    unit_price: float
+    unit_original: Optional[float] = None
+    qty: int = 1
+
+
+class OrderPayload(BaseModel):
+    items: List[OrderItem]
+    address: Optional[str] = ""
+    payment_method: Optional[str] = "carte"
+
+
+@api.get("/cse/orders")
+async def list_cse_orders():
+    """Return current user's CSE product orders, most recent first."""
+    items = await db.cse_orders.find(
+        {"user_id": current_user()}, {"_id": 0}
+    ).sort("created_at", -1).to_list(100)
+    return items
+
+
+@api.post("/cse/orders")
+async def create_cse_order(payload: OrderPayload):
+    if not payload.items:
+        raise HTTPException(400, "Panier vide")
+    subtotal = 0.0
+    discount = 0.0
+    lines = []
+    for it in payload.items:
+        qty = max(1, int(it.qty))
+        line_total = round(it.unit_price * qty, 2)
+        subtotal += line_total
+        if it.unit_original and it.unit_original > it.unit_price:
+            discount += round((it.unit_original - it.unit_price) * qty, 2)
+        lines.append({
+            "partner_id": it.partner_id,
+            "name": it.name,
+            "image": it.image or "",
+            "unit_price": float(it.unit_price),
+            "unit_original": float(it.unit_original) if it.unit_original else None,
+            "qty": qty,
+            "line_total": line_total,
+        })
+    order = {
+        "id": _id(),
+        "user_id": current_user(),
+        "items": lines,
+        "subtotal": round(subtotal, 2),
+        "discount_total": round(discount, 2),
+        "total": round(subtotal, 2),
+        "status": "confirmed",
+        "address": payload.address or "",
+        "payment_method": payload.payment_method or "carte",
+        "created_at": _now(),
+        "reference": f"MSC-{_id()[:8].upper()}",
+    }
+    await db.cse_orders.insert_one(order.copy())
+    # Notify the user
+    await _push_notification(
+        employee_id=current_user(),
+        type="order",
+        title=f"Commande {order['reference']} confirmée",
+        content=f"Merci ! Votre commande de {order['total']:.2f} € est validée.",
+        icon="gift",
+        link="/avantages/commandes",
+    )
+    return order
 
 
 # ─── Channels & messages

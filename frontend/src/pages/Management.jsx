@@ -38,6 +38,7 @@ import SupportITList from "@/pages/Support";
 import RestaurationManager from "@/pages/RestaurationManager";
 import PayslipsManager from "@/pages/PayslipsManager";
 import IdeasAdmin from "@/pages/IdeasAdmin";
+import PartnersManager from "@/pages/PartnersManager";
 import ImageUpload from "@/components/ImageUpload";
 
 const subNav = [
@@ -55,6 +56,7 @@ const subNav = [
   { to: "/management/fiches-de-paie", label: "Fiches de paie", icon: FileText },
   { to: "/management/documents-editor", label: "Rédiger documents", icon: FileText },
   { to: "/management/idees", label: "Boîte à idées", icon: Lightbulb },
+  { to: "/management/avantages", label: "CSE & Avantages", icon: Gift },
 ];
 
 const isoDate = (d) =>
@@ -153,6 +155,7 @@ export default function ManagementShell() {
         {isAdmin && <Route path="restauration" element={<RestaurationManager />} />}
         {isAdmin && <Route path="fiches-de-paie" element={<PayslipsManager />} />}
         {isAdmin && <Route path="idees" element={<IdeasAdmin />} />}
+        {isAdmin && <Route path="avantages" element={<PartnersManager />} />}
         {isAdmin && <Route path="support" element={<SupportITList />} />}
         {isAdmin && <Route path="documents-editor" element={<HRDocsManager />} />}
         {isAdmin && <Route path="documents-editor/:id" element={<HRDocEditor />} />}
