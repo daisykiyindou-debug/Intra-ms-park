@@ -168,6 +168,21 @@ Intranet premium pour employés du parc MS Park + espace administrateur pour le 
 
 ## Changelog
 
+### 2026-02-24 — Éditeur Newsletter Canva-like (iter 11)
+- **Éditeur drag & drop enrichi** (`/newsletters/new` + `/:id/edit`) inspiré Canva/Mailchimp/Framer :
+  - **Palette latérale groupée** en 5 catégories (Texte / Média / Action / Layout / Structure) avec icônes 2x2 grid, blocs **draggables** vers le canvas (native HTML5 dragstart).
+  - **Drop zones actives** : chaque bloc + zone "Glissez ici pour ajouter à la fin" en bas + zone empty state avec émoji 📥.
+  - **Ring visuel** bleu sur le bloc survolé pendant le drag.
+- **14 types de blocs** (contre 7 avant) :
+  - Texte : Titre (H1/H2/H3, alignement, couleur), Texte (taille sm/base/lg, couleur, align)
+  - Média : Image (**5 formes** carré/arrondi/rounded-xl/very-rounded/**cercle** + width slider 20-100%), **Galerie** (2/3/4 colonnes + formes), **Vidéo** (auto-embed YouTube/Vimeo), **GIF** (URL Giphy + shape + width), **Icône** (15 icônes lucide + taille + couleur + label), **Emoji** (28 emojis picker)
+  - Action : Bouton (**3 tailles** sm/md/lg × **3 formes** rounded/pill/square + align + couleurs), **CTA double** (2 boutons côte-à-côte avec fond du bloc personnalisé)
+  - Layout : **2 colonnes** avec 3 layouts (image-texte / texte-image / **2 images**) + bouton optionnel + fond de bloc, **3 colonnes** cards (image + titre + texte + CTA par colonne), **Carte** (image left/right/top + overline + titre + texte + bouton + fond), **Statistiques** (grid 4 valeurs/labels), **Hero** (titre + sous-titre + CTA button + hauteur small/medium/large + arrière-plan couleur ou image avec overlay)
+  - Structure : **Séparateur** (solid/dashed/dotted + couleur), **Espace** (slider hauteur 4-200px)
+- **RenderBlock étendu** avec `_shapeClass()` (SHAPES map), `_ytEmbed()` (extraction YouTube/Vimeo ID), overlay hero avec `hexAlpha()`.
+- **BlockInspector complet** avec pickers dédiés : `ShapePicker` (5 formes), `IconPicker` (grid 5-col scroll), `EmojiPicker` (grid 7-col scroll), toujours `AlignPicker` + `ColorPicker` (12 swatches + input color natif).
+- Compatibilité totale préservée avec les newsletters existantes (les anciens blocs continuent d'être rendus normalement).
+
 ### 2026-02-24 — Super Admin + Menu restructure + Formation + Support IT + Aide (iter 10)
 - **Compte SUPER ADMIN** (`superadmin@mspark.fr` / `MSPark@Super2026!`) : flags `is_admin=true, is_super_admin=true, can_manage_communication=true`. Sidebar restreinte à Dashboard + Profil + bloc Management (aucune section employé). Employé id `emp-super-admin`, `role_category=admin`, `contract_hours_weekly=0` (non employé). Seed idempotent au démarrage.
 - **Menu employé restructuré** en 6 sections :
