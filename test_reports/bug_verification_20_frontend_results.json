@@ -1,0 +1,27 @@
+{
+  "passed": true,
+  "tested_at": "2026-07-24",
+  "base_url": "http://localhost:3000",
+  "admin_login": "passed",
+  "last_row_menu": {
+    "passed": true,
+    "last_row_button_rect": {"top": 958, "bottom": 990},
+    "menu_rect": {"top": 698, "bottom": 897, "height": 199},
+    "viewport_height": 1080,
+    "body_portal": true,
+    "visible_options": ["Modifier", "Réinit. mot de passe", "Suspendre", "Désactiver", "Supprimer"]
+  },
+  "avatar_cropper": {
+    "passed": true,
+    "modal_visible": true,
+    "circular_preview_overflow_hidden": true,
+    "zoom_slider_updated_to": "2",
+    "drag_changed_transform": true,
+    "apply_uploaded_url_prefix": "/api/uploads/",
+    "success_toast": "Photo recadrée et téléversée"
+  },
+  "console_notes": [
+    "Dev websocket connection refused on localhost:443/ws (non-blocking hot reload issue)",
+    "Posthog flags request aborted (non-blocking third-party analytics)"
+  ]
+}

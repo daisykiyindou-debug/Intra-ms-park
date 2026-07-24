@@ -3731,7 +3731,8 @@ events are still allowed and preserved."""
 
 
 def _shift_horizon_cap() -> date:
-    return SHIFT_HORIZON_CAP
+    """Auto-generate one year ahead of today (or the fixed cap if larger)."""
+    return max(SHIFT_HORIZON_CAP, date.today() + timedelta(days=365))
 
 
 async def _ensure_range(employee_id: str, start: date, end: date) -> None:

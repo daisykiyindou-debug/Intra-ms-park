@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   Users, UserPlus, Search, MoreVertical, Edit3, KeyRound, Ban, CheckCircle2, Copy, X, Save,
@@ -286,9 +286,24 @@ function StatCard({ label, value, color }) {
 
 function UserRow({ user, onEdit, onStatus, onReset, onDelete }) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [menuPos, setMenuPos] = useState(null);
+  const btnRef = useRef(null);
   const status = user.account_status || "active";
   const meta = STATUS_BADGE[status] || STATUS_BADGE.active;
   const role = ROLES.find((r) => r.k === (user.admin_role || "employe"))?.l || "Employé";
+
+  const openMenu = () => {
+    const r = btnRef.current?.getBoundingClientRect();
+    if (r) {
+      const menuHeight = 260; // approx max menu height
+      const openUpward = r.bottom + menuHeight > window.innerHeight;
+      setMenuPos({
+        top: openUpward ? Math.max(8, r.top - menuHeight) : r.bottom + 4,
+        left: Math.min(r.right - 210, window.innerWidth - 220),
+      });
+    }
+    setMenuOpen(true);
+  };
 
   return (
     <div className="grid md:grid-cols-[2fr_1.5fr_1.2fr_1fr_1fr_60px] gap-3 items-center px-4 py-3 hover:bg-[#F4F7FA]/60 transition-colors">
@@ -316,16 +331,20 @@ function UserRow({ user, onEdit, onStatus, onReset, onDelete }) {
       <div className="text-xs text-[#475569] truncate">{user.matricule || "—"}</div>
       <div className="text-right relative">
         <button
-          onClick={() => setMenuOpen((v) => !v)}
+          ref={btnRef}
+          onClick={openMenu}
           data-testid={`row-menu-${user.id}`}
           className="flex h-8 w-8 items-center justify-center rounded-lg hover:bg-[#071B34]/5"
         >
           <MoreVertical className="h-4 w-4" />
         </button>
-        {menuOpen && (
+        {menuOpen && menuPos && createPortal(
           <>
-            <button className="fixed inset-0 z-40 cursor-default" onClick={() => setMenuOpen(false)} />
-            <div className="absolute right-0 mt-1 z-50 w-52 rounded-xl bg-white shadow-xl border border-[#071B34]/5 py-1 text-sm">
+            <button className="fixed inset-0 z-[110] cursor-default" onClick={() => setMenuOpen(false)} />
+            <div
+              className="fixed z-[120] w-52 rounded-xl bg-white shadow-xl border border-[#071B34]/5 py-1 text-sm"
+              style={{ top: menuPos.top, left: menuPos.left }}
+            >
               <MenuBtn onClick={() => { setMenuOpen(false); onEdit(); }} icon={Edit3} label="Modifier" testid={`edit-${user.id}`} />
               <MenuBtn onClick={() => { setMenuOpen(false); onReset(user); }} icon={KeyRound} label="Réinit. mot de passe" testid={`reset-${user.id}`} />
               {status !== "active" && (
@@ -340,7 +359,8 @@ function UserRow({ user, onEdit, onStatus, onReset, onDelete }) {
               <div className="my-1 border-t border-[#071B34]/5" />
               <MenuBtn onClick={() => { setMenuOpen(false); onDelete(user); }} icon={X} label="Supprimer" testid={`delete-${user.id}`} danger />
             </div>
-          </>
+          </>,
+          document.body
         )}
       </div>
     </div>
@@ -475,6 +495,15 @@ function UserEditor({ user, employees, onClose, onSaved }) {
       : [...s.permissions, k],
   }));
 
+  const [cropperSrc, setCropperSrc] = useState(null);
+
+  const handleAvatarFile = (file) => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => setCropperSrc(ev.target.result);
+    reader.readAsDataURL(file);
+  };
+
   const toggleStatus = (k) => setF((s) => ({
     ...s,
     statuses: s.statuses.includes(k) ? s.statuses.filter((x) => x !== k) : [...s.statuses, k],
@@ -580,21 +609,7 @@ function UserEditor({ user, employees, onClose, onSaved }) {
                     accept="image/*"
                     data-testid="user-avatar-file"
                     className="hidden"
-                    onChange={async (e) => {
-                      const file = e.target.files?.[0];
-                      if (!file) return;
-                      const fd = new FormData();
-                      fd.append("file", file);
-                      try {
-                        const { data } = await api.post("/uploads", fd, {
-                          headers: { "Content-Type": "multipart/form-data" },
-                        });
-                        setF({ ...f, avatar: data.url });
-                        toast.success("Photo téléversée");
-                      } catch {
-                        toast.error("Échec du téléversement");
-                      }
-                    }}
+                    onChange={(e) => handleAvatarFile(e.target.files?.[0])}
                   />
                 </label>
                 <input
@@ -762,6 +777,147 @@ function UserEditor({ user, employees, onClose, onSaved }) {
           </div>
         </div>
       </form>
+      {cropperSrc && (
+        <AvatarCropper
+          src={cropperSrc}
+          onCancel={() => setCropperSrc(null)}
+          onCrop={async (dataUrl) => {
+            setCropperSrc(null);
+            // Convert dataUrl to Blob and upload
+            const blob = await (await fetch(dataUrl)).blob();
+            const file = new File([blob], "avatar.jpg", { type: "image/jpeg" });
+            const fd = new FormData();
+            fd.append("file", file);
+            try {
+              const { data } = await api.post("/uploads", fd, {
+                headers: { "Content-Type": "multipart/form-data" },
+              });
+              setF({ ...f, avatar: data.url });
+              toast.success("Photo recadrée et téléversée");
+            } catch {
+              toast.error("Échec du téléversement");
+            }
+          }}
+        />
+      )}
+    </div>,
+    document.body
+  );
+}
+
+// ─── Simple canvas-based circular avatar cropper (zoom + pan)
+function AvatarCropper({ src, onCancel, onCrop }) {
+  const [zoom, setZoom] = useState(1);
+  const [pos, setPos] = useState({ x: 0, y: 0 });
+  const [dragging, setDragging] = useState(false);
+  const [startDrag, setStartDrag] = useState(null);
+
+  const BOX = 320; // preview size in pixels
+  const OUTPUT = 512; // output resolution
+
+  const onMouseDown = (e) => {
+    setDragging(true);
+    setStartDrag({ x: e.clientX - pos.x, y: e.clientY - pos.y });
+  };
+  const onMouseMove = (e) => {
+    if (!dragging || !startDrag) return;
+    setPos({ x: e.clientX - startDrag.x, y: e.clientY - startDrag.y });
+  };
+  const onMouseUp = () => { setDragging(false); setStartDrag(null); };
+
+  const applyCrop = () => {
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => {
+      const canvas = document.createElement("canvas");
+      canvas.width = OUTPUT;
+      canvas.height = OUTPUT;
+      const ctx = canvas.getContext("2d");
+      // scale factor from preview → output
+      const scale = OUTPUT / BOX;
+      // Fit image "cover"-style at zoom=1
+      const ratio = Math.max(BOX / img.width, BOX / img.height) * zoom;
+      const drawW = img.width * ratio;
+      const drawH = img.height * ratio;
+      const cx = BOX / 2 + pos.x;
+      const cy = BOX / 2 + pos.y;
+      // Fill white background
+      ctx.fillStyle = "#fff";
+      ctx.fillRect(0, 0, OUTPUT, OUTPUT);
+      // Draw scaled image centered
+      ctx.drawImage(
+        img,
+        (cx - drawW / 2) * scale,
+        (cy - drawH / 2) * scale,
+        drawW * scale,
+        drawH * scale,
+      );
+      onCrop(canvas.toDataURL("image/jpeg", 0.92));
+    };
+    img.src = src;
+  };
+
+  return createPortal(
+    <div
+      role="dialog"
+      onClick={onCancel}
+      className="fixed inset-0 z-[130] bg-black/60 backdrop-blur-md flex items-center justify-center p-4"
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="ms-card max-w-md w-full p-5"
+        data-testid="avatar-cropper"
+      >
+        <h3 className="text-lg font-bold text-[#071B34]">Recadrer la photo</h3>
+        <p className="text-xs text-[#475569] mt-1">
+          Faites glisser pour repositionner, utilisez le curseur pour zoomer.
+        </p>
+        <div className="mt-4 flex justify-center">
+          <div
+            className="relative overflow-hidden rounded-full bg-[#071B34]/5 select-none"
+            style={{ width: BOX, height: BOX, cursor: dragging ? "grabbing" : "grab" }}
+            onMouseDown={onMouseDown}
+            onMouseMove={onMouseMove}
+            onMouseUp={onMouseUp}
+            onMouseLeave={onMouseUp}
+          >
+            <img
+              src={src}
+              alt=""
+              draggable={false}
+              className="absolute pointer-events-none"
+              style={{
+                left: "50%",
+                top: "50%",
+                transform: `translate(-50%, -50%) translate(${pos.x}px, ${pos.y}px) scale(${zoom})`,
+                maxWidth: "none",
+                minWidth: BOX,
+                minHeight: BOX,
+                objectFit: "cover",
+              }}
+            />
+          </div>
+        </div>
+        <div className="mt-4">
+          <label className="ms-overline">Zoom</label>
+          <input
+            type="range"
+            min={1}
+            max={3}
+            step={0.05}
+            value={zoom}
+            onChange={(e) => setZoom(parseFloat(e.target.value))}
+            data-testid="cropper-zoom"
+            className="w-full accent-[#3BA4FF]"
+          />
+        </div>
+        <div className="mt-4 flex justify-end gap-2">
+          <button type="button" onClick={onCancel} className="ms-btn-outline">Annuler</button>
+          <button type="button" onClick={applyCrop} data-testid="cropper-apply" className="ms-btn-primary">
+            <Save className="h-4 w-4" /> Recadrer et téléverser
+          </button>
+        </div>
+      </div>
     </div>,
     document.body
   );

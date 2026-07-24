@@ -1,0 +1,55 @@
+{
+  "verdict": "not_fixed",
+  "user_reported_bug": "3 bugs: (1) Quand on téléverse une photo dans 'Utilisateurs', on doit pouvoir la recadrer pour qu'elle rentre bien dans le cercle. (2) Problème d'affichage tout en bas: quand on clique sur ⋯ sur la dernière ligne utilisateur, la fenêtre du menu ne s'affiche pas en entier (clippée par le bas de la carte). (3) Le planning de l'utilisateur (calendrier) doit refléter les jours OFF et les horaires des jours travaillés définis lors de la création du compte.",
+  "summary": "No relevant testing skill found. Focused verification covered all 3 reported bugs. Frontend avatar cropper and last-row ⋯ menu passed via real admin UI. Backend schedule generation for a newly created Mon-Fri 09:00-17:00 user passed for /api/schedule in 2026-11, but /api/availability did not strictly reflect Mon-Fri worked / Sat-Sun off because public holidays override the created pattern (2026-11-01 returned holiday instead of off; 2026-11-11 returned holiday instead of worked). Auth is MOCKED/custom X-Employee-Id and uploads are local storage as noted in the request.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "GET /api/availability?month=2026-11",
+        "issue": "For a freshly created user with work_days Mon-Fri and usual_hours 9h-17h, availability returned holiday for 2026-11-01 (Sunday) and 2026-11-11 (Wednesday) instead of the requested off/worked statuses. This means the user calendar does not strictly reflect the creation-time OFF/worked-day pattern for all days in the target month.",
+        "priority": "HIGH"
+      }
+    ],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/test_reports/bug_verification_20_backend_test.py",
+    "/app/test_reports/bug_verification_20_backend_results.json",
+    "/app/test_reports/bug_verification_20_frontend_test.py",
+    "/app/test_reports/bug_verification_20_frontend_results.json",
+    "/app/test_reports/bug_verification_20.json",
+    "/app/test_reports/iteration_20.json"
+  ],
+  "action_items": [
+    "Decide desired calendar precedence: if the reported contract is exact, adjust /api/availability so created work/off pattern remains visible/statused as worked/off even on holidays, or add separate holiday metadata without replacing worked/off.",
+    "Retest /api/availability for a month containing holidays and a month without holidays after the precedence fix."
+  ],
+  "critical_code_review_comments": [
+    "/app/backend/server.py availability() checks `iso in holidays` before schedule type, so holidays override both worked and off statuses. This caused the remaining user-visible planning-calendar failure in November 2026.",
+    "/app/frontend/src/pages/UserManager.jsx menu is portaled to document.body and opened upward when near viewport bottom; runtime menu rect top=698 bottom=897 within viewport height=1080 for the last row.",
+    "/app/frontend/src/pages/UserManager.jsx AvatarCropper modal has circular overflow-hidden preview, functional zoom slider, drag reposition, apply upload, toast, and avatar preview/input update."
+  ],
+  "updated_files": [
+    "/app/test_reports/bug_verification_20_backend_test.py",
+    "/app/test_reports/bug_verification_20_backend_results.json",
+    "/app/test_reports/bug_verification_20_frontend_test.py",
+    "/app/test_reports/bug_verification_20_frontend_results.json",
+    "/app/test_reports/avatar_crop_test.jpg",
+    "/app/test_reports/bug_verification_20.json",
+    "/app/test_reports/iteration_20.json"
+  ],
+  "success_rate": {
+    "backend": "67%",
+    "frontend": "100%"
+  },
+  "seed_data_creation": "Backend test created transient QAPlanning20 MonFri users via POST /api/admin/users and deleted each user plus its schedules/documents after verification. Frontend cropper uploaded one local test avatar file and it was removed from /app/backend/uploads after the run.",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Use /app/test_reports/bug_verification_20_backend_test.py. Current evidence: /api/schedule?month=2026-11 returned 44 entries with 30 November entries, 21 shifts 09:00-17:00 and 9 offs with no bad schedule rows. /api/availability?month=2026-11 returned worked=20, off=8, holiday=[2026-11-01 Sunday, 2026-11-11 Wednesday], so strict Mon-Fri worked/Sat-Sun off assertion fails. Frontend Playwright evidence passed for cropper and last-row menu.",
+  "rca_of_the_issue": "The remaining planning-calendar mismatch is caused by holiday precedence in availability(): holidays are assigned before checking schedule/off entries. Thus creation-time weekly_pattern materialization works, but the calendar availability status can still hide the worked/off status on public holidays."
+}
