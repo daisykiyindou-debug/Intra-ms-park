@@ -134,7 +134,7 @@ export default function Demandes() {
       <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-3">
         <div>
           <div className="ms-overline">Mon Coin RH</div>
-          <h1 className="text-3xl md:text-4xl font-bold tracking-tight text-[#071B34] mt-1">Demandes RH</h1>
+          <h1 className="text-3xl md:text-4xl font-bold tracking-tight text-[#071B34] mt-1">Congés et absences</h1>
           <p className="text-sm text-[#475569] mt-2">
             Soumettez vos demandes de congés, absences, échanges et plus encore.
           </p>

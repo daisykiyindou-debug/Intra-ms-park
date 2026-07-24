@@ -33,6 +33,8 @@ import UserManager from "@/pages/UserManager";
 import { ExpensesManager } from "@/pages/NotesDeFrais";
 import { HRDocsManager, HRDocEditor } from "@/pages/HRDocs";
 import OvertimeManager from "@/pages/OvertimeManager";
+import { FormationsManager } from "@/pages/Formations";
+import SupportITList from "@/pages/Support";
 import ImageUpload from "@/components/ImageUpload";
 
 const subNav = [
@@ -142,6 +144,8 @@ export default function ManagementShell() {
         {isAdmin && <Route path="documents" element={<DocumentsManager />} />}
         {isAdmin && <Route path="notes-de-frais" element={<ExpensesManager />} />}
         {isAdmin && <Route path="heures-supp" element={<OvertimeManager />} />}
+        {isAdmin && <Route path="formations" element={<FormationsManager />} />}
+        {isAdmin && <Route path="support" element={<SupportITList />} />}
         {isAdmin && <Route path="documents-editor" element={<HRDocsManager />} />}
         {isAdmin && <Route path="documents-editor/:id" element={<HRDocEditor />} />}
         <Route path="fil" element={<Navigate to="/actualites" replace />} />

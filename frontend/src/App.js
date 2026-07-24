@@ -29,6 +29,8 @@ import NewslettersList, { NewsletterDetail, NewsletterEditor } from "@/pages/New
 import GalerieList, { GalerieAlbum } from "@/pages/Galerie";
 import NotesDeFrais from "@/pages/NotesDeFrais";
 import { HRDocView } from "@/pages/HRDocs";
+import FormationsList from "@/pages/Formations";
+import SupportITList, { TicketDetail, CentreAide } from "@/pages/Support";
 
 function ProtectedShell() {
   const isOut = typeof window !== "undefined" && localStorage.getItem("ms_logged_out") === "1";
@@ -108,6 +110,10 @@ function App() {
               <Route path="/galerie/:id" element={<GalerieAlbum />} />
               <Route path="/notes-de-frais" element={<NotesDeFrais />} />
               <Route path="/documents/rediger/:id" element={<HRDocView />} />
+              <Route path="/formations" element={<FormationsList />} />
+              <Route path="/support" element={<SupportITList />} />
+              <Route path="/support/tickets/:id" element={<TicketDetail />} />
+              <Route path="/aide" element={<CentreAide />} />
               <Route path="/avantages" element={<Avantages />} />
               <Route path="/contacts" element={<Contacts />} />
               <Route path="/profil" element={<Profil />} />

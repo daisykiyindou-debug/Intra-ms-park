@@ -168,6 +168,20 @@ Intranet premium pour employés du parc MS Park + espace administrateur pour le 
 
 ## Changelog
 
+### 2026-02-24 — Super Admin + Menu restructure + Formation + Support IT + Aide (iter 10)
+- **Compte SUPER ADMIN** (`superadmin@mspark.fr` / `MSPark@Super2026!`) : flags `is_admin=true, is_super_admin=true, can_manage_communication=true`. Sidebar restreinte à Dashboard + Profil + bloc Management (aucune section employé). Employé id `emp-super-admin`, `role_category=admin`, `contract_hours_weekly=0` (non employé). Seed idempotent au démarrage.
+- **Menu employé restructuré** en 6 sections :
+  - **Communication** : Actualités, Newsletters, Messagerie, Contacts
+  - **Ressources humaines** : Planning, Badge, **Congés et absences** (renommé), Notes de frais, Documents
+  - **Points repas** (nouveau divider) : Restauration
+  - **Vie de l'entreprise** : CSE & Avantages (renommé), Agenda, Formation (nouveau), Galerie photos
+  - **Support & IT** : Support Informatique (nouveau), Centre d'aide (nouveau)
+  - Suppression de l'ancien item "Points repas" balance en haut.
+- **Formation** (`/formations` + `/management/formations`) : catalogue en cards (cover, catégorie/format, durée/date/lieu/inscrits), inscription/désinscription en un clic, modal "Proposer une formation" (titre + raison + bénéfice + lien), admin CRUD + liste des propositions. Backend : `formations` + `formation_registrations` + `formation_proposals` collections. Seed 3 formations démo (HACCP, Excel, Anglais B2).
+- **Support Informatique** (`/support` + `/support/tickets/:id` + `/management/support`) : liste tickets filtrable (statut/recherche), modal création (sujet, catégorie 6 icônes, priorité 4 niveaux, description, pièce jointe), page détail avec fil de conversation (bulles employé / support IT alternées), boutons répondre + changement statut (admin). Backend : `tickets` collection avec messages embarqués + notifications bidirectionnelles.
+- **Centre d'aide** (`/aide`) : hero recherche + rail catégories + 9 articles FAQ pré-chargés (Badge, Congés, Notes de frais, Points repas, Formation, IT, Communication), accordéon expand/collapse, markdown gras. Backend : `HELP_ARTICLES` statique + `GET /help/articles?category=&q=`.
+- **Menu admin** : nouveaux items "Formations" et "Support IT (tickets)". Le super admin ne voit que ce bloc.
+
 ### 2026-02-24 — Badge refonte + Heures supp. & récupération (iter 9)
 - **Page Badge complètement refondue** (`/rh/badgeage`) : header status card, **4 punch cards** (Entrée / Pause sortie / Pause entrée / Sortie), heures travaillées vs prévues + statut du jour, tableau récapitulatif de la semaine (7 lignes + total), 4 cards récap hebdo (Heures travaillées, Heures supp., Heures prévues, Solde), **récap mensuel avec donut chart** (worked + supp validées + récup + pending), CTA "Demander une récupération (RTT)" quand solde ≥ 6h, CTA "Déclarer des heures exceptionnelles", historique complet 30 jours en accordéon.
 - **Badgeage en ligne** : bouton `Badgeage` → modal "Badgeage en ligne" avec prochaine étape auto-détectée (clock_in → pause_out → pause_in → clock_out), heure en direct. Backend `POST /api/badging/punch` maintient `badging_manual` collection + `GET /badging/today-live` fusionne planning + punches réels. Sync direct dans les cartes.

@@ -7,10 +7,6 @@ import {
   Fingerprint,
   FileText,
   Newspaper,
-  Mail,
-  Camera,
-  Receipt,
-  Clock,
   MessageSquare,
   Folder,
   Calendar,
@@ -25,28 +21,46 @@ import {
   Megaphone,
   ListChecks,
   Edit3,
+  Mail,
+  Camera,
+  Receipt,
+  Clock,
+  GraduationCap,
+  LifeBuoy,
+  HelpCircle,
 } from "lucide-react";
 import { useApp } from "@/contexts/AppContext";
 
-const nav = [
+// ─── Employee nav: grouped by section
+const employeeNav = [
   { to: "/dashboard", label: "Tableau de bord", icon: LayoutDashboard, key: "dashboard" },
   { to: "/profil", label: "Mon profil", icon: User, key: "profil" },
-  { to: "/points-repas", label: "Points repas", icon: UtensilsCrossed, key: "points" },
-  { to: "/restaurant", label: "Restauration", icon: ShoppingBag, key: "restaurant" },
-  { divider: "Mon Coin RH" },
-  { to: "/rh/planning", label: "Planning", icon: CalendarDays, key: "planning" },
-  { to: "/rh/badgeage", label: "Badge", icon: Fingerprint, key: "badge" },
-  { to: "/rh/demandes", label: "Demandes RH", icon: FileText, key: "demandes" },
-  { to: "/notes-de-frais", label: "Notes de frais", icon: Receipt, key: "expenses" },
-  { divider: "Entreprise" },
+
+  { divider: "Communication" },
   { to: "/actualites", label: "Actualités", icon: Newspaper, key: "news" },
   { to: "/newsletters", label: "Newsletters", icon: Mail, key: "newsletters" },
-  { to: "/galerie", label: "Galerie photos", icon: Camera, key: "gallery" },
   { to: "/messagerie", label: "Messagerie", icon: MessageSquare, key: "messagerie" },
-  { to: "/documents", label: "Documents", icon: Folder, key: "documents" },
-  { to: "/agenda", label: "Agenda", icon: Calendar, key: "agenda" },
-  { to: "/avantages", label: "Avantages", icon: Gift, key: "avantages" },
   { to: "/contacts", label: "Contacts", icon: Users, key: "contacts" },
+
+  { divider: "Ressources humaines" },
+  { to: "/rh/planning", label: "Planning", icon: CalendarDays, key: "planning" },
+  { to: "/rh/badgeage", label: "Badge", icon: Fingerprint, key: "badge" },
+  { to: "/rh/demandes", label: "Congés et absences", icon: FileText, key: "demandes" },
+  { to: "/notes-de-frais", label: "Notes de frais", icon: Receipt, key: "expenses" },
+  { to: "/documents", label: "Documents", icon: Folder, key: "documents" },
+
+  { divider: "Points repas" },
+  { to: "/restaurant", label: "Restauration", icon: ShoppingBag, key: "restaurant" },
+
+  { divider: "Vie de l'entreprise" },
+  { to: "/avantages", label: "CSE & Avantages", icon: Gift, key: "cse" },
+  { to: "/agenda", label: "Agenda", icon: Calendar, key: "agenda" },
+  { to: "/formations", label: "Formation", icon: GraduationCap, key: "formations" },
+  { to: "/galerie", label: "Galerie photos", icon: Camera, key: "gallery" },
+
+  { divider: "Support & IT" },
+  { to: "/support", label: "Support Informatique", icon: LifeBuoy, key: "support" },
+  { to: "/aide", label: "Centre d'aide", icon: HelpCircle, key: "help" },
 ];
 
 const adminNav = [
@@ -57,6 +71,8 @@ const adminNav = [
   { to: "/management/attributions", label: "RTT / CP", icon: Gift, key: "mgmt-rtt" },
   { to: "/management/notes-de-frais", label: "Notes de frais", icon: Receipt, key: "mgmt-expenses" },
   { to: "/management/heures-supp", label: "Heures supp. & récup.", icon: Clock, key: "mgmt-overtime" },
+  { to: "/management/formations", label: "Formations", icon: GraduationCap, key: "mgmt-formations" },
+  { to: "/management/support", label: "Support IT (tickets)", icon: LifeBuoy, key: "mgmt-support" },
   { to: "/management/carrousel", label: "Carrousel accueil", icon: Newspaper, key: "mgmt-carrousel" },
   { to: "/management/agenda", label: "Agenda", icon: Calendar, key: "mgmt-agenda" },
   { to: "/management/formulaires", label: "Formulaires", icon: ListChecks, key: "mgmt-forms" },
@@ -72,11 +88,25 @@ const commNav = [
   { to: "/management/formulaires", label: "Formulaires", icon: ListChecks, key: "comm-forms" },
 ];
 
+// Super admin: only admin features + dashboard (no employee-side items)
+const superAdminBase = [
+  { to: "/dashboard", label: "Tableau de bord", icon: LayoutDashboard, key: "dashboard" },
+  { to: "/profil", label: "Mon profil", icon: User, key: "profil" },
+];
+
 export default function Sidebar({ open, onClose }) {
   const { me } = useApp();
+  const isSuperAdmin = !!me?.is_super_admin;
   const isAdmin = !!me?.is_admin;
-  const isComm = !!me?.can_manage_communication;
-  const items = isAdmin ? [...nav, ...adminNav] : isComm ? [...nav, ...commNav] : nav;
+  const isComm = !!me?.can_manage_communication && !isAdmin;
+
+  const items = isSuperAdmin
+    ? [...superAdminBase, ...adminNav]
+    : isAdmin
+    ? [...employeeNav, ...adminNav]
+    : isComm
+    ? [...employeeNav, ...commNav]
+    : employeeNav;
 
   return (
     <>

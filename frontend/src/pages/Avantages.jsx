@@ -21,9 +21,9 @@ export default function Avantages() {
   return (
     <div className="space-y-6 ms-fade-up">
       <div>
-        <div className="ms-overline">Avantages employés</div>
+        <div className="ms-overline">Vie de l&apos;entreprise › CSE &amp; Avantages</div>
         <h1 className="text-3xl md:text-4xl font-bold tracking-tight text-[#071B34] mt-1">
-          Vos privilèges MS Group
+          CSE &amp; Avantages
         </h1>
         <p className="text-sm text-[#475569] mt-2 max-w-2xl">
           Profitez de réductions exclusives chez nos partenaires et des avantages internes MS Park.

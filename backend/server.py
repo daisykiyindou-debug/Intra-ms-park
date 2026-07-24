@@ -638,6 +638,30 @@ async def _seed_once() -> None:
             "phone": "+33 6 65 54 43 32",
             "seniority_months": 5,
         },
+        {
+            # ─── Super admin (not an employee — pure admin console)
+            "id": "emp-super-admin",
+            "first_name": "Super",
+            "last_name": "ADMIN",
+            "role": "Super administrateur",
+            "role_category": "admin",
+            "role_title": "Super administrateur",
+            "department": "Direction",
+            "avatar": "https://ui-avatars.com/api/?name=Super+Admin&background=071B34&color=fff&size=256&bold=true",
+            "email": "superadmin@mspark.fr",
+            "phone": "+33 6 00 00 00 00",
+            "seniority_months": 0,
+            "is_admin": True,
+            "is_super_admin": True,
+            "can_post": True,
+            "can_manage_communication": True,
+            "contract_hours_weekly": 0,
+            "badge_number": "MSP-SUPER",
+            "badge_active": False,
+            "hire_date": "2024-01-01",
+            "skills": [],
+            "leave_balance": {"cp_n_1": 0, "cp_n": 0, "rtt": 0},
+        },
     ]
     await db.employees.insert_many(employees)
 
@@ -3283,6 +3307,7 @@ _LOGIN_CREDENTIALS = {
     "marcus.simeo@gmail.com": ("MSPark@Admin2026!", ADMIN_EMPLOYEE_ID),
     "lea.dubois@mspark.fr": ("MSPark@Comm2026!", "emp-lea-comm"),
     "lea.dubois.comm@gmail.com": ("MSPark@Comm2026!", "emp-lea-comm"),
+    "superadmin@mspark.fr": ("MSPark@Super2026!", "emp-super-admin"),
 }
 
 
@@ -4568,6 +4593,27 @@ async def attach_current_user(request: Request, call_next):
 async def on_start():
     await _seed_once()
     await _seed_extra_products()
+    try:
+        await _seed_formations()
+    except Exception as e:
+        print(f"[seed_formations] error: {e}")
+    # Idempotent super admin (may not exist if seed ran on older version)
+    if not await db.employees.find_one({"id": "emp-super-admin"}):
+        await db.employees.insert_one({
+            "id": "emp-super-admin",
+            "first_name": "Super", "last_name": "ADMIN",
+            "role": "Super administrateur", "role_category": "admin",
+            "role_title": "Super administrateur", "department": "Direction",
+            "avatar": "https://ui-avatars.com/api/?name=Super+Admin&background=071B34&color=fff&size=256&bold=true",
+            "email": "superadmin@mspark.fr", "phone": "+33 6 00 00 00 00",
+            "seniority_months": 0,
+            "is_admin": True, "is_super_admin": True,
+            "can_post": True, "can_manage_communication": True,
+            "contract_hours_weekly": 0,
+            "badge_number": "MSP-SUPER", "badge_active": False,
+            "hire_date": "2024-01-01", "skills": [],
+            "leave_balance": {"cp_n_1": 0, "cp_n": 0, "rtt": 0},
+        })
 
 
 async def _seed_extra_products():
@@ -5389,6 +5435,330 @@ async def admin_decide_overtime(oid: str, payload: OvertimeDecision):
                     upsert=True,
                 )
     return o
+
+
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Formations (formation catalog + registrations + proposals)
+# ═══════════════════════════════════════════════════════════════════
+class FormationCreate(BaseModel):
+    title: str
+    description: Optional[str] = ""
+    category: Optional[str] = "Métier"
+    duration_hours: int = 8
+    format: Optional[str] = "présentiel"  # présentiel | distanciel | hybride
+    location: Optional[str] = ""
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    trainer: Optional[str] = ""
+    max_participants: Optional[int] = 20
+    cover_image: Optional[str] = None
+    is_open: bool = True
+
+
+@api.get("/formations")
+async def list_formations():
+    items = await db.formations.find({}, {"_id": 0}).sort("start_date", 1).to_list(500)
+    me_id = current_user()
+    for f in items:
+        regs = await db.formation_registrations.count_documents({"formation_id": f["id"], "status": {"$ne": "cancelled"}})
+        f["registrations_count"] = regs
+        my = await db.formation_registrations.find_one({"formation_id": f["id"], "employee_id": me_id, "status": {"$ne": "cancelled"}})
+        f["me_registered"] = bool(my)
+    return items
+
+
+@api.get("/formations/{fid}")
+async def get_formation(fid: str):
+    f = await db.formations.find_one({"id": fid}, {"_id": 0})
+    if not f:
+        raise HTTPException(404, "Formation introuvable")
+    regs = await db.formation_registrations.find({"formation_id": fid}, {"_id": 0}).to_list(500)
+    emp_ids = [r["employee_id"] for r in regs]
+    emps = {e["id"]: e async for e in db.employees.find({"id": {"$in": emp_ids}}, {"_id": 0})}
+    for r in regs:
+        e = emps.get(r["employee_id"], {})
+        r["employee_name"] = f"{e.get('first_name','')} {e.get('last_name','')}".strip()
+        r["employee_avatar"] = e.get("avatar_url") or e.get("avatar")
+    f["registrations"] = regs
+    return f
+
+
+@api.post("/admin/formations")
+async def create_formation(payload: FormationCreate):
+    await require_admin()
+    f = payload.model_dump()
+    f["id"] = _id()
+    f["created_at"] = _now()
+    await db.formations.insert_one(f.copy())
+    return await _strip(f)
+
+
+@api.put("/admin/formations/{fid}")
+async def update_formation(fid: str, payload: FormationCreate):
+    await require_admin()
+    await db.formations.update_one({"id": fid}, {"$set": payload.model_dump()})
+    return await db.formations.find_one({"id": fid}, {"_id": 0})
+
+
+@api.delete("/admin/formations/{fid}")
+async def delete_formation(fid: str):
+    await require_admin()
+    await db.formations.delete_one({"id": fid})
+    await db.formation_registrations.delete_many({"formation_id": fid})
+    return {"ok": True}
+
+
+@api.post("/formations/{fid}/register")
+async def register_formation(fid: str):
+    me = await _me()
+    f = await db.formations.find_one({"id": fid}, {"_id": 0})
+    if not f or not f.get("is_open"):
+        raise HTTPException(400, "Inscriptions fermées")
+    existing = await db.formation_registrations.find_one({"formation_id": fid, "employee_id": me["id"]})
+    if existing:
+        await db.formation_registrations.update_one({"_id": existing["_id"]}, {"$set": {"status": "registered"}})
+    else:
+        await db.formation_registrations.insert_one({
+            "id": _id(), "formation_id": fid, "employee_id": me["id"],
+            "status": "registered", "created_at": _now(),
+        })
+    return {"ok": True, "status": "registered"}
+
+
+@api.delete("/formations/{fid}/register")
+async def unregister_formation(fid: str):
+    me = await _me()
+    await db.formation_registrations.update_one(
+        {"formation_id": fid, "employee_id": me["id"]},
+        {"$set": {"status": "cancelled", "cancelled_at": _now()}},
+    )
+    return {"ok": True}
+
+
+class FormationProposal(BaseModel):
+    title: str
+    reason: str
+    expected_benefit: Optional[str] = ""
+    external_link: Optional[str] = ""
+
+
+@api.post("/formations/propose")
+async def propose_formation(payload: FormationProposal):
+    me = await _me()
+    p = payload.model_dump()
+    p["id"] = _id()
+    p["employee_id"] = me["id"]
+    p["status"] = "pending"
+    p["created_at"] = _now()
+    await db.formation_proposals.insert_one(p.copy())
+    admins = await db.employees.find({"is_admin": True}, {"id": 1}).to_list(20)
+    for a in admins:
+        await _push_notification(
+            employee_id=a["id"], type="formation",
+            title=f"Nouvelle proposition de formation · {me.get('first_name','')} {me.get('last_name','')}",
+            content=p["title"], icon="graduation-cap", link="/management/formations",
+        )
+    return await _strip(p)
+
+
+@api.get("/admin/formation-proposals")
+async def list_proposals():
+    await require_admin()
+    items = await db.formation_proposals.find({}, {"_id": 0}).sort("created_at", -1).to_list(300)
+    emp_ids = list({p["employee_id"] for p in items})
+    emps = {e["id"]: e async for e in db.employees.find({"id": {"$in": emp_ids}}, {"_id": 0})}
+    for p in items:
+        e = emps.get(p["employee_id"], {})
+        p["employee_name"] = f"{e.get('first_name','')} {e.get('last_name','')}".strip()
+    return items
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Support IT tickets
+# ═══════════════════════════════════════════════════════════════════
+class TicketCreate(BaseModel):
+    subject: str
+    category: str  # hardware | software | network | access | account | other
+    priority: str = "normal"  # low | normal | high | urgent
+    description: str
+    attachment_url: Optional[str] = None
+    attachment_name: Optional[str] = None
+
+
+class TicketReply(BaseModel):
+    message: str
+
+
+@api.get("/tickets")
+async def list_my_tickets():
+    me = await _me()
+    if me.get("is_admin"):
+        items = await db.tickets.find({}, {"_id": 0}).sort("created_at", -1).to_list(500)
+    else:
+        items = await db.tickets.find({"employee_id": me["id"]}, {"_id": 0}).sort("created_at", -1).to_list(300)
+    emp_ids = list({t.get("employee_id") for t in items})
+    emps = {e["id"]: e async for e in db.employees.find({"id": {"$in": emp_ids}}, {"_id": 0})}
+    for t in items:
+        e = emps.get(t.get("employee_id"), {})
+        t["employee_name"] = f"{e.get('first_name','')} {e.get('last_name','')}".strip()
+        t["employee_avatar"] = e.get("avatar_url") or e.get("avatar")
+    return items
+
+
+@api.get("/tickets/{tid}")
+async def get_ticket(tid: str):
+    me = await _me()
+    t = await db.tickets.find_one({"id": tid}, {"_id": 0})
+    if not t:
+        raise HTTPException(404, "Ticket introuvable")
+    if t["employee_id"] != me["id"] and not me.get("is_admin"):
+        raise HTTPException(403, "Accès refusé")
+    return t
+
+
+@api.post("/tickets")
+async def create_ticket(payload: TicketCreate):
+    me = await _me()
+    t = payload.model_dump()
+    t["id"] = _id()
+    t["number"] = f"TKT-{datetime.now(timezone.utc).strftime('%Y%m%d')}-{uuid.uuid4().hex[:4].upper()}"
+    t["employee_id"] = me["id"]
+    t["status"] = "open"
+    t["messages"] = [{
+        "id": _id(), "author_id": me["id"], "author_name": f"{me.get('first_name','')} {me.get('last_name','')}",
+        "message": payload.description, "at": _now(),
+    }]
+    t["created_at"] = _now()
+    t["updated_at"] = _now()
+    await db.tickets.insert_one(t.copy())
+    admins = await db.employees.find({"is_admin": True}, {"id": 1}).to_list(20)
+    for a in admins:
+        await _push_notification(
+            employee_id=a["id"], type="ticket",
+            title=f"Nouveau ticket {t['number']} · {payload.priority.upper()}",
+            content=payload.subject, icon="life-buoy", link="/management/support",
+        )
+    return await _strip(t)
+
+
+@api.post("/tickets/{tid}/reply")
+async def reply_ticket(tid: str, payload: TicketReply):
+    me = await _me()
+    t = await db.tickets.find_one({"id": tid}, {"_id": 0})
+    if not t:
+        raise HTTPException(404, "Ticket introuvable")
+    if t["employee_id"] != me["id"] and not me.get("is_admin"):
+        raise HTTPException(403, "Accès refusé")
+    msg = {
+        "id": _id(), "author_id": me["id"],
+        "author_name": f"{me.get('first_name','')} {me.get('last_name','')}",
+        "is_admin": bool(me.get("is_admin")),
+        "message": payload.message, "at": _now(),
+    }
+    new_status = t.get("status", "open")
+    if me.get("is_admin") and new_status == "open":
+        new_status = "in_progress"
+    await db.tickets.update_one({"id": tid}, {"$push": {"messages": msg}, "$set": {"updated_at": _now(), "status": new_status}})
+    # notify the other party
+    other_id = t["employee_id"] if me.get("is_admin") else None
+    if other_id:
+        await _push_notification(
+            employee_id=other_id, type="ticket",
+            title=f"Réponse au ticket {t['number']}",
+            content=payload.message[:100], icon="life-buoy",
+            link=f"/support/tickets/{tid}",
+        )
+    return await db.tickets.find_one({"id": tid}, {"_id": 0})
+
+
+class TicketStatus(BaseModel):
+    status: str  # open | in_progress | waiting | resolved | closed
+
+
+@api.put("/tickets/{tid}/status")
+async def set_ticket_status(tid: str, payload: TicketStatus):
+    me = await _me()
+    if not me.get("is_admin"):
+        raise HTTPException(403, "Accès refusé")
+    await db.tickets.update_one({"id": tid}, {"$set": {"status": payload.status, "updated_at": _now()}})
+    return await db.tickets.find_one({"id": tid}, {"_id": 0})
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Centre d'aide (FAQ / help articles)
+# ═══════════════════════════════════════════════════════════════════
+HELP_ARTICLES = [
+    {"id": "h-badge", "category": "Badge", "icon": "fingerprint", "title": "Comment badger en ligne ?",
+     "content": "Cliquez sur le bouton **Badgeage** en haut de la page Badge. Le système détecte automatiquement la prochaine étape (Entrée → Pause sortie → Pause entrée → Sortie) et enregistre l'heure. Vous verrez votre pointage apparaître immédiatement dans les cartes du jour."},
+    {"id": "h-overtime", "category": "Badge", "icon": "clock", "title": "Comment déclarer des heures exceptionnelles ?",
+     "content": "Sur la page Badge, section **Récapitulatif mensuel**, cliquez sur **Déclarer des heures exceptionnelles**. Choisissez le type (Événement, Réunion, Formation…), renseignez le motif, les horaires et éventuellement des pauses. Votre responsable devra valider avant que les heures soient ajoutées à votre compteur."},
+    {"id": "h-recovery", "category": "Badge", "icon": "clock", "title": "Comment demander une récupération (RTT) ?",
+     "content": "Dès que votre solde atteint 6h, un bouton **Demander une récupération (RTT)** apparaît sur la page Badge. La demande doit être posée et récupérée dans les 10 jours suivant l'atteinte du seuil, sinon les heures sont automatiquement payées."},
+    {"id": "h-leave", "category": "Congés", "icon": "calendar", "title": "Comment poser un congé ?",
+     "content": "Rendez-vous sur **Congés et absences**, cliquez sur **Nouvelle demande**, sélectionnez le type (CP, RTT, arrêt maladie…), choisissez vos dates sur le calendrier interactif et validez. Votre responsable recevra la demande pour approbation."},
+    {"id": "h-expense", "category": "Notes de frais", "icon": "receipt", "title": "Comment soumettre une note de frais ?",
+     "content": "Depuis **Notes de frais**, cliquez sur **Nouvelle note de frais**, ajoutez vos dépenses (Transport, Repas, Hébergement, Autres) avec les justificatifs correspondants, puis soumettez. L'admin recevra une notification pour approbation."},
+    {"id": "h-meal", "category": "Points repas", "icon": "utensils-crossed", "title": "Comment fonctionnent les points repas ?",
+     "content": "Vous recevez automatiquement chaque jour un quota de points repas (20 pour la majorité, 25 pour Idriss). Utilisez-les sur la page **Restauration** pour commander votre repas — la commande doit être passée le jour même, au moins 1h avant le retrait."},
+    {"id": "h-training", "category": "Formation", "icon": "graduation-cap", "title": "Comment s'inscrire à une formation ?",
+     "content": "Sur la page **Formation**, parcourez le catalogue et cliquez sur **S'inscrire** pour la formation qui vous intéresse. Vous pouvez également proposer une nouvelle formation via le bouton **Proposer une formation**."},
+    {"id": "h-ticket", "category": "IT", "icon": "life-buoy", "title": "Comment ouvrir un ticket IT ?",
+     "content": "Sur **Support Informatique**, cliquez sur **Nouveau ticket**, décrivez votre problème (catégorie, priorité, description), joignez éventuellement une capture d'écran. Vous pourrez suivre l'avancement et échanger avec l'équipe IT depuis la page du ticket."},
+    {"id": "h-newsletter", "category": "Communication", "icon": "mail", "title": "Où trouver les newsletters ?",
+     "content": "La page **Newsletters** regroupe toutes les communications internes officielles. Chaque newsletter est composée de blocs (texte, images, boutons, hero) et peut inclure des pièces jointes."},
+]
+
+
+@api.get("/help/articles")
+async def list_help_articles(category: Optional[str] = None, q: Optional[str] = None):
+    items = list(HELP_ARTICLES)
+    if category and category != "all":
+        items = [a for a in items if a["category"] == category]
+    if q:
+        n = q.lower()
+        items = [a for a in items if n in (a["title"] + " " + a["content"]).lower()]
+    return items
+
+
+@api.get("/help/articles/{aid}")
+async def get_help_article(aid: str):
+    for a in HELP_ARTICLES:
+        if a["id"] == aid:
+            return a
+    raise HTTPException(404, "Article introuvable")
+
+
+# Seed a few demo formations if empty
+async def _seed_formations():
+    if await db.formations.count_documents({}) > 0:
+        return
+    demos = [
+        {"id": _id(), "title": "Sécurité HACCP en restauration",
+         "description": "Formation obligatoire pour le personnel de restauration : hygiène, chaîne du froid, traçabilité.",
+         "category": "Sécurité", "duration_hours": 14, "format": "présentiel",
+         "location": "MS Park — Salle formation", "start_date": (date.today() + timedelta(days=14)).isoformat(),
+         "end_date": (date.today() + timedelta(days=15)).isoformat(),
+         "trainer": "Chef Thomas DUPONT", "max_participants": 12,
+         "cover_image": "https://images.unsplash.com/photo-1556910103-1c02745aae4d?w=800",
+         "is_open": True, "created_at": _now()},
+        {"id": _id(), "title": "Excel avancé — tableaux croisés dynamiques",
+         "description": "Maîtrisez les TCD, formules avancées et automatisations pour vos reportings.",
+         "category": "Bureautique", "duration_hours": 7, "format": "distanciel",
+         "trainer": "OpenClassrooms", "max_participants": 20,
+         "start_date": (date.today() + timedelta(days=30)).isoformat(),
+         "cover_image": "https://images.unsplash.com/photo-1454165804606-c3d57bc86b40?w=800",
+         "is_open": True, "created_at": _now()},
+        {"id": _id(), "title": "Anglais professionnel — niveau B2",
+         "description": "10 séances de 2h avec un formateur natif, en petit groupe.",
+         "category": "Langues", "duration_hours": 20, "format": "hybride",
+         "trainer": "British Council", "max_participants": 8,
+         "start_date": (date.today() + timedelta(days=45)).isoformat(),
+         "cover_image": "https://images.unsplash.com/photo-1503676260728-1c00da094a0b?w=800",
+         "is_open": True, "created_at": _now()},
+    ]
+    await db.formations.insert_many(demos)
 
 
 
