@@ -2051,11 +2051,31 @@ async def get_badging(filter_range: str = "month"):
         by_day[d] = base
     items = sorted(by_day.values(), key=lambda x: x["day"], reverse=True)
 
-    # Live entry for today, computed from today's planning
+    # Live entry for today, computed from today's planning AND manual punches
     today_sched = await db.schedules.find_one(
         {"employee_id": current_user(), "day": today_d.isoformat()}, {"_id": 0}
     )
+    today_manual = await db.badging_manual.find_one(
+        {"employee_id": current_user(), "day": today_d.isoformat()}, {"_id": 0}
+    )
     live = _compute_today_badging(today_sched, current_user()) if today_sched else None
+    if live and today_manual:
+        # Manual punches always win over schedule-derived values
+        for k in ("clock_in", "pause_out", "pause_in", "clock_out"):
+            if today_manual.get(k):
+                live[k] = today_manual[k]
+        ci = _hm_to_minutes(live.get("clock_in"))
+        co = _hm_to_minutes(live.get("clock_out"))
+        po = _hm_to_minutes(live.get("pause_out"))
+        pi = _hm_to_minutes(live.get("pause_in"))
+        if ci is not None:
+            now_m = _now_paris().hour * 60 + _now_paris().minute
+            end_m = co if co is not None else now_m
+            worked = max(0, end_m - ci)
+            if po is not None and pi is not None:
+                worked -= max(0, pi - po)
+            live["worked_minutes"] = max(0, worked)
+        live["is_manual"] = True
     if live:
         items = [live] + items
     return items
@@ -2269,11 +2289,25 @@ class IdeaCreate(BaseModel):
     description: str
     category: Optional[str] = "Autres"
     is_anonymous: bool = True
+    attachments: List[str] = []  # image URLs
 
 
 class IdeaModerate(BaseModel):
     status: Optional[str] = None  # new | reviewing | accepted | rejected
     admin_response: Optional[str] = None
+
+
+class IdeaCommentCreate(BaseModel):
+    content: str
+
+
+IDEA_STATUS_LABELS = {
+    "new": "En attente",
+    "reviewing": "En étude",
+    "accepted": "Validée",
+    "rejected": "Refusée",
+    "delivered": "Mise en place",
+}
 
 
 def _sanitize_idea(idea: dict, me: dict) -> dict:
@@ -2284,6 +2318,9 @@ def _sanitize_idea(idea: dict, me: dict) -> dict:
     out["downvotes"] = sum(1 for v in votes.values() if v == "down")
     out["my_vote"] = votes.get(me["id"])
     out["score"] = out["upvotes"] - out["downvotes"]
+    out["comments_count"] = len(out.get("comments") or [])
+    out["me_followed"] = me["id"] in (out.get("followers") or [])
+    out["me_is_author"] = idea.get("author_id") == me["id"]
     # Hide identity for anonymous submissions (even from admin, per user requirement)
     if idea.get("is_anonymous"):
         out["author_id"] = None
@@ -2291,6 +2328,7 @@ def _sanitize_idea(idea: dict, me: dict) -> dict:
     if not is_admin:
         out.pop("admin_note", None)
     out.pop("votes", None)
+    out.pop("followers", None)
     return out
 
 
@@ -2302,8 +2340,7 @@ async def list_ideas(status: Optional[str] = None, category: Optional[str] = Non
         q["status"] = status
     if category:
         q["category"] = category
-    items = await db.ideas.find(q, {"_id": 0}).sort("created_at", -1).to_list(200)
-    # Attach non-anonymous author snapshot
+    items = await db.ideas.find(q, {"_id": 0}).sort("created_at", -1).to_list(500)
     non_anon_ids = list({i["author_id"] for i in items if not i.get("is_anonymous") and i.get("author_id")})
     emps = {e["id"]: e async for e in db.employees.find({"id": {"$in": non_anon_ids}}, {"_id": 0})}
     for i in items:
@@ -2316,20 +2353,87 @@ async def list_ideas(status: Optional[str] = None, category: Optional[str] = Non
     return [_sanitize_idea(i, me) for i in items]
 
 
+@api.get("/ideas/stats")
+async def ideas_stats():
+    """Aggregate counters for the sidebar stats card."""
+    await _me()
+    items = await db.ideas.find({}, {"_id": 0}).to_list(2000)
+    total_votes = 0
+    for i in items:
+        total_votes += len(i.get("votes") or {})
+    by_cat: dict = {}
+    for i in items:
+        c = i.get("category") or "Autres"
+        by_cat[c] = by_cat.get(c, 0) + 1
+    top_categories = [{"name": c, "count": n} for c, n in sorted(by_cat.items(), key=lambda x: -x[1])[:6]]
+    return {
+        "total_ideas": len(items),
+        "total_votes": total_votes,
+        "accepted": sum(1 for i in items if i.get("status") == "accepted"),
+        "reviewing": sum(1 for i in items if i.get("status") == "reviewing"),
+        "rejected": sum(1 for i in items if i.get("status") == "rejected"),
+        "top_categories": top_categories,
+    }
+
+
+@api.get("/ideas/{idea_id}")
+async def get_idea(idea_id: str):
+    me = await _me()
+    idea = await db.ideas.find_one({"id": idea_id}, {"_id": 0})
+    if not idea:
+        raise HTTPException(404, "Idée introuvable")
+    if not idea.get("is_anonymous"):
+        author = await db.employees.find_one({"id": idea.get("author_id")}, {"_id": 0}) or {}
+        idea["author_snapshot"] = {
+            "first_name": author.get("first_name"), "last_name": author.get("last_name"),
+            "avatar": author.get("avatar"), "role": author.get("role"),
+        }
+    # Related ideas — same category, top score
+    related = await db.ideas.find(
+        {"category": idea.get("category"), "id": {"$ne": idea_id}},
+        {"_id": 0},
+    ).sort("created_at", -1).to_list(20)
+    related.sort(key=lambda x: sum(1 for v in (x.get("votes") or {}).values() if v == "up"), reverse=True)
+    idea["related"] = [{
+        "id": r["id"], "title": r["title"],
+        "votes": sum(1 for v in (r.get("votes") or {}).values() if v == "up"),
+    } for r in related[:3]]
+    # Comments (hydrated with author snapshots when not anonymous)
+    comments = idea.get("comments") or []
+    author_ids = list({c.get("author_id") for c in comments if not c.get("is_anonymous")})
+    emps = {e["id"]: e async for e in db.employees.find({"id": {"$in": author_ids}}, {"_id": 0})}
+    for c in comments:
+        if not c.get("is_anonymous"):
+            e = emps.get(c.get("author_id"), {})
+            c["author_snapshot"] = {
+                "first_name": e.get("first_name"), "last_name": e.get("last_name"),
+                "avatar": e.get("avatar"),
+            }
+        else:
+            c["author_id"] = None
+            c["author_snapshot"] = {"first_name": "Anonyme", "last_name": ""}
+    return _sanitize_idea(idea, me)
+
+
 @api.post("/ideas")
 async def create_idea(payload: IdeaCreate):
     me = await _me()
+    now = _now()
     idea = {
         "id": _id(),
-        "title": payload.title.strip() or "Sans titre",
-        "description": payload.description.strip(),
+        "title": payload.title.strip()[:100] or "Sans titre",
+        "description": payload.description.strip()[:2000],
         "category": payload.category or "Autres",
         "author_id": me["id"],
         "is_anonymous": bool(payload.is_anonymous),
         "status": "new",
         "admin_response": None,
         "votes": {},
-        "created_at": _now(),
+        "attachments": (payload.attachments or [])[:6],
+        "comments": [],
+        "followers": [me["id"]],  # author auto-follows
+        "status_history": [{"status": "new", "at": now, "by": None}],
+        "created_at": now,
     }
     await db.ideas.insert_one(idea.copy())
     return _sanitize_idea(idea, me)
@@ -2354,6 +2458,53 @@ async def vote_idea(idea_id: str, direction: str):
     return _sanitize_idea(fresh, me)
 
 
+@api.post("/ideas/{idea_id}/follow")
+async def follow_idea(idea_id: str):
+    me = await _me()
+    idea = await db.ideas.find_one({"id": idea_id}, {"_id": 0})
+    if not idea:
+        raise HTTPException(404, "Idée introuvable")
+    followers = idea.get("followers") or []
+    if me["id"] not in followers:
+        followers.append(me["id"])
+        await db.ideas.update_one({"id": idea_id}, {"$set": {"followers": followers}})
+    fresh = await db.ideas.find_one({"id": idea_id}, {"_id": 0})
+    return _sanitize_idea(fresh, me)
+
+
+@api.delete("/ideas/{idea_id}/follow")
+async def unfollow_idea(idea_id: str):
+    me = await _me()
+    idea = await db.ideas.find_one({"id": idea_id}, {"_id": 0})
+    if not idea:
+        raise HTTPException(404, "Idée introuvable")
+    followers = [f for f in (idea.get("followers") or []) if f != me["id"]]
+    await db.ideas.update_one({"id": idea_id}, {"$set": {"followers": followers}})
+    fresh = await db.ideas.find_one({"id": idea_id}, {"_id": 0})
+    return _sanitize_idea(fresh, me)
+
+
+@api.post("/ideas/{idea_id}/comments")
+async def comment_idea(idea_id: str, payload: IdeaCommentCreate):
+    me = await _me()
+    idea = await db.ideas.find_one({"id": idea_id}, {"_id": 0})
+    if not idea:
+        raise HTTPException(404, "Idée introuvable")
+    comment = {
+        "id": _id(),
+        "author_id": me["id"],
+        "content": (payload.content or "").strip()[:800],
+        "created_at": _now(),
+        "is_anonymous": False,
+    }
+    if not comment["content"]:
+        raise HTTPException(400, "Commentaire vide")
+    comments = idea.get("comments") or []
+    comments.append(comment)
+    await db.ideas.update_one({"id": idea_id}, {"$set": {"comments": comments}})
+    return comment
+
+
 @api.put("/admin/ideas/{idea_id}")
 async def moderate_idea(idea_id: str, payload: IdeaModerate):
     me = await require_admin()
@@ -2361,27 +2512,44 @@ async def moderate_idea(idea_id: str, payload: IdeaModerate):
     if not idea:
         raise HTTPException(404, "Idée introuvable")
     updates: dict = {}
+    now = _now()
     if payload.status is not None:
-        if payload.status not in IDEA_STATUSES:
+        if payload.status not in list(IDEA_STATUS_LABELS.keys()):
             raise HTTPException(400, f"Statut invalide : {payload.status}")
         updates["status"] = payload.status
+        # Append to timeline
+        history = list(idea.get("status_history") or [])
+        history.append({"status": payload.status, "at": now, "by": me["id"]})
+        updates["status_history"] = history
     if payload.admin_response is not None:
         updates["admin_response"] = payload.admin_response
         updates["moderated_by"] = me["id"]
-        updates["moderated_at"] = _now()
+        updates["moderated_at"] = now
     if updates:
         await db.ideas.update_one({"id": idea_id}, {"$set": updates})
     fresh = await db.ideas.find_one({"id": idea_id}, {"_id": 0})
-    # If it was submitted non-anonymously, notify the author of the status change
-    if not fresh.get("is_anonymous") and payload.status and payload.status != idea.get("status"):
+    # Notify AUTHOR silently on status change (also for anonymous ideas — the
+    # notification lands in their personal inbox without revealing identity).
+    if payload.status and payload.status != idea.get("status") and fresh.get("author_id"):
         await _push_notification(
             employee_id=fresh["author_id"],
             type="idea",
-            title="Mise à jour de votre idée",
-            content=f"« {fresh['title']} » — statut : {payload.status}",
+            title=f"Votre idée est maintenant « {IDEA_STATUS_LABELS.get(payload.status, payload.status)} »",
+            content=f"{fresh['title']}" + (f" — {payload.admin_response}" if payload.admin_response else ""),
             icon="lightbulb",
-            link="/idees",
+            link=f"/idees/{fresh['id']}",
         )
+        # Also notify followers (people who explicitly clicked "Suivre")
+        for fid in (fresh.get("followers") or []):
+            if fid and fid != fresh.get("author_id"):
+                await _push_notification(
+                    employee_id=fid,
+                    type="idea",
+                    title=f"Idée suivie · {IDEA_STATUS_LABELS.get(payload.status, payload.status)}",
+                    content=fresh["title"],
+                    icon="lightbulb",
+                    link=f"/idees/{fresh['id']}",
+                )
     return _sanitize_idea(fresh, me)
 
 

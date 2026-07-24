@@ -293,3 +293,27 @@ Tests : iteration_24 → 100% backend (21/21) + 100% frontend. Zéro régression
 Dépendance ajoutée : `canvas-confetti` (yarn add).
 
 
+
+### 2026-07-24 — Bugfix Badge : cohérence cartes/tableau (iter 26)
+- **Bug** : sur `/rh/badgeage`, les cartes du haut (Entrée / Pause / Sortie) affichaient les vraies heures pointées (08:30 → 16:55) mais la ligne "Ven. 24/07" du "Récapitulatif de la semaine" affichait toujours les heures théoriques du planning (09:00 → 17:00). Résultat : incohérence + mauvais total hebdo.
+- **Cause** : dans `/api/badging` (`get_badging`), le calcul de l'entrée "live" pour aujourd'hui utilisait `_compute_today_badging(sched)` qui lit uniquement le planning, sans appliquer les overrides de `badging_manual`.
+- **Fix** : après avoir calculé `live` depuis le planning, appliquer les overrides `badging_manual` (clock_in/pause_out/pause_in/clock_out) et recalculer `worked_minutes` en tenant compte de la pause réelle. Alignement complet avec `/badging/today-live`.
+- Vérification curl : GET /api/badging?filter_range=week (X-Employee-Id emp-marcus-simeo) → ligne 2026-07-24 = 08:30 / 12:00 / 13:00 / 16:55, worked=445 min (7h25), `is_manual=true`. Total semaine = 36h40. Correspond exactement aux cartes.
+
+
+
+### 2026-07-24 — Refonte totale Boîte à idées (iter 27)
+- **Backend**:
+  - `Idea` étendue : `attachments`, `comments`, `followers`, `status_history[]`, statut `delivered` ("Mise en place")
+  - Nouveaux endpoints : `GET /ideas/stats`, `GET /ideas/{id}` (détail avec related & auteurs), `POST /ideas/{id}/comments`, `POST/DELETE /ideas/{id}/follow`
+  - **Notification systématique de l'auteur** (y compris pour idées anonymes) quand le statut change, avec titre dynamique (« En étude / Validée / Refusée / Mise en place »). Followers également notifiés.
+  - `create_idea` initialise `status_history=[{status:new}]` et auto-follow de l'auteur.
+- **Frontend** — `/app/frontend/src/pages/Ideas.jsx` réécrit intégralement (3 vues) :
+  1. **Liste** (`/idees`) — hero avec 4 piliers, onglets Toutes/Mes idées/Populaires, filtres (statut/catégorie/anonymes/tri/recherche), cards avec bloc vote large à gauche, sidebar (Comment ça fonctionne / Statistiques 5 lignes / Catégories populaires).
+  2. **Détail** (`/idees/:id`) — header "Idée #XXXX · Proposée le … par …" + badge statut, bloc "Votez pour cette idée !" avec bouton "Je vote pour" plein + "Je ne vote pas" outline, confirmation vote enregistré, onglets Détails/Commentaires/Historique, sidebar timeline (En étude → Validée → Mise en place) + Partager + Actions (Suivre / Modérer admin) + Vous aimerez peut-être.
+  3. **Proposer** (`/idees/nouveau`) — page dédiée avec champs Titre (0/100), Catégorie, Description (0/2000), ImageUpload multi-fichiers, toggle "Rendre l'idée anonyme", sidebar tips.
+- Modale de modération (`IdeaModerator`) accessible depuis liste ET détail, chips 5 statuts + réponse admin publique, notif automatique auteur+followers.
+- Routes ajoutées dans `App.js` : `/idees/nouveau`, `/idees/:id`.
+- Backend curl-tested : création → modération → notification auteur y compris anonyme = OK.
+
+

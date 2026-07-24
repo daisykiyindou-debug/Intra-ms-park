@@ -31,7 +31,7 @@ import NotesDeFrais from "@/pages/NotesDeFrais";
 import { HRDocView } from "@/pages/HRDocs";
 import FormationsList from "@/pages/Formations";
 import SupportITList, { TicketDetail, CentreAide } from "@/pages/Support";
-import Ideas from "@/pages/Ideas";
+import Ideas, { IdeaDetail, IdeaSubmit } from "@/pages/Ideas";
 import Birthdays from "@/pages/Birthdays";
 import BirthdayGate from "@/components/BirthdayGate";
 
@@ -130,6 +130,8 @@ function App() {
               <Route path="/aide" element={<CentreAide />} />
               <Route path="/avantages" element={<Avantages />} />
               <Route path="/idees" element={<Ideas />} />
+              <Route path="/idees/nouveau" element={<IdeaSubmit />} />
+              <Route path="/idees/:id" element={<IdeaDetail />} />
               <Route path="/anniversaires" element={<Birthdays />} />
               <Route path="/contacts" element={<Contacts />} />
               <Route path="/profil" element={<Profil />} />
