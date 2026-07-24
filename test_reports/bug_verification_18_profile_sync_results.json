@@ -1,0 +1,39 @@
+{
+  "checks": [
+    {
+      "name": "admin update to Idriss succeeds",
+      "passed": true,
+      "details": {
+        "status": 200,
+        "body_subset": {
+          "personal_phone": "+33 6 18 18 18 18",
+          "phone": "+33 1 18 18 18 18",
+          "postal_code": "92180",
+          "city": "Antony",
+          "manager_id": "emp-marcus-simeo",
+          "weekly_hours": "28h",
+          "daily_quota": 25
+        }
+      }
+    },
+    {
+      "name": "admin modifications reflect on Idriss /me account",
+      "passed": true,
+      "details": {
+        "personal_phone": "+33 6 18 18 18 18",
+        "phone": "+33 1 18 18 18 18",
+        "address": "18 avenue Admin Sync",
+        "postal_code": "92180",
+        "city": "Antony",
+        "manager_id": "emp-marcus-simeo",
+        "weekly_hours": "28h",
+        "meal_points": 25,
+        "daily_quota": 25
+      }
+    }
+  ],
+  "started_at": "2026-07-24T10:56:01Z",
+  "finished_at": "2026-07-24T10:56:01Z",
+  "passed": 2,
+  "failed": 0
+}

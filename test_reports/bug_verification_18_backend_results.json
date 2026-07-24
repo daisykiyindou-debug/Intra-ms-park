@@ -1,0 +1,196 @@
+{
+  "base_url": "https://mspark-employee-hub.preview.emergentagent.com/api",
+  "started_at": "2026-07-24T10:54:05Z",
+  "checks": [
+    {
+      "name": "meal_points auto bureau",
+      "passed": true,
+      "details": {
+        "actual_meal_points": 35,
+        "actual_daily_quota": 35
+      }
+    },
+    {
+      "name": "meal_points auto management",
+      "passed": true,
+      "details": {
+        "actual_meal_points": 30,
+        "actual_daily_quota": 30
+      }
+    },
+    {
+      "name": "meal_points auto ops",
+      "passed": true,
+      "details": {
+        "actual_meal_points": 25,
+        "actual_daily_quota": 25
+      }
+    },
+    {
+      "name": "meal_points explicit non-zero preserved",
+      "passed": true,
+      "details": {
+        "actual_meal_points": 42,
+        "actual_daily_quota": 42
+      }
+    },
+    {
+      "name": "badge fields persist and are returned by GET /me",
+      "passed": true,
+      "details": {
+        "badge_rfid": "BDG-01",
+        "badge_expiry": "2027-12-31",
+        "badge_active": true
+      }
+    },
+    {
+      "name": "admin-created profile fields reflect on user /me",
+      "passed": true,
+      "details": {
+        "personal_phone": "+33 6 23 45 67 89",
+        "phone": "+33 1 23 45 67 89",
+        "postal_code": "75018",
+        "city": "Paris",
+        "manager_id": "emp-marcus-simeo",
+        "weekly_hours": "39h"
+      }
+    },
+    {
+      "name": "weekly_pattern Mon-Fri shifts and Sat-Sun off",
+      "passed": true,
+      "details": {
+        "weekly_pattern": {
+          "0": {
+            "type": "shift",
+            "start": "09:00",
+            "end": "17:00"
+          },
+          "1": {
+            "type": "shift",
+            "start": "09:00",
+            "end": "17:00"
+          },
+          "2": {
+            "type": "shift",
+            "start": "09:00",
+            "end": "17:00"
+          },
+          "3": {
+            "type": "shift",
+            "start": "09:00",
+            "end": "17:00"
+          },
+          "4": {
+            "type": "shift",
+            "start": "09:00",
+            "end": "17:00"
+          },
+          "5": {
+            "type": "off"
+          },
+          "6": {
+            "type": "off"
+          }
+        }
+      }
+    },
+    {
+      "name": "availability 2026-09 follows work_days/off_days",
+      "passed": true,
+      "details": {
+        "bad_days": []
+      }
+    },
+    {
+      "name": "contract_url creation creates db.documents entry with employee_id/category Contrat",
+      "passed": false,
+      "details": {
+        "db_docs_for_employee_id": [],
+        "expected_name": "Contrat de travail — QA18 CONTRACT"
+      }
+    },
+    {
+      "name": "uploaded contract is visible in employee Documents RH (/documents)",
+      "passed": false,
+      "details": {
+        "visible_doc_names": [
+          "Règlement intérieur 2026",
+          "Procédure sécurité incendie"
+        ],
+        "expected_name": "Contrat de travail — QA18 CONTRACT"
+      }
+    },
+    {
+      "name": "updating contract_url adds a new Documents RH document without overwriting",
+      "passed": false,
+      "details": {
+        "before_doc_count": 0,
+        "after_docs": []
+      }
+    },
+    {
+      "name": "change-password rejects wrong current password for DB-created user",
+      "passed": true,
+      "details": {
+        "status": 401,
+        "body": {
+          "detail": "Mot de passe actuel incorrect"
+        }
+      }
+    },
+    {
+      "name": "change-password rejects new_password shorter than 6 chars",
+      "passed": true,
+      "details": {
+        "status": 400,
+        "body": {
+          "detail": "Le nouveau mot de passe doit contenir au moins 6 caractères"
+        }
+      }
+    },
+    {
+      "name": "change-password success allows login with new password and blocks old password for DB-created user",
+      "passed": true,
+      "details": {
+        "change_status": 200,
+        "change_body": {
+          "ok": true
+        },
+        "login_new_status": 200,
+        "login_old_status": 401
+      }
+    },
+    {
+      "name": "Idriss profile password change validates current password before success",
+      "passed": false,
+      "details": {
+        "status": 200,
+        "body": {
+          "ok": true
+        }
+      }
+    },
+    {
+      "name": "Idriss login works with changed password after profile change",
+      "passed": false,
+      "details": {
+        "login_new_status": 401,
+        "note": "Hardcoded demo auth currently rejects non-original password before DB fallback."
+      }
+    }
+  ],
+  "created_user_ids": [
+    "05b9b1de-3912-4e4e-923c-953a86ddc10c",
+    "30fb7d9c-080d-42c7-ac21-f123e2c1e370",
+    "71d095a2-df7e-469b-978c-8b3aa88a898d",
+    "1272e883-fe09-460e-b9d0-a0c6533412c5",
+    "4b4fb8cf-536a-4848-b3dd-4191f785c413"
+  ],
+  "cleanup": {
+    "employees_deleted": 5,
+    "documents_deleted": 0
+  },
+  "finished_at": "2026-07-24T10:54:06Z",
+  "passed": 11,
+  "failed": 5
+}

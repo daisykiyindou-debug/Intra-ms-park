@@ -444,6 +444,8 @@ function UserEditor({ user, employees, onClose, onSaved }) {
     contract_end_date: "",
     category: "Employé",
     badge_rfid: "",
+    badge_expiry: "",
+    badge_active: true,
     locker: "",
     work_days: [],
     off_days: [],
@@ -456,6 +458,8 @@ function UserEditor({ user, employees, onClose, onSaved }) {
     bic: "",
     account_holder: "",
     meal_points: "",
+    contract_url: "",
+    contract_name: "",
     admin_role: "employe",
     permissions: [],
     groups: [],
@@ -569,12 +573,36 @@ function UserEditor({ user, employees, onClose, onSaved }) {
                   alt=""
                   className="h-24 w-24 rounded-full object-cover ring-4 ring-white shadow-md"
                 />
+                <label className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-[#3BA4FF] text-white text-xs font-semibold px-3 py-1.5 cursor-pointer hover:bg-[#1D70B8]">
+                  <Copy className="h-3 w-3" /> Téléverser une photo
+                  <input
+                    type="file"
+                    accept="image/*"
+                    data-testid="user-avatar-file"
+                    className="hidden"
+                    onChange={async (e) => {
+                      const file = e.target.files?.[0];
+                      if (!file) return;
+                      const fd = new FormData();
+                      fd.append("file", file);
+                      try {
+                        const { data } = await api.post("/uploads", fd, {
+                          headers: { "Content-Type": "multipart/form-data" },
+                        });
+                        setF({ ...f, avatar: data.url });
+                        toast.success("Photo téléversée");
+                      } catch {
+                        toast.error("Échec du téléversement");
+                      }
+                    }}
+                  />
+                </label>
                 <input
                   data-testid="user-avatar"
                   value={f.avatar}
                   onChange={(e) => setF({ ...f, avatar: e.target.value })}
-                  placeholder="URL photo de profil"
-                  className="ms-input mt-3 text-xs"
+                  placeholder="ou coller une URL"
+                  className="ms-input mt-2 text-xs"
                 />
               </div>
               <div className="lg:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -627,6 +655,45 @@ function UserEditor({ user, employees, onClose, onSaved }) {
               <Field label="Date fin contrat" type="date" testid="contract_end_date" value={f.contract_end_date} onChange={(v) => setF({ ...f, contract_end_date: v })} />
               <Field label="Badge RFID / NFC" testid="badge_rfid" value={f.badge_rfid} onChange={(v) => setF({ ...f, badge_rfid: v })} />
               <Field label="Casier attribué" testid="locker" value={f.locker} onChange={(v) => setF({ ...f, locker: v })} />
+              <Field label="Expiration du badge" type="date" testid="badge_expiry" value={f.badge_expiry} onChange={(v) => setF({ ...f, badge_expiry: v })} />
+              <div className="flex items-center gap-2 pt-6">
+                <input type="checkbox" id="badge-active" checked={f.badge_active !== false} onChange={(e) => setF({ ...f, badge_active: e.target.checked })} data-testid="badge_active" className="h-4 w-4 accent-[#3BA4FF]" />
+                <label htmlFor="badge-active" className="text-sm text-[#071B34]">Badge actif</label>
+              </div>
+              <div className="md:col-span-2">
+                <label className="ms-overline">Contrat de travail (PDF)</label>
+                <label className="mt-2 flex items-center gap-3 rounded-xl border-2 border-dashed border-[#3BA4FF]/40 bg-[#3BA4FF]/5 p-4 cursor-pointer hover:bg-[#3BA4FF]/10 transition-colors">
+                  <input
+                    type="file"
+                    accept="application/pdf,.pdf,.doc,.docx"
+                    data-testid="contract-file"
+                    className="hidden"
+                    onChange={async (e) => {
+                      const file = e.target.files?.[0];
+                      if (!file) return;
+                      const fd = new FormData();
+                      fd.append("file", file);
+                      try {
+                        const { data } = await api.post("/uploads", fd, {
+                          headers: { "Content-Type": "multipart/form-data" },
+                        });
+                        setF({ ...f, contract_url: data.url, contract_name: file.name });
+                        toast.success("Contrat téléversé — il apparaîtra dans Documents RH");
+                      } catch {
+                        toast.error("Échec du téléversement");
+                      }
+                    }}
+                  />
+                  <Copy className="h-5 w-5 text-[#3BA4FF]" />
+                  <div className="flex-1 text-sm">
+                    {f.contract_url ? (
+                      <span className="font-semibold text-[#071B34]">{f.contract_name || "Contrat téléversé"} ✓</span>
+                    ) : (
+                      <span className="text-[#475569]">Cliquez pour joindre le contrat (PDF)</span>
+                    )}
+                  </div>
+                </label>
+              </div>
             </div>
           )}
 
@@ -653,7 +720,7 @@ function UserEditor({ user, employees, onClose, onSaved }) {
               <Field label="Salaire brut (€)" type="number" testid="gross_salary" value={f.gross_salary} onChange={(v) => setF({ ...f, gross_salary: v })} />
               <Field label="Salaire net estimé (€)" type="number" testid="net_salary" value={f.net_salary} onChange={(v) => setF({ ...f, net_salary: v })} />
               <Field label="Taux horaire (€)" type="number" testid="hourly_rate" value={f.hourly_rate} onChange={(v) => setF({ ...f, hourly_rate: v })} />
-              <Field label="Points repas / jour" type="number" testid="meal_points" value={f.meal_points} onChange={(v) => setF({ ...f, meal_points: v })} />
+              <Field label="Points repas / jour" type="number" testid="meal_points" value={f.meal_points} onChange={(v) => setF({ ...f, meal_points: v })} placeholder="Auto: Bureau=35 · Management=30 · OPS=25" />
               <Field className="md:col-span-2" label="IBAN" testid="iban" value={f.iban} onChange={(v) => setF({ ...f, iban: v })} placeholder="FR76 ..." />
               <Field label="BIC" testid="bic" value={f.bic} onChange={(v) => setF({ ...f, bic: v })} />
               <Field label="Titulaire du compte" testid="account_holder" value={f.account_holder} onChange={(v) => setF({ ...f, account_holder: v })} />

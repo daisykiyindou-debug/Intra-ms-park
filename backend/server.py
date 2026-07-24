@@ -3070,6 +3070,29 @@ class ProfileUpdate(BaseModel):
     address: Optional[str] = None
 
 
+class PasswordChange(BaseModel):
+    current_password: Optional[str] = None
+    new_password: str
+
+
+@api.post("/me/change-password")
+async def change_own_password(payload: PasswordChange):
+    emp = await db.employees.find_one({"id": current_user()})
+    if not emp:
+        raise HTTPException(404, "Utilisateur introuvable")
+    stored = emp.get("password")
+    # If a stored password exists, verify current_password matches
+    if stored and payload.current_password and payload.current_password != stored:
+        raise HTTPException(401, "Mot de passe actuel incorrect")
+    if len(payload.new_password) < 6:
+        raise HTTPException(400, "Le nouveau mot de passe doit contenir au moins 6 caractères")
+    await db.employees.update_one(
+        {"id": current_user()},
+        {"$set": {"password": payload.new_password, "must_change_password": False}},
+    )
+    return {"ok": True}
+
+
 @api.put("/me")
 async def update_me(payload: ProfileUpdate):
     updates = {k: v for k, v in payload.model_dump().items() if v is not None}
@@ -3343,6 +3366,8 @@ class UserCreate(BaseModel):
     contract_end_date: Optional[str] = None
     category: Optional[str] = None  # Employé, Agent maîtrise, Cadre
     badge_rfid: Optional[str] = None
+    badge_expiry: Optional[str] = None  # YYYY-MM-DD
+    badge_active: Optional[bool] = True
     locker: Optional[str] = None
     # Section 3 — Planning
     work_days: List[str] = []  # ["monday", "tuesday", ...]
@@ -3425,7 +3450,18 @@ async def admin_create_user(payload: UserCreate):
     data.setdefault("leave_balance", {"cp_n_1": 0, "cp_n": 0, "rtt": 0})
     data.setdefault("weekly_pattern", {})
     data.setdefault("created_at", _now())
+    _apply_user_derivations(data)
     await db.employees.insert_one(data.copy())
+    # Register a Documents RH entry if a contract was uploaded during creation
+    if data.get("contract_url"):
+        await db.documents.insert_one({
+            "id": _id(),
+            "employee_id": data["id"],
+            "name": f"Contrat de travail — {data['first_name']} {data['last_name']}",
+            "category": "Contrat",
+            "url": data["contract_url"],
+            "uploaded_at": _now(),
+        })
     # Return the generated password so the admin can share it
     return {"user": {k: v for k, v in data.items() if k != "password"},
             "temp_password": temp_pwd}
@@ -3445,7 +3481,23 @@ async def admin_update_user(uid: str, payload: UserUpdate):
         data["can_manage_communication"] = data["admin_role"] in (
             "communication", "superadmin", "direction",
         )
+    # Merge current employee data with updates for derivation
+    merged = {**u, **data}
+    _apply_user_derivations(merged)
+    # Persist derived fields alongside explicit updates
+    for k in ("meal_points", "daily_quota", "weekly_pattern", "badge_active"):
+        data[k] = merged[k]
     await db.employees.update_one({"id": uid}, {"$set": data})
+    # If a new contract was attached and not already in Documents RH, register it
+    if data.get("contract_url") and data.get("contract_url") != u.get("contract_url"):
+        await db.documents.insert_one({
+            "id": _id(),
+            "employee_id": uid,
+            "name": f"Contrat de travail — {u.get('first_name', '')} {u.get('last_name', '')}".strip(),
+            "category": "Contrat",
+            "url": data["contract_url"],
+            "uploaded_at": _now(),
+        })
     updated = await db.employees.find_one({"id": uid}, {"_id": 0, "password": 0})
     return updated
 
@@ -3544,6 +3596,81 @@ def _covered_minutes(entry: dict) -> int:
         return max(0, m)
     except Exception:
         return 0
+
+
+MEAL_POINTS_BY_STATUS = {
+    "bureau": 35,
+    "management": 30,
+    "direction": 30,
+    "ops": 25,
+    "alternant": 25,
+    "stage": 25,
+}
+
+WEEKDAY_MAP = {
+    "monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3,
+    "friday": 4, "saturday": 5, "sunday": 6,
+}
+
+
+def _derive_meal_points(statuses: list[str], fallback: Optional[int] = None) -> int:
+    """Return the highest meal_points quota matching the given statuses."""
+    if not statuses:
+        return fallback if fallback is not None else 20
+    return max((MEAL_POINTS_BY_STATUS.get(s, 20) for s in statuses), default=20)
+
+
+def _build_weekly_pattern(work_days: list[str], off_days: list[str], usual_hours: Optional[str]) -> dict:
+    """Build weekly_pattern dict indexed by weekday int (0=Mon)."""
+    # Parse usual_hours like "9h-17h" or "09:00-17:00"
+    default_start, default_end = "09:00", "17:00"
+    if usual_hours:
+        parts = usual_hours.replace("h", ":").replace(" ", "").split("-")
+        if len(parts) == 2:
+            def _norm(t: str) -> str:
+                if ":" not in t:
+                    return f"{int(t):02d}:00"
+                h, _, m = t.partition(":")
+                return f"{int(h):02d}:{(m or '00').zfill(2)[:2]}"
+            try:
+                default_start = _norm(parts[0])
+                default_end = _norm(parts[1])
+            except Exception:
+                pass
+    pattern: dict = {}
+    for d in work_days:
+        idx = WEEKDAY_MAP.get(d)
+        if idx is None:
+            continue
+        pattern[str(idx)] = {"type": "shift", "start": default_start, "end": default_end}
+    for d in off_days:
+        idx = WEEKDAY_MAP.get(d)
+        if idx is None:
+            continue
+        pattern[str(idx)] = {"type": "off"}
+    return pattern
+
+
+def _apply_user_derivations(data: dict) -> None:
+    """Mutate `data` in place: derive meal_points, weekly_pattern, daily_quota."""
+    statuses = data.get("statuses") or []
+    # meal_points auto if not explicitly overridden or if defaulted to None
+    if data.get("meal_points") in (None, "", 0):
+        data["meal_points"] = _derive_meal_points(statuses)
+    data["daily_quota"] = data["meal_points"]
+    # Weekly pattern
+    work_days = data.get("work_days") or []
+    off_days = data.get("off_days") or []
+    if work_days or off_days:
+        # Auto-complete: any weekday not listed as work is off
+        listed = set(work_days) | set(off_days)
+        for k in WEEKDAY_MAP:
+            if k not in listed:
+                off_days = list(off_days) + [k]
+        data["weekly_pattern"] = _build_weekly_pattern(work_days, off_days, data.get("usual_hours"))
+    # Badge defaults
+    if data.get("badge_active") is None:
+        data["badge_active"] = True
 
 
 def _entry_from_pattern(emp: dict, day: date) -> dict:
