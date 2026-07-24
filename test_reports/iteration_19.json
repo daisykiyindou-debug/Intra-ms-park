@@ -1,0 +1,41 @@
+{
+  "verdict": "fixed",
+  "user_reported_bug": "Retest suite au verdict not_fixed: (1) Contract upload persisté et visible dans Documents RH — était bloqué car contract_url absent du modèle Pydantic UserCreate. (2) Password change pour comptes seedés (Idriss) — était bloqué car login prenait toujours le hardcoded password.",
+  "summary": "No relevant testing skill found. Backend-only focused retest passed: admin create/update with contract_url persists separate Contrat documents visible via GET /api/documents for the target employee; Idriss seed account can change password using old seed current_password, log in with new password and old seed password, and rejects wrong password. Regression checks for admin-created user password change/login, meal_points, badge fields, weekly_pattern, and Profil-related /me data also passed. Auth flow is MOCKED/custom X-Employee-Id + fallback DB as noted by the request.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/test_reports/bug_verification_19_backend_test.py",
+    "/app/test_reports/bug_verification_19_backend_results.json",
+    "/app/test_reports/bug_verification_19.json",
+    "/app/test_reports/iteration_19.json"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Verified /app/backend/server.py: UserCreate now includes contract_url and UserUpdate inherits it; admin create/update insert Documents RH rows with target_employee_id, category='Contrat', url, and issued_at/uploaded_at.",
+    "Verified seeded auth code: auth_login accepts either hardcoded seed password or stored DB password for Idriss; change_own_password accepts current_password matching either stored DB password or seed password.",
+    "Important: authentication in this app remains MOCKED/custom via X-Employee-Id header plus login response, not a production JWT/session flow. This matches the review request's mocked API note."
+  ],
+  "updated_files": [
+    "/app/test_reports/bug_verification_19_backend_test.py",
+    "/app/test_reports/bug_verification_19_backend_results.json",
+    "/app/test_reports/bug_verification_19.json",
+    "/app/test_reports/iteration_19.json"
+  ],
+  "success_rate": {
+    "backend": "100%",
+    "frontend": "N/A - backend-only request"
+  },
+  "seed_data_creation": "Created one transient QA employee with two contract URLs, verified DB/API visibility and password-change behavior, then deleted the employee and its 2 test documents. Idriss password was changed during the test and restored to Idriss2026! at the end.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Focused script /app/test_reports/bug_verification_19_backend_test.py passed on http://localhost:8001 using DB test_database. Evidence file shows create contract doc visible count=1, update visible URLs include both contract URLs, Idriss new/old seed logins 200 and wrong login 401, created user new login 200 and old temp password 401. Idriss documented seed password was restored and QA employee/docs were cleaned up.",
+  "rca_of_the_issue": "Original failure was consistent with contract_url being dropped by the Pydantic model and seeded login checking only the hardcoded password. Runtime verification now proves contract_url reaches employee/doc persistence and seeded auth accepts both DB and seed passwords after password change."
+}

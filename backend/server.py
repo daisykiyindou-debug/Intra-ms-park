@@ -3081,9 +3081,16 @@ async def change_own_password(payload: PasswordChange):
     if not emp:
         raise HTTPException(404, "Utilisateur introuvable")
     stored = emp.get("password")
-    # If a stored password exists, verify current_password matches
-    if stored and payload.current_password and payload.current_password != stored:
-        raise HTTPException(401, "Mot de passe actuel incorrect")
+    # Try to find the seed/hardcoded credentials for this employee
+    hardcoded_pwd = None
+    for _email, (_pwd, _eid) in _LOGIN_CREDENTIALS.items():
+        if _eid == emp["id"]:
+            hardcoded_pwd = _pwd
+            break
+    # Verify current password: accept either the stored one OR the hardcoded seed password
+    if payload.current_password:
+        if payload.current_password != stored and payload.current_password != hardcoded_pwd:
+            raise HTTPException(401, "Mot de passe actuel incorrect")
     if len(payload.new_password) < 6:
         raise HTTPException(400, "Le nouveau mot de passe doit contenir au moins 6 caractères")
     await db.employees.update_one(
@@ -3277,16 +3284,20 @@ _LOGIN_CREDENTIALS = {
 async def auth_login(payload: LoginRequest):
     email = payload.email.lower().strip()
 
-    # 1) Hardcoded demo credentials (kept for backward compatibility)
+    # 1) Hardcoded demo credentials — but the DB password takes precedence if the
+    #    user has changed it via /me/change-password. This preserves the ability
+    #    for seed accounts to update their own password permanently.
     creds = _LOGIN_CREDENTIALS.get(email)
     if creds:
         expected_pwd, eid = creds
-        if payload.password != expected_pwd:
-            raise HTTPException(401, "Mot de passe incorrect")
         emp = await db.employees.find_one({"id": eid}, {"_id": 0})
         if emp:
             if emp.get("account_status") in ("suspended", "deactivated"):
                 raise HTTPException(403, "Ce compte est désactivé. Contactez l'administrateur.")
+            # Accept DB password (if set) OR the seed password
+            db_pwd = emp.get("password")
+            if payload.password != expected_pwd and (not db_pwd or payload.password != db_pwd):
+                raise HTTPException(401, "Mot de passe incorrect")
             return {
                 "employee_id": eid,
                 "is_admin": emp.get("is_admin", False),
@@ -3295,6 +3306,8 @@ async def auth_login(payload: LoginRequest):
                 "last_name": emp["last_name"],
                 "must_change_password": bool(emp.get("must_change_password")),
             }
+        if payload.password != expected_pwd:
+            raise HTTPException(401, "Mot de passe incorrect")
 
     # 2) DB users (created via admin panel)
     emp = await db.employees.find_one(
@@ -3382,6 +3395,7 @@ class UserCreate(BaseModel):
     bic: Optional[str] = None
     account_holder: Optional[str] = None
     meal_points: Optional[int] = None
+    contract_url: Optional[str] = None
     # Section 7 — Access
     admin_role: str = "employe"  # employe | manager | rh | communication | comptabilite | direction | superadmin
     permissions: List[str] = []
@@ -3456,10 +3470,11 @@ async def admin_create_user(payload: UserCreate):
     if data.get("contract_url"):
         await db.documents.insert_one({
             "id": _id(),
-            "employee_id": data["id"],
+            "target_employee_id": data["id"],
             "name": f"Contrat de travail — {data['first_name']} {data['last_name']}",
             "category": "Contrat",
             "url": data["contract_url"],
+            "issued_at": _now(),
             "uploaded_at": _now(),
         })
     # Return the generated password so the admin can share it
@@ -3492,10 +3507,11 @@ async def admin_update_user(uid: str, payload: UserUpdate):
     if data.get("contract_url") and data.get("contract_url") != u.get("contract_url"):
         await db.documents.insert_one({
             "id": _id(),
-            "employee_id": uid,
+            "target_employee_id": uid,
             "name": f"Contrat de travail — {u.get('first_name', '')} {u.get('last_name', '')}".strip(),
             "category": "Contrat",
             "url": data["contract_url"],
+            "issued_at": _now(),
             "uploaded_at": _now(),
         })
     updated = await db.employees.find_one({"id": uid}, {"_id": 0, "password": 0})

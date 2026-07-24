@@ -1,0 +1,84 @@
+{
+  "base_url": "http://localhost:8001",
+  "db_name": "test_database",
+  "steps": [
+    {
+      "name": "admin_login",
+      "status": 200,
+      "employee_id": "emp-marcus-simeo"
+    },
+    {
+      "name": "create_user_contract_document_and_profile_regressions",
+      "status": 200,
+      "user_id": "634b5924-243b-47f3-8aae-ff34f524b53d",
+      "db_doc": {
+        "id": "d3144a57-f28a-4bcc-8f48-bfec84ab0ff4",
+        "target_employee_id": "634b5924-243b-47f3-8aae-ff34f524b53d",
+        "name": "Contrat de travail — QAContract 20260724110340",
+        "category": "Contrat",
+        "url": "http://x/c-20260724110340-1.pdf",
+        "issued_at": "2026-07-24T11:03:40.908115+00:00",
+        "uploaded_at": "2026-07-24T11:03:40.908122+00:00"
+      },
+      "visible_count": 1,
+      "profile_fields_checked": [
+        "meal_points",
+        "daily_quota",
+        "badge_rfid",
+        "badge_active",
+        "weekly_pattern"
+      ],
+      "meal_points_today": {
+        "daily_quota": 12,
+        "credited": true,
+        "credited_points": 12,
+        "used": 0,
+        "remaining": 12,
+        "transactions": [],
+        "last_badge": null,
+        "last_transaction_ts": null,
+        "role_category": "employe",
+        "expires_at": "2026-07-24T23:59:59"
+      }
+    },
+    {
+      "name": "update_user_adds_new_contract_document",
+      "status": 200,
+      "visible_urls": [
+        "http://x/c-20260724110340-1.pdf",
+        "http://x/c-20260724110340-2.pdf"
+      ]
+    },
+    {
+      "name": "idriss_seed_password_change_dual_login",
+      "change_status": 200,
+      "new_login_status": 200,
+      "old_seed_login_status": 200,
+      "wrong_login_status": 401,
+      "wrong_detail": {
+        "detail": "Mot de passe incorrect"
+      }
+    },
+    {
+      "name": "created_user_password_change_login",
+      "new_login_status": 200,
+      "old_password_rejected_status": 401
+    }
+  ],
+  "cleanup": [
+    {
+      "name": "restore_idriss_seed_password",
+      "status": 200,
+      "body": {
+        "ok": true
+      }
+    },
+    {
+      "name": "delete_created_user_and_docs",
+      "user_id": "634b5924-243b-47f3-8aae-ff34f524b53d",
+      "deleted_docs": 2,
+      "deleted_emp": 1
+    }
+  ],
+  "verdict": "passed"
+}
