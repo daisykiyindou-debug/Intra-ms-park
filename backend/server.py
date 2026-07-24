@@ -1713,7 +1713,9 @@ async def availability(month: Optional[str] = None):
         r = by_day_req.get(iso)
         sched = by_day.get(iso)
         # Fallback: derive from weekly pattern for days without a materialized entry
-        if not sched:
+        # Only apply if the user actually has a defined pattern — otherwise let
+        # the holiday branch below handle days on the fixed French calendar.
+        if not sched and emp.get("weekly_pattern"):
             sched = _entry_from_pattern(emp, cur)
         status, label, selectable = "available", "Disponible", True
 
@@ -3741,9 +3743,12 @@ def _shift_horizon_cap() -> date:
 
 async def _ensure_range(employee_id: str, start: date, end: date) -> None:
     """Materialize any missing schedule days between [start, end] from the employee's pattern.
-    Only auto-generates up to SHIFT_HORIZON_CAP. Idempotent."""
+    Only auto-generates up to SHIFT_HORIZON_CAP. Idempotent. Users without a weekly_pattern
+    are skipped (no artificial off-day rows) so that public-holiday defaults still apply."""
     emp = await db.employees.find_one({"id": employee_id}, {"_id": 0})
     if not emp:
+        return
+    if not emp.get("weekly_pattern"):
         return
     existing_days = set()
     async for e in db.schedules.find(
@@ -4613,3 +4618,101 @@ async def _seed_extra_products():
 @app.on_event("shutdown")
 async def on_stop():
     client.close()
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Newsletters
+# ═══════════════════════════════════════════════════════════════════
+class NewsletterCreate(BaseModel):
+    title: str
+    subject: Optional[str] = None
+    preheader: Optional[str] = None
+    cover_image: Optional[str] = None
+    category: Optional[str] = "Général"
+    author_id: Optional[str] = None
+    reading_time: Optional[int] = 3  # minutes
+    body_html: Optional[str] = ""  # rich content
+    blocks: List[dict] = []  # optional block-based content
+    attachments: List[dict] = []  # [{name, url}]
+    archived: bool = False
+    published: bool = False
+    published_at: Optional[str] = None
+
+
+@api.get("/newsletters")
+async def list_newsletters(archived: bool = False, category: Optional[str] = None, q: Optional[str] = None):
+    query: dict = {"archived": archived}
+    if category:
+        query["category"] = category
+    items = await db.newsletters.find(query, {"_id": 0}).sort("published_at", -1).to_list(200)
+    if q:
+        needle = q.lower()
+        items = [n for n in items if needle in (n.get("title", "") + n.get("subject", "") + n.get("category", "")).lower()]
+    return items
+
+
+@api.get("/newsletters/{nid}")
+async def get_newsletter(nid: str):
+    n = await db.newsletters.find_one({"id": nid}, {"_id": 0})
+    if not n:
+        raise HTTPException(404, "Newsletter introuvable")
+    return n
+
+
+@api.post("/admin/newsletters")
+async def create_newsletter(payload: NewsletterCreate):
+    me = await require_communication_editor()
+    n = payload.model_dump()
+    n["id"] = _id()
+    n["author_id"] = n.get("author_id") or me["id"]
+    n["created_at"] = _now()
+    if n.get("published") and not n.get("published_at"):
+        n["published_at"] = _now()
+    await db.newsletters.insert_one(n.copy())
+    if n.get("published") and not n.get("archived"):
+        await _broadcast_notification(
+            type="news",
+            title=f"Nouvelle newsletter · {n['title']}",
+            content=n.get("preheader") or n.get("subject") or "",
+            icon="megaphone",
+            link=f"/newsletters/{n['id']}",
+            exclude_ids=[me["id"]],
+        )
+    return await _strip(n)
+
+
+@api.put("/admin/newsletters/{nid}")
+async def update_newsletter(nid: str, payload: NewsletterCreate):
+    await require_communication_editor()
+    old = await db.newsletters.find_one({"id": nid}, {"_id": 0})
+    if not old:
+        raise HTTPException(404, "Newsletter introuvable")
+    upd = payload.model_dump()
+    if upd.get("published") and not old.get("published"):
+        upd["published_at"] = _now()
+    await db.newsletters.update_one({"id": nid}, {"$set": upd})
+    n = await db.newsletters.find_one({"id": nid}, {"_id": 0})
+    if upd.get("published") and not old.get("published"):
+        await _broadcast_notification(
+            type="news",
+            title=f"Nouvelle newsletter · {n['title']}",
+            content=n.get("preheader") or n.get("subject") or "",
+            icon="megaphone",
+            link=f"/newsletters/{n['id']}",
+        )
+    return n
+
+
+@api.delete("/admin/newsletters/{nid}")
+async def delete_newsletter(nid: str):
+    await require_communication_editor()
+    await db.newsletters.delete_one({"id": nid})
+    return {"ok": True}
+
+
+@api.post("/admin/newsletters/{nid}/archive")
+async def archive_newsletter(nid: str):
+    await require_communication_editor()
+    await db.newsletters.update_one({"id": nid}, {"$set": {"archived": True}})
+    return {"ok": True}
+
