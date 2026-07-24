@@ -7,6 +7,7 @@ import {
 import { toast } from "sonner";
 import { api, absoluteUrl, formatDateFr } from "@/lib/api";
 import { useApp } from "@/contexts/AppContext";
+import PortalModal from "@/components/PortalModal";
 
 const CATEGORIES = ["Métier", "Sécurité", "Bureautique", "Langues", "Management", "Autres"];
 const FORMATS = ["présentiel", "distanciel", "hybride"];
@@ -133,6 +134,7 @@ function ProposeModal({ onClose, onSaved }) {
     onSaved();
   };
   return (
+    <PortalModal>
     <div onClick={onClose} className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
       <div onClick={(e) => e.stopPropagation()} className="bg-white rounded-3xl w-full max-w-lg p-6 space-y-4">
         <div className="flex items-center justify-between">
@@ -161,6 +163,7 @@ function ProposeModal({ onClose, onSaved }) {
         </div>
       </div>
     </div>
+    </PortalModal>
   );
 }
 
@@ -262,6 +265,7 @@ function FormationEditor({ formation, onClose, onSaved }) {
   };
 
   return (
+    <PortalModal>
     <div onClick={onClose} className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
       <div onClick={(e) => e.stopPropagation()} className="bg-white rounded-3xl w-full max-w-xl max-h-[90vh] overflow-y-auto p-6 space-y-3">
         <div className="flex items-center justify-between">
@@ -302,5 +306,6 @@ function FormationEditor({ formation, onClose, onSaved }) {
         </div>
       </div>
     </div>
+    </PortalModal>
   );
 }

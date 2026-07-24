@@ -7,6 +7,7 @@ import {
 import { toast } from "sonner";
 import { api, absoluteUrl, formatDateFr } from "@/lib/api";
 import { useApp } from "@/contexts/AppContext";
+import PortalModal from "@/components/PortalModal";
 
 const CATEGORIES = [
   { k: "hardware", l: "Matériel", ic: Cpu },
@@ -132,6 +133,7 @@ function TicketComposer({ onClose, onSaved }) {
     onSaved();
   };
   return (
+    <PortalModal>
     <div onClick={onClose} className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
       <div onClick={(e) => e.stopPropagation()} className="bg-white rounded-3xl w-full max-w-lg max-h-[90vh] overflow-y-auto p-6 space-y-3">
         <div className="flex items-center justify-between">
@@ -168,6 +170,7 @@ function TicketComposer({ onClose, onSaved }) {
         </div>
       </div>
     </div>
+    </PortalModal>
   );
 }
 

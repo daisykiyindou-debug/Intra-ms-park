@@ -6,6 +6,7 @@ import {
 import { toast } from "sonner";
 import { api, absoluteUrl, formatDateFr } from "@/lib/api";
 import { useApp } from "@/contexts/AppContext";
+import PortalModal from "@/components/PortalModal";
 
 const CATEGORIES = [
   { k: "transport", l: "Transport" },
@@ -141,6 +142,7 @@ function ExpenseComposer({ onClose, onSaved }) {
   };
 
   return (
+    <PortalModal>
     <div onClick={onClose} className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
       <div onClick={(e) => e.stopPropagation()} className="bg-white rounded-3xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
         <div className="sticky top-0 z-10 bg-white flex items-center justify-between p-5 border-b border-[#071B34]/5">
@@ -199,6 +201,7 @@ function ExpenseComposer({ onClose, onSaved }) {
         </div>
       </div>
     </div>
+    </PortalModal>
   );
 }
 

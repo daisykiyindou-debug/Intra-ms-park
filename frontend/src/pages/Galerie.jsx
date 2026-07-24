@@ -7,6 +7,7 @@ import {
 import { toast } from "sonner";
 import { api, absoluteUrl, formatDateFr } from "@/lib/api";
 import { useApp } from "@/contexts/AppContext";
+import PortalModal from "@/components/PortalModal";
 
 const CATEGORIES = ["Événement", "Team Building", "Formation", "Restaurant", "Vie du parc", "Autres"];
 
@@ -253,10 +254,12 @@ export function GalerieAlbum() {
       )}
 
       {lightbox && (
+        <PortalModal>
         <div onClick={() => setLightbox(null)} className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4">
           <button className="absolute top-4 right-4 text-white h-10 w-10 flex items-center justify-center bg-white/10 rounded-full"><X className="h-5 w-5" /></button>
           <img src={absoluteUrl(lightbox.url)} alt="" className="max-w-full max-h-full rounded-2xl" />
         </div>
+        </PortalModal>
       )}
 
       {editing && <AlbumEditor album={g} onClose={() => setEditing(false)} onSaved={() => { setEditing(false); load(); }} />}
@@ -292,6 +295,7 @@ function AlbumEditor({ album, onClose, onSaved }) {
   };
 
   return (
+    <PortalModal>
     <div onClick={onClose} className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
       <div onClick={(e) => e.stopPropagation()} className="bg-white rounded-3xl w-full max-w-lg max-h-[90vh] overflow-y-auto p-6 space-y-4">
         <div className="flex items-center justify-between">
@@ -341,5 +345,6 @@ function AlbumEditor({ album, onClose, onSaved }) {
         </div>
       </div>
     </div>
+    </PortalModal>
   );
 }

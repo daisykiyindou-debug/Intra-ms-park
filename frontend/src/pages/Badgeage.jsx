@@ -8,6 +8,7 @@ import {
 import { toast } from "sonner";
 import { api, formatDateFr } from "@/lib/api";
 import useLiveData from "@/hooks/useLiveData";
+import PortalModal from "@/components/PortalModal";
 
 const DAYS = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"];
 const fmtHM = (min) => {
@@ -337,6 +338,7 @@ function MonthlyDonut({ worked, declared, available }) {
 // ═══════════════════════════════════════════════════════════════════
 function PunchModal({ onClose, onPunch, nextStep, today }) {
   return (
+    <PortalModal>
     <div onClick={onClose} className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
       <div onClick={(e) => e.stopPropagation()} className="bg-white rounded-3xl w-full max-w-md p-6 space-y-4">
         <div className="flex items-center justify-between">
@@ -372,6 +374,7 @@ function PunchModal({ onClose, onPunch, nextStep, today }) {
         )}
       </div>
     </div>
+    </PortalModal>
   );
 }
 
@@ -427,6 +430,7 @@ function OvertimeDeclareModal({ onClose, onSaved }) {
   };
 
   return (
+    <PortalModal>
     <div onClick={onClose} className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
       <div onClick={(e) => e.stopPropagation()} className="bg-white rounded-3xl w-full max-w-3xl max-h-[90vh] overflow-y-auto">
         <div className="sticky top-0 bg-white flex items-center justify-between p-5 border-b border-[#071B34]/5 z-10">
@@ -546,6 +550,7 @@ function OvertimeDeclareModal({ onClose, onSaved }) {
         </div>
       </div>
     </div>
+    </PortalModal>
   );
 }
 
@@ -579,6 +584,7 @@ function RecoveryRequestModal({ counter, onClose, onSaved }) {
   };
 
   return (
+    <PortalModal>
     <div onClick={onClose} className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
       <div onClick={(e) => e.stopPropagation()} className="bg-white rounded-3xl w-full max-w-3xl max-h-[90vh] overflow-y-auto">
         <div className="sticky top-0 bg-white p-5 border-b border-[#071B34]/5 z-10 flex items-start justify-between">
@@ -693,5 +699,6 @@ function RecoveryRequestModal({ counter, onClose, onSaved }) {
         </div>
       </div>
     </div>
+    </PortalModal>
   );
 }

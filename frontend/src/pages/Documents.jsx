@@ -3,6 +3,7 @@ import { FileText, Download, Eye, Search, X, Receipt, Star } from "lucide-react"
 import { Link } from "react-router-dom";
 import { api, formatDateFr } from "@/lib/api";
 import useLiveData from "@/hooks/useLiveData";
+import PortalModal from "@/components/PortalModal";
 
 const CATEGORIES = [
   { k: "all", l: "Toutes les catégories" },
@@ -136,6 +137,7 @@ export default function Documents() {
       </div>
 
       {preview && (
+        <PortalModal>
         <div role="dialog" aria-modal="true" onClick={() => setPreview(null)} className="fixed inset-0 z-50 bg-black/50 backdrop-blur-md flex items-center justify-center p-4">
           <div onClick={(e) => e.stopPropagation()} data-testid="doc-preview" className="bg-white rounded-2xl max-w-3xl w-full h-[80vh] p-0 overflow-hidden">
             <div className="flex items-center justify-between px-5 h-14 border-b border-[#071B34]/5">
@@ -145,6 +147,7 @@ export default function Documents() {
             <iframe title="preview" src={preview.url} className="w-full h-[calc(80vh-3.5rem)]" />
           </div>
         </div>
+        </PortalModal>
       )}
     </div>
   );
