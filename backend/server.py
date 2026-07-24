@@ -3416,9 +3416,12 @@ async def admin_create_user(payload: UserCreate):
     data.setdefault("available", True)
     data.setdefault("seniority_months", 0)
     data.setdefault("skills", [])
-    data.setdefault("avatar", data.get("avatar") or "https://images.unsplash.com/photo-1633332755192-727a05c4013d?w=200&h=200&fit=crop")
-    data.setdefault("email", data.get("email") or data.get("personal_email"))
-    data.setdefault("phone", data.get("phone") or data.get("personal_phone"))
+    if not data.get("avatar"):
+        data["avatar"] = "https://images.unsplash.com/photo-1633332755192-727a05c4013d?w=200&h=200&fit=crop"
+    if not data.get("email"):
+        data["email"] = data.get("personal_email")
+    if not data.get("phone"):
+        data["phone"] = data.get("personal_phone")
     data.setdefault("leave_balance", {"cp_n_1": 0, "cp_n": 0, "rtt": 0})
     data.setdefault("weekly_pattern", {})
     data.setdefault("created_at", _now())

@@ -114,6 +114,7 @@ export default function UserManager() {
   const resetPassword = async (u) => {
     if (!window.confirm(`Réinitialiser le mot de passe de ${u.first_name} ${u.last_name} ?`)) return;
     const { data } = await api.post(`/admin/users/${u.id}/reset-password`);
+    toast.success(`Nouveau mot de passe : ${data.temp_password}`, { duration: 15000 });
     setTempPasswordModal({ user: u, password: data.temp_password });
   };
 
@@ -243,9 +244,12 @@ export default function UserManager() {
           user={editing === "new" ? null : editing}
           employees={users}
           onClose={() => setEditing(null)}
-          onSaved={(created) => {
+          onSaved={async (created) => {
             setEditing(null);
-            load();
+            setSearch(""); // Clear any active search filter so the new user is visible
+            setFilterRole("all");
+            setFilterStatus("all");
+            await load();
             notifyLiveRefresh(["users"]);
             if (created?.temp_password) {
               setTempPasswordModal({
@@ -261,7 +265,10 @@ export default function UserManager() {
       {tempPasswordModal && (
         <TempPasswordModal
           data={tempPasswordModal}
-          onClose={() => setTempPasswordModal(null)}
+          onClose={() => {
+            setTempPasswordModal(null);
+            load(); // Force refresh to ensure newly-created user is visible in the table
+          }}
         />
       )}
     </div>
@@ -379,9 +386,20 @@ function TempPasswordModal({ data, onClose }) {
         <div className="mt-4 rounded-xl bg-[#F4F7FA] p-3 flex items-center justify-between gap-2">
           <code className="font-mono text-lg font-bold text-[#071B34]" data-testid="temp-password-value">{data.password}</code>
           <button
-            onClick={() => {
-              navigator.clipboard.writeText(data.password);
-              toast.success("Copié !");
+            onClick={async () => {
+              try {
+                await navigator.clipboard.writeText(data.password);
+                toast.success("Copié !");
+              } catch {
+                // Fallback for browsers/contexts that block clipboard API
+                const ta = document.createElement("textarea");
+                ta.value = data.password;
+                document.body.appendChild(ta);
+                ta.select();
+                try { document.execCommand("copy"); toast.success("Copié !"); }
+                catch { toast.info("Copiez manuellement : " + data.password); }
+                document.body.removeChild(ta);
+              }
             }}
             className="flex items-center gap-1 rounded-lg bg-[#3BA4FF] text-white text-xs font-semibold px-2.5 py-1.5"
           >

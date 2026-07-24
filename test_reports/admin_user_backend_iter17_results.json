@@ -1,0 +1,15 @@
+{
+  "run_id": 1784889357,
+  "email": "qa.backend.1784889357@example.com",
+  "checks": [
+    "create fallback email/phone response ok",
+    "created user immediately appears in admin list",
+    "created user can login with generated password",
+    "edit role/groups/info works",
+    "suspend blocks login",
+    "reactivate restores login",
+    "reset password returns a new login-capable password",
+    "delete works"
+  ],
+  "status": "PASS"
+}
