@@ -317,3 +317,16 @@ Dépendance ajoutée : `canvas-confetti` (yarn add).
 - Backend curl-tested : création → modération → notification auteur y compris anonyme = OK.
 
 
+
+### 2026-07-24 — Fixes Boîte à idées + inbox admin (iter 28)
+- **Bug fix** — `/idees/nouveau` cassé (`u.startsWith is not a function`) causé par `mode="multiple"` passé à `<ImageUpload>` alors que le composant attend `"multi"`. Corrigé.
+- **Vote gelé** — quand le statut est `accepted` / `rejected` / `delivered`, les boutons "Je vote pour" et "Je ne vote pas" sont désactivés et grisés, avec un libellé "Vote fermé" et une bannière explicative. Le contenu de l'idée reste entièrement consultable.
+- **Pagination 8 par page** sur la liste (`Toutes / Mes idées / Populaires`) avec navigation par numéros + boutons ‹ ›, reset auto quand les filtres changent.
+- **Nouveau : Espace admin dédié `/management/idees`** (fichier `/app/frontend/src/pages/IdeasAdmin.jsx`) :
+  - KPI 5 lignes (Idées reçues / Votes cumulés / En étude / Validées / Refusées)
+  - Filtres chips par statut + recherche
+  - Tableau (Idée / Catégorie / Auteur / Reçue le / Votes / Statut / Actions)
+  - Actions inline : Voir → détail, Modérer → modale (5 statuts + réponse admin), Supprimer
+- Sidebar admin + subNav Management enrichis avec l'entrée "Boîte à idées" (icône `Lightbulb`).
+
+

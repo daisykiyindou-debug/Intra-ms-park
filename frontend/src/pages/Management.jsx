@@ -5,7 +5,7 @@ import {
   BarChart3, ClipboardList, Inbox, Newspaper, ShieldCheck, ArrowRight,
   Users as UsersIcon, AlertTriangle, CheckCircle2, TrendingUp, ChevronLeft, ChevronRight,
   Plus, Trash2, Save, X, CalendarDays, CalendarClock, Clock, MessageCircle, Gift, Sparkles,
-  FileText, Receipt, Send, Megaphone, GripVertical, UtensilsCrossed,
+  FileText, Receipt, Send, Megaphone, GripVertical, UtensilsCrossed, Lightbulb,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -37,6 +37,7 @@ import { FormationsManager } from "@/pages/Formations";
 import SupportITList from "@/pages/Support";
 import RestaurationManager from "@/pages/RestaurationManager";
 import PayslipsManager from "@/pages/PayslipsManager";
+import IdeasAdmin from "@/pages/IdeasAdmin";
 import ImageUpload from "@/components/ImageUpload";
 
 const subNav = [
@@ -53,6 +54,7 @@ const subNav = [
   { to: "/management/utilisateurs", label: "Utilisateurs", icon: UsersIcon },
   { to: "/management/fiches-de-paie", label: "Fiches de paie", icon: FileText },
   { to: "/management/documents-editor", label: "Rédiger documents", icon: FileText },
+  { to: "/management/idees", label: "Boîte à idées", icon: Lightbulb },
 ];
 
 const isoDate = (d) =>
@@ -150,6 +152,7 @@ export default function ManagementShell() {
         {isAdmin && <Route path="formations" element={<FormationsManager />} />}
         {isAdmin && <Route path="restauration" element={<RestaurationManager />} />}
         {isAdmin && <Route path="fiches-de-paie" element={<PayslipsManager />} />}
+        {isAdmin && <Route path="idees" element={<IdeasAdmin />} />}
         {isAdmin && <Route path="support" element={<SupportITList />} />}
         {isAdmin && <Route path="documents-editor" element={<HRDocsManager />} />}
         {isAdmin && <Route path="documents-editor/:id" element={<HRDocEditor />} />}
