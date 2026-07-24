@@ -3614,6 +3614,29 @@ async def admin_delete_document(did: str):
     return {"ok": True}
 
 
+class DocumentUpdate(BaseModel):
+    name: Optional[str] = None
+    category: Optional[str] = None
+    url: Optional[str] = None
+    target_employee_id: Optional[str] = None
+    description: Optional[str] = None
+    size_kb: Optional[int] = None
+
+
+@api.put("/admin/documents/{did}")
+async def admin_update_document(did: str, payload: DocumentUpdate):
+    await require_admin()
+    existing = await db.documents.find_one({"id": did}, {"_id": 0})
+    if not existing:
+        raise HTTPException(404, "Document introuvable")
+    updates = {k: v for k, v in payload.model_dump(exclude_unset=True).items() if v is not None}
+    if not updates:
+        return existing
+    await db.documents.update_one({"id": did}, {"$set": updates})
+    existing.update(updates)
+    return existing
+
+
 # ─── Admin: broadcast message on the #accueil channel (fil MS Park)
 class ChannelBroadcast(BaseModel):
     content: str

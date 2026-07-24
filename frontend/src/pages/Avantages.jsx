@@ -2,11 +2,12 @@ import { useEffect, useMemo, useState } from "react";
 import {
   QrCode, Tag, Copy, Check, ExternalLink, Gift, ShoppingCart, Plus, Minus,
   X, Percent, Ticket, Building2, Calendar, ChevronRight, ArrowLeft, Trash2,
-  Search, Package, ClipboardList,
+  Search, Package, ClipboardList, Settings,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Link, useNavigate } from "react-router-dom";
 import { api, absoluteUrl } from "@/lib/api";
+import { useApp } from "@/contexts/AppContext";
 import PortalModal from "@/components/PortalModal";
 
 const CART_KEY = "ms_cse_cart_v1";
@@ -22,6 +23,8 @@ const CATEGORIES = [
 
 export default function Avantages() {
   const navigate = useNavigate();
+  const { me, adminMode } = useApp();
+  const isAdmin = !!me?.is_admin && adminMode !== false;
   const [partners, setPartners] = useState([]);
   const [copied, setCopied] = useState(null);
   const [detail, setDetail] = useState(null);
@@ -115,7 +118,16 @@ export default function Avantages() {
             Profitez de réductions exclusives chez nos partenaires, achetez billets et produits directement depuis votre espace CSE.
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          {isAdmin && (
+            <Link
+              to="/management/avantages"
+              data-testid="cse-admin-link"
+              className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-[#A78BFA] to-[#7C3AED] hover:opacity-90 px-3 h-11 text-sm font-bold text-white shadow-md"
+            >
+              <Settings className="h-4 w-4" /> Gérer les avantages
+            </Link>
+          )}
           <Link
             to="/avantages/commandes"
             data-testid="cse-orders-link"

@@ -1,5 +1,5 @@
 import { useMemo, useState, useEffect, useRef } from "react";
-import { FileText, Download, Eye, Search, X, Receipt, Star, Upload, Plus } from "lucide-react";
+import { FileText, Download, Eye, Search, X, Receipt, Star, Upload, Plus, Edit3, Trash2 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { api, formatDateFr } from "@/lib/api";
@@ -35,11 +35,24 @@ export default function Documents() {
   const [tab, setTab] = useState("all");
   const [preview, setPreview] = useState(null);
   const [uploadOpen, setUploadOpen] = useState(false);
+  const [editing, setEditing] = useState(null); // legacy doc being edited
 
   useLiveData(() => api.get("/documents").then((r) => setDocs(r.data)), ["documents"]);
   useEffect(() => { api.get("/hr-documents").then((r) => setHrDocs(r.data)); }, []);
 
   const reloadDocs = () => api.get("/documents").then((r) => setDocs(r.data));
+
+  const deleteDoc = async (d) => {
+    if (d.kind !== "file") return;
+    if (!window.confirm(`Supprimer définitivement "${d.name}" ?`)) return;
+    try {
+      await api.delete(`/admin/documents/${d.id}`);
+      toast.success("Document supprimé");
+      reloadDocs();
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Suppression impossible");
+    }
+  };
 
   const toggleFav = (id) => {
     const next = new Set(favIds);
@@ -129,7 +142,16 @@ export default function Documents() {
             </div>
           )}
           {filtered.map((d) => (
-            <DocCard key={d.id} d={d} isFav={favIds.has(d.id)} onFav={() => toggleFav(d.id)} onPreview={() => setPreview(d)} />
+            <DocCard
+              key={d.id}
+              d={d}
+              isFav={favIds.has(d.id)}
+              onFav={() => toggleFav(d.id)}
+              onPreview={() => setPreview(d)}
+              isAdmin={isAdmin}
+              onEdit={() => setEditing(d)}
+              onDelete={() => deleteDoc(d)}
+            />
           ))}
         </div>
       </div>
@@ -177,24 +199,61 @@ export default function Documents() {
           />
         </PortalModal>
       )}
+
+      {editing && (
+        <PortalModal>
+          <EditDocModal
+            doc={editing}
+            employees={employees || []}
+            onClose={() => setEditing(null)}
+            onDone={() => { setEditing(null); reloadDocs(); }}
+          />
+        </PortalModal>
+      )}
     </div>
   );
 }
 
-function DocCard({ d, isFav, onFav, onPreview }) {
+function DocCard({ d, isFav, onFav, onPreview, isAdmin, onEdit, onDelete }) {
   const ext = (d.url || "").split(".").pop()?.toUpperCase() || (d.kind === "rich" ? "HTML" : "PDF");
   const colorForExt = {
     PDF: "bg-[#EF4444]", DOCX: "bg-[#3BA4FF]", DOC: "bg-[#3BA4FF]",
     XLSX: "bg-[#10B981]", XLS: "bg-[#10B981]", PPTX: "bg-[#F59E0B]", PPT: "bg-[#F59E0B]",
     HTML: "bg-[#8B5CF6]", ZIP: "bg-[#F59E0B]",
   }[ext] || "bg-[#3BA4FF]";
+  // Only legacy uploaded files (kind === "file") can be edited/deleted here.
+  // Payslips are auto-generated (target_employee_id set + is_payslip flag).
+  const isPayslip = d.raw?.is_payslip;
+  const canManage = isAdmin && d.kind === "file" && !isPayslip;
   return (
     <div className="ms-card p-4 space-y-2 hover:shadow-md transition-shadow" data-testid={`doc-${d.id}`}>
       <div className="flex items-start justify-between gap-2">
         <div className={`inline-flex items-center justify-center h-11 w-11 rounded-xl text-white font-bold text-[10px] ${colorForExt}`}>{ext}</div>
-        <button onClick={onFav} className={`h-8 w-8 rounded-lg ${isFav ? "text-[#F59E0B]" : "text-[#94A3B8]"} hover:bg-[#F4F7FA]`}>
-          <Star className={`h-4 w-4 ${isFav ? "fill-[#F59E0B]" : ""}`} />
-        </button>
+        <div className="flex items-center gap-1">
+          {canManage && (
+            <>
+              <button
+                onClick={onEdit}
+                data-testid={`doc-edit-${d.id}`}
+                title="Modifier le document"
+                className="h-8 w-8 rounded-lg hover:bg-[#3BA4FF]/10 text-[#3BA4FF] inline-flex items-center justify-center"
+              >
+                <Edit3 className="h-4 w-4" />
+              </button>
+              <button
+                onClick={onDelete}
+                data-testid={`doc-del-${d.id}`}
+                title="Supprimer le document"
+                className="h-8 w-8 rounded-lg hover:bg-[#FEE2E2] text-[#B91C1C] inline-flex items-center justify-center"
+              >
+                <Trash2 className="h-4 w-4" />
+              </button>
+            </>
+          )}
+          <button onClick={onFav} className={`h-8 w-8 rounded-lg ${isFav ? "text-[#F59E0B]" : "text-[#94A3B8]"} hover:bg-[#F4F7FA]`}>
+            <Star className={`h-4 w-4 ${isFav ? "fill-[#F59E0B]" : ""}`} />
+          </button>
+        </div>
       </div>
       <span className="ms-chip !text-[10px]">{d.category}</span>
       <h3 className="text-sm font-bold text-[#071B34] line-clamp-2">{d.name}</h3>
@@ -417,6 +476,180 @@ function UploadPdfModal({ employees, onClose, onDone }) {
     </div>
   );
 }
+
+function EditDocModal({ doc, employees, onClose, onDone }) {
+  const fileRef = useRef(null);
+  const [name, setName] = useState(doc.name || "");
+  const [category, setCategory] = useState(doc.category || "Ressources Humaines");
+  const [description, setDescription] = useState(doc.raw?.description || "");
+  const [target, setTarget] = useState(doc.raw?.target_employee_id || "all");
+  const [newFile, setNewFile] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  const onPickFile = (e) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    if (f.type && f.type !== "application/pdf" && !f.name.toLowerCase().endsWith(".pdf")) {
+      toast.error("Seuls les fichiers PDF sont acceptés");
+      e.target.value = "";
+      return;
+    }
+    setNewFile(f);
+  };
+
+  const submit = async () => {
+    if (!name.trim()) { toast.error("Nom requis"); return; }
+    setBusy(true);
+    try {
+      const payload = {
+        name: name.trim(),
+        category,
+        description: description.trim() || null,
+        target_employee_id: target === "all" ? "all" : target,
+      };
+      // If a new file was picked, upload it and swap the URL / size
+      if (newFile) {
+        const form = new FormData();
+        form.append("file", newFile);
+        const { data: up } = await api.post("/uploads", form, {
+          headers: { "Content-Type": "multipart/form-data" },
+        });
+        payload.url = up.url;
+        payload.size_kb = Math.max(1, Math.round((up.size || newFile.size || 0) / 1024));
+      }
+      await api.put(`/admin/documents/${doc.id}`, payload);
+      toast.success("Document mis à jour");
+      onDone?.();
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Impossible de mettre à jour");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div
+      onClick={onClose}
+      className="fixed inset-0 z-[70] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4"
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        data-testid="doc-edit-modal"
+        className="bg-white rounded-3xl w-full max-w-lg max-h-[90vh] overflow-hidden shadow-2xl flex flex-col"
+      >
+        <div className="flex items-center justify-between px-5 py-4 border-b border-[#071B34]/5">
+          <div>
+            <h3 className="text-base font-bold text-[#071B34]">Modifier le document</h3>
+            <p className="text-xs text-[#475569] mt-0.5">Titre, catégorie, destinataire, PDF.</p>
+          </div>
+          <button onClick={onClose} className="h-9 w-9 rounded-lg hover:bg-[#F4F7FA] inline-flex items-center justify-center">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="p-5 space-y-4 overflow-y-auto">
+          <div>
+            <label className="text-[10px] uppercase tracking-widest font-semibold text-[#475569]">Fichier PDF</label>
+            <input
+              ref={fileRef}
+              type="file"
+              accept="application/pdf,.pdf"
+              onChange={onPickFile}
+              className="hidden"
+              data-testid="doc-edit-file"
+            />
+            <div className="mt-1 flex items-center gap-3 rounded-2xl border border-[#071B34]/10 p-3">
+              <FileText className="h-6 w-6 text-[#EF4444]" />
+              <div className="flex-1 min-w-0 text-sm">
+                <div className="font-semibold text-[#071B34] truncate">
+                  {newFile ? newFile.name : (doc.name || "Document actuel")}
+                </div>
+                <div className="text-[11px] text-[#475569]">
+                  {newFile ? `${Math.max(1, Math.round(newFile.size / 1024))} Ko — nouveau fichier` : `PDF actuel${doc.size_kb ? ` · ${doc.size_kb} Ko` : ""}`}
+                </div>
+              </div>
+              <button
+                onClick={() => fileRef.current?.click()}
+                data-testid="doc-edit-swap"
+                className="rounded-xl bg-[#F4F7FA] hover:bg-[#3BA4FF]/10 px-3 py-2 text-xs font-semibold text-[#334155] inline-flex items-center gap-1"
+              >
+                <Upload className="h-3 w-3" /> Remplacer
+              </button>
+            </div>
+          </div>
+
+          <div>
+            <label className="text-[10px] uppercase tracking-widest font-semibold text-[#475569]">Nom du document</label>
+            <input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              data-testid="doc-edit-name"
+              className="ms-input mt-1"
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-[10px] uppercase tracking-widest font-semibold text-[#475569]">Catégorie</label>
+              <select
+                value={category}
+                onChange={(e) => setCategory(e.target.value)}
+                data-testid="doc-edit-category"
+                className="ms-input mt-1"
+              >
+                {CATEGORIES.filter((c) => c.k !== "all").map((c) => (
+                  <option key={c.k} value={c.k}>{c.l}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="text-[10px] uppercase tracking-widest font-semibold text-[#475569]">Destinataire</label>
+              <select
+                value={target}
+                onChange={(e) => setTarget(e.target.value)}
+                data-testid="doc-edit-target"
+                className="ms-input mt-1"
+              >
+                <option value="all">Tous les employés</option>
+                {(employees || []).filter((e) => !e.is_super_admin).map((e) => (
+                  <option key={e.id} value={e.id}>{e.first_name} {e.last_name}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <label className="text-[10px] uppercase tracking-widest font-semibold text-[#475569]">Description</label>
+            <textarea
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              rows={2}
+              data-testid="doc-edit-description"
+              className="ms-input mt-1 resize-none"
+            />
+          </div>
+        </div>
+        <div className="border-t border-[#071B34]/5 p-4 flex items-center gap-2 bg-[#F4F7FA]/50">
+          <button
+            onClick={onClose}
+            disabled={busy}
+            className="flex-1 h-11 rounded-xl bg-white hover:bg-[#F4F7FA] border border-[#071B34]/10 text-sm font-semibold text-[#334155] disabled:opacity-40"
+          >
+            Annuler
+          </button>
+          <button
+            onClick={submit}
+            disabled={busy || !name.trim()}
+            data-testid="doc-edit-save"
+            className="flex-1 h-11 rounded-xl bg-[#3BA4FF] hover:bg-[#2A8DE0] disabled:opacity-50 text-white text-sm font-bold inline-flex items-center justify-center gap-2"
+          >
+            {busy ? "Enregistrement…" : "Enregistrer"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 
 
 
