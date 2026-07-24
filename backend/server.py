@@ -5109,6 +5109,288 @@ async def _me_optional():
         return None
 
 
+# ═══════════════════════════════════════════════════════════════════
+# Real-time Badging (online punch)
+# ═══════════════════════════════════════════════════════════════════
+def _hm_now() -> str:
+    n = _now_paris()
+    return f"{n.hour:02d}:{n.minute:02d}"
+
+
+@api.post("/badging/punch")
+async def punch_badge():
+    """Punch the next step of today's badging. Auto-detects clock_in → pause_out → pause_in → clock_out."""
+    me = await _me()
+    today = _now_paris().date().isoformat()
+    now_hm = _hm_now()
+
+    # Get or create today's manual override doc (persisted separately from schedule-derived)
+    doc = await db.badging_manual.find_one({"employee_id": me["id"], "day": today}, {"_id": 0})
+    if not doc:
+        doc = {"id": _id(), "employee_id": me["id"], "day": today,
+               "clock_in": None, "pause_out": None, "pause_in": None, "clock_out": None,
+               "punches": [], "created_at": _now()}
+        await db.badging_manual.insert_one(doc.copy())
+
+    # Determine next step
+    if not doc.get("clock_in"):
+        step = "clock_in"; label = "Entrée"
+    elif not doc.get("pause_out"):
+        step = "pause_out"; label = "Pause (sortie)"
+    elif not doc.get("pause_in"):
+        step = "pause_in"; label = "Pause (entrée)"
+    elif not doc.get("clock_out"):
+        step = "clock_out"; label = "Sortie"
+    else:
+        raise HTTPException(400, "Tous les pointages du jour sont déjà effectués")
+
+    await db.badging_manual.update_one(
+        {"employee_id": me["id"], "day": today},
+        {"$set": {step: now_hm}, "$push": {"punches": {"step": step, "time": now_hm, "at": _now()}}},
+    )
+    return {"step": step, "label": label, "time": now_hm}
+
+
+@api.get("/badging/today-live")
+async def today_live_badging():
+    """Return today's badging combining schedule-based computation + manual punches."""
+    me = await _me()
+    today = _now_paris().date().isoformat()
+    sched = await db.schedules.find_one({"employee_id": me["id"], "day": today}, {"_id": 0})
+    manual = await db.badging_manual.find_one({"employee_id": me["id"], "day": today}, {"_id": 0})
+    base = _compute_today_badging(sched, me["id"]) if sched else {
+        "id": f"live-{today}", "employee_id": me["id"], "day": today,
+        "clock_in": None, "pause_out": None, "pause_in": None, "clock_out": None,
+        "worked_minutes": 0, "break_minutes": 0, "anomaly": None, "note": "Pas de shift planifié", "live": True,
+    }
+    if manual:
+        # Manual punches override schedule-derived values
+        for k in ("clock_in", "pause_out", "pause_in", "clock_out"):
+            if manual.get(k):
+                base[k] = manual[k]
+        # Recompute worked minutes based on actual punches
+        ci = _hm_to_minutes(base.get("clock_in"))
+        co = _hm_to_minutes(base.get("clock_out"))
+        po = _hm_to_minutes(base.get("pause_out"))
+        pi = _hm_to_minutes(base.get("pause_in"))
+        if ci is not None:
+            now_m = _now_paris().hour * 60 + _now_paris().minute
+            end_m = co if co is not None else now_m
+            worked = max(0, end_m - ci)
+            if po is not None and pi is not None:
+                worked -= max(0, pi - po)
+            base["worked_minutes"] = max(0, worked)
+    base["is_manual"] = bool(manual)
+    return base
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Overtime (heures exceptionnelles) + Recovery counter
+# ═══════════════════════════════════════════════════════════════════
+class OvertimePause(BaseModel):
+    start: str  # HH:MM
+    end: str
+
+
+class OvertimeDeclare(BaseModel):
+    event_type: str  # event | meeting | training | inventory | intervention | other
+    reason: str
+    center: Optional[str] = ""
+    manager_id: Optional[str] = None
+    date: str  # YYYY-MM-DD
+    start_time: str  # HH:MM
+    end_time: str
+    pauses: List[OvertimePause] = []
+    comment: Optional[str] = ""
+    attachment_url: Optional[str] = ""
+    attachment_name: Optional[str] = ""
+
+
+def _minutes_between(a: str, b: str) -> int:
+    x, y = _hm_to_minutes(a), _hm_to_minutes(b)
+    if x is None or y is None:
+        return 0
+    return max(0, y - x)
+
+
+def _compute_overtime_minutes(p: dict) -> int:
+    total = _minutes_between(p.get("start_time", ""), p.get("end_time", ""))
+    for pp in (p.get("pauses") or []):
+        total -= _minutes_between(pp.get("start", ""), pp.get("end", ""))
+    return max(0, total)
+
+
+@api.post("/overtime/declare")
+async def declare_overtime(payload: OvertimeDeclare):
+    me = await _me()
+    d = payload.model_dump()
+    d["id"] = _id()
+    d["employee_id"] = me["id"]
+    d["status"] = "pending"
+    d["type"] = "overtime_declare"
+    d["minutes"] = _compute_overtime_minutes(d)
+    d["created_at"] = _now()
+    d["decided_at"] = None
+    d["decided_by"] = None
+    d["decision_comment"] = ""
+    await db.overtime.insert_one(d.copy())
+    admins = await db.employees.find({"is_admin": True}, {"id": 1}).to_list(20)
+    for a in admins:
+        await _push_notification(
+            employee_id=a["id"],
+            type="overtime",
+            title=f"Heures exceptionnelles · {me.get('first_name','')} {me.get('last_name','')}",
+            content=f"{d['minutes'] // 60}h{d['minutes'] % 60:02d} · {d['reason']}",
+            icon="clock",
+            link="/management/heures-supp",
+        )
+    return await _strip(d)
+
+
+class RecoveryRequest(BaseModel):
+    kind: str  # full_day | half_day | precise
+    dates: List[str]  # YYYY-MM-DD
+    minutes: Optional[int] = None  # for precise
+    comment: Optional[str] = ""
+
+
+@api.post("/overtime/recovery")
+async def request_recovery(payload: RecoveryRequest):
+    me = await _me()
+    counter = await _overtime_counter_for(me["id"])
+    if counter["available_minutes"] < 6 * 60:
+        raise HTTPException(400, "Solde d'heures supplémentaires insuffisant (min. 6h00)")
+    d = payload.model_dump()
+    d["id"] = _id()
+    d["employee_id"] = me["id"]
+    d["status"] = "pending"
+    d["type"] = "overtime_recovery"
+    d["created_at"] = _now()
+    d["decided_at"] = None
+    d["decided_by"] = None
+    d["decision_comment"] = ""
+    # Estimate minutes if not provided
+    if d["kind"] == "full_day":
+        d["minutes"] = len(d["dates"]) * (5 * 60 + 59)
+    elif d["kind"] == "half_day":
+        d["minutes"] = len(d["dates"]) * (3 * 60)
+    await db.overtime.insert_one(d.copy())
+    admins = await db.employees.find({"is_admin": True}, {"id": 1}).to_list(20)
+    for a in admins:
+        await _push_notification(
+            employee_id=a["id"],
+            type="overtime",
+            title=f"Demande de récupération · {me.get('first_name','')} {me.get('last_name','')}",
+            content=f"{d['minutes'] // 60}h{d['minutes'] % 60:02d}",
+            icon="clock",
+            link="/management/heures-supp",
+        )
+    return await _strip(d)
+
+
+async def _overtime_counter_for(employee_id: str) -> dict:
+    # Sum approved declares - approved recoveries taken this month
+    now = _now_paris()
+    month_start = date(now.year, now.month, 1).isoformat()
+    declares = await db.overtime.find({
+        "employee_id": employee_id, "type": "overtime_declare",
+        "status": "approved", "date": {"$gte": month_start}
+    }, {"_id": 0}).to_list(500)
+    recoveries = await db.overtime.find({
+        "employee_id": employee_id, "type": "overtime_recovery",
+        "status": "approved"
+    }, {"_id": 0}).to_list(500)
+    pending_declares = await db.overtime.find({
+        "employee_id": employee_id, "type": "overtime_declare",
+        "status": "pending", "date": {"$gte": month_start}
+    }, {"_id": 0}).to_list(500)
+
+    declared_min = sum(d.get("minutes", 0) for d in declares)
+    recovered_min = sum(r.get("minutes", 0) for r in recoveries)
+    pending_min = sum(d.get("minutes", 0) for d in pending_declares)
+    available = max(0, declared_min - recovered_min)
+    return {
+        "declared_minutes": declared_min,
+        "recovered_minutes": recovered_min,
+        "pending_minutes": pending_min,
+        "available_minutes": available,
+        "can_request_recovery": available >= 6 * 60,
+        "threshold_minutes": 6 * 60,
+        "declares": declares,
+        "recoveries": recoveries,
+        "pending_declares": pending_declares,
+    }
+
+
+@api.get("/overtime/counter")
+async def get_overtime_counter():
+    me = await _me()
+    return await _overtime_counter_for(me["id"])
+
+
+@api.get("/overtime/mine")
+async def list_my_overtime():
+    me = await _me()
+    items = await db.overtime.find({"employee_id": me["id"]}, {"_id": 0}).sort("created_at", -1).to_list(300)
+    return items
+
+
+@api.get("/admin/overtime")
+async def admin_list_overtime(status: Optional[str] = None):
+    await require_admin()
+    query: dict = {}
+    if status:
+        query["status"] = status
+    items = await db.overtime.find(query, {"_id": 0}).sort("created_at", -1).to_list(500)
+    emp_ids = list({i.get("employee_id") for i in items})
+    emps = {e["id"]: e async for e in db.employees.find({"id": {"$in": emp_ids}}, {"_id": 0})}
+    for it in items:
+        e = emps.get(it.get("employee_id"))
+        if e:
+            it["employee_name"] = f"{e.get('first_name','')} {e.get('last_name','')}".strip()
+            it["employee_avatar"] = e.get("avatar_url")
+    return items
+
+
+class OvertimeDecision(BaseModel):
+    status: str  # approved | rejected
+    comment: Optional[str] = ""
+
+
+@api.put("/admin/overtime/{oid}/decide")
+async def admin_decide_overtime(oid: str, payload: OvertimeDecision):
+    me = await require_admin()
+    if payload.status not in ("approved", "rejected"):
+        raise HTTPException(400, "Statut invalide")
+    upd = {"status": payload.status, "decision_comment": payload.comment or "",
+           "decided_at": _now(), "decided_by": me["id"]}
+    await db.overtime.update_one({"id": oid}, {"$set": upd})
+    o = await db.overtime.find_one({"id": oid}, {"_id": 0})
+    if o:
+        t = o.get("type", "overtime")
+        title = "Heures exceptionnelles" if t == "overtime_declare" else "Récupération"
+        verb = "approuvée" if payload.status == "approved" else "refusée"
+        await _push_notification(
+            employee_id=o["employee_id"],
+            type="overtime",
+            title=f"{title} {verb}",
+            content=payload.comment or "",
+            icon="clock",
+            link="/rh/badgeage",
+        )
+        # If recovery approved, materialize as leave days
+        if t == "overtime_recovery" and payload.status == "approved" and o.get("kind") == "full_day":
+            for d in (o.get("dates") or []):
+                await db.schedules.update_one(
+                    {"employee_id": o["employee_id"], "day": d},
+                    {"$set": {"type": "recovery", "start": None, "end": None,
+                              "pause_start": None, "pause_end": None,
+                              "location": "Récupération", "service": ""}},
+                    upsert=True,
+                )
+    return o
+
+
 
 
 

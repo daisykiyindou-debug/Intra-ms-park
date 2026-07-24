@@ -32,6 +32,7 @@ import FormBuilder from "@/pages/FormBuilder";
 import UserManager from "@/pages/UserManager";
 import { ExpensesManager } from "@/pages/NotesDeFrais";
 import { HRDocsManager, HRDocEditor } from "@/pages/HRDocs";
+import OvertimeManager from "@/pages/OvertimeManager";
 import ImageUpload from "@/components/ImageUpload";
 
 const subNav = [
@@ -40,6 +41,7 @@ const subNav = [
   { to: "/management/demandes", label: "Demandes", icon: Inbox },
   { to: "/management/attributions", label: "RTT / CP", icon: Gift },
   { to: "/management/notes-de-frais", label: "Notes de frais", icon: FileText },
+  { to: "/management/heures-supp", label: "Heures supp.", icon: FileText },
   { to: "/management/carrousel", label: "Carrousel accueil", icon: Newspaper },
   { to: "/management/agenda", label: "Agenda", icon: CalendarDays },
   { to: "/management/formulaires", label: "Formulaires", icon: FileText },
@@ -139,6 +141,7 @@ export default function ManagementShell() {
         <Route path="actualites" element={<Navigate to="/management/carrousel" replace />} />
         {isAdmin && <Route path="documents" element={<DocumentsManager />} />}
         {isAdmin && <Route path="notes-de-frais" element={<ExpensesManager />} />}
+        {isAdmin && <Route path="heures-supp" element={<OvertimeManager />} />}
         {isAdmin && <Route path="documents-editor" element={<HRDocsManager />} />}
         {isAdmin && <Route path="documents-editor/:id" element={<HRDocEditor />} />}
         <Route path="fil" element={<Navigate to="/actualites" replace />} />

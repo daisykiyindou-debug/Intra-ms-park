@@ -168,6 +168,15 @@ Intranet premium pour employés du parc MS Park + espace administrateur pour le 
 
 ## Changelog
 
+### 2026-02-24 — Badge refonte + Heures supp. & récupération (iter 9)
+- **Page Badge complètement refondue** (`/rh/badgeage`) : header status card, **4 punch cards** (Entrée / Pause sortie / Pause entrée / Sortie), heures travaillées vs prévues + statut du jour, tableau récapitulatif de la semaine (7 lignes + total), 4 cards récap hebdo (Heures travaillées, Heures supp., Heures prévues, Solde), **récap mensuel avec donut chart** (worked + supp validées + récup + pending), CTA "Demander une récupération (RTT)" quand solde ≥ 6h, CTA "Déclarer des heures exceptionnelles", historique complet 30 jours en accordéon.
+- **Badgeage en ligne** : bouton `Badgeage` → modal "Badgeage en ligne" avec prochaine étape auto-détectée (clock_in → pause_out → pause_in → clock_out), heure en direct. Backend `POST /api/badging/punch` maintient `badging_manual` collection + `GET /badging/today-live` fusionne planning + punches réels. Sync direct dans les cartes.
+- **Déclaration heures exceptionnelles** : modal 3 sections avec choix du type (6 icônes : Événement, Réunion, Formation, Inventaire, Intervention, Autre), motif, centre, date, responsable, plage horaire + pauses ajoutables, calcul durée live, commentaire, upload pièce jointe, récapitulatif. Backend `POST /api/overtime/declare` avec push notification aux admins.
+- **Demande de récupération (RTT)** : modal avec solde à récupérer en haut, 3 sections (info + type journée/demi/heures + dates + commentaire ; récapitulatif ; validation par checkbox). Règle métier backend : min. 6h validées, sinon 400. Backend `POST /api/overtime/recovery`.
+- **Compteur d'heures supp** : `GET /api/overtime/counter` retourne `{declared, recovered, pending, available, can_request_recovery, threshold}` calculés sur le mois en cours (déclarés approuvés - récupérations approuvées).
+- **Admin — Heures supp. & récupérations** (`/management/heures-supp`) : tableau filtrable par statut, panneau détail latéral avec type/motif/horaires/pauses/pièces jointes, décision approuver/refuser + commentaire. À l'approbation d'une récupération full_day, les jours ciblés sont automatiquement marqués `type=recovery` dans le planning.
+- **Sidebar admin** : nouvel item "Heures supp. & récup." (Clock icon) + top-nav Management.
+
 ### 2026-02-24 — Galerie Photos + Notes de frais + Documents (iter 8)
 - **Galerie Photos** (`/galerie`, `/galerie/:id`) : albums avec catégories (Événement, Team Building, Formation, Restaurant, Vie du parc), image de couverture, contributions toggle par album, recherche/filtre par catégorie. Album détail : upload multi-photos (drag&drop file input), favoris (toggle par photo, filtre "Favoris"), téléchargement, lightbox plein écran, suppression (par uploader ou admin/comm). Backend : `galleries` + `photos` + `photo_favorites` collections, endpoints `/api/galleries*` (public) + `/api/admin/galleries*` (editors). Règle métier : contributions bloquées (403) si `allow_contributions=false` pour non-editors.
 - **Notes de frais** — employé + admin :
