@@ -262,3 +262,34 @@ Intranet premium pour employés du parc MS Park + espace administrateur pour le 
   - Cropper avatar (`UserManager.jsx > AvatarCropper`) réécrit : zoom out possible (min 0.4×) + zoom in (max 4×), boutons − / + / Réinit., support tactile (`onTouchStart/Move`), zoom molette, taille naturelle de l'image utilisée pour un vrai "cover fit" (l'ancien `objectFit: cover` sans width/height cassait le rendu et empêchait de recadrer proprement une photo portrait).
 - Tests : iteration_22 verrouille 100% (12/12 pytest backend + 10/10 flows frontend). Aucune régression identifiée.
 
+
+### 2026-07-24 — Programmation + Fiches de paie + Messagerie refonte + Idées + Anniversaires (iter 23+24)
+
+**Programmation des publications (Actualités & Newsletters)**
+- Backend `PostCreate.publish_at` + `NewsletterCreate.publish_at`. Les posts/newsletters programmés sont invisibles aux employés jusqu'à la date/heure exacte, visibles à l'auteur/admin avec `is_scheduled=true`. `_dispatch_scheduled_posts()` / `_dispatch_scheduled_newsletters()` déclenchent les notifications broadcast en mode lazy dès qu'un utilisateur récupère la liste.
+- Frontend Composer Actualités : bouton `Clock` "Programmer" (data-testid `tool-schedule`) + `datetime-local` (`composer-publish-at`). Bouton publier → label switch "Programmer" si futur. Newsletter editor : `datetime-local` en toolbar (`nl-publish-at`) + libellé dynamique.
+
+**Fiches de paie (remplace "Fichiers RH" côté admin)**
+- Backend : `PayslipPayload` + endpoints `/admin/payslips` (list/stats/get/create/update/delete/send/preview), `list_my_payslips`. Calcul auto ~22% cotisations (Sécu 15% + Retraite 4% + Prévoyance 2% + Divers 1%), split gross/net. `send` crée un doc `Documents` chez l'employé + notif.
+- Frontend `/management/fiches-de-paie` : KPI (générées/employés/envoyées/en attente), filtres mois/statut, tableau, panneau détails, générateur modale avec live preview + 5 onglets d'éléments (auto/HS/primes/indemnités/retenues) + message perso.
+- Sidebar admin : "Fichiers RH" renommé "Fiches de paie".
+
+**Messagerie — refonte visuelle complète**
+- Backend : `POST /api/channels/{cid}/read` (marque conversation + notifs `type=message` liées comme lues, upsert `channel_reads`). `GET /api/channels` calcule dynamiquement `unread_count` par utilisateur, ajoute `last_message_ts/preview`.
+- Frontend `Messagerie.jsx` réécrit intégralement : liste plate des conversations (plus de sections "canaux"), onglets `Toutes / Non lues / Favoris` avec compteurs, avatars + bulles bleu clair (moi) / gris (autres), séparateurs de date `Aujourd'hui / Hier / date`, favoris en localStorage, clic conversation → marquée lue immédiatement (badge + notif header effacés).
+
+**Boîte à idées (nouveau, `/idees`)**
+- Backend : collection `ideas` (title, description, category, author_id, is_anonymous, status, admin_response, votes). Endpoints GET/POST `/ideas`, POST `/ideas/{id}/vote?direction=up|down|clear`, PUT/DELETE `/admin/ideas/{id}`. Sanitize : auteur toujours masqué en "Anonyme" quand `is_anonymous=true`, même pour l'admin.
+- Frontend : composer + votes up/down avec score, statuts colorés (Nouvelle/À l'étude/Retenue/Non retenue), modérateur admin (statut + réponse publique).
+
+**Anniversaires (nouveau, `/anniversaires`)**
+- Backend : endpoints `/birthdays` (upcoming/past), `/me/birthday`, `/me/birthday/claim`. `_seed_birth_dates()` idempotent — Idriss a `birth_date` = date du jour pour la démo. `birthday_bonus` sur l'employé = { points: 10, spent, granted_at, expires_at: today+30d, year }. `create_order` déduit du bonus en priorité (splits `points_used_bonus` / `points_used_daily`).
+- Frontend page : illustration gâteau, onglets À venir / Passés, tableau (avatar + nom + rôle + date + pill "Aujourd'hui" / "Dans X jours" + bouton "Souhaiter" qui publie un post cadeau).
+- **BirthdayGate popup** (`/components/BirthdayGate.jsx`) : monté au root de App. Lance canvas-confetti (3 rafales) + carte cadeau (brownie Soccer Bar + 10 points repas 30j + bon 20€ MS Shop) + CTA "J'ai compris". Une fois cliqué, POST `/me/birthday/claim` crédite les 10 points repas.
+- **Header** : badge gâteau rose animé (`data-testid=header-birthday-cake`) à côté du nom quand `is_birthday_today`.
+- Sidebar Vie de l'entreprise : + "Boîte à idées" (Lightbulb) + "Anniversaires" (Cake).
+
+Tests : iteration_24 → 100% backend (21/21) + 100% frontend. Zéro régression.
+Dépendance ajoutée : `canvas-confetti` (yarn add).
+
+
