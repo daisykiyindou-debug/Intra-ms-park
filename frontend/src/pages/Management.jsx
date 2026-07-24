@@ -29,6 +29,7 @@ import { api, fr, formatMinutes, absoluteUrl } from "@/lib/api";
 import { useApp } from "@/contexts/AppContext";
 import { notifyLiveRefresh } from "@/hooks/useLiveData";
 import FormBuilder from "@/pages/FormBuilder";
+import UserManager from "@/pages/UserManager";
 import ImageUpload from "@/components/ImageUpload";
 
 const subNav = [
@@ -39,6 +40,7 @@ const subNav = [
   { to: "/management/carrousel", label: "Carrousel accueil", icon: Newspaper },
   { to: "/management/agenda", label: "Agenda", icon: CalendarDays },
   { to: "/management/formulaires", label: "Formulaires", icon: FileText },
+  { to: "/management/utilisateurs", label: "Utilisateurs", icon: UsersIcon },
   { to: "/management/documents", label: "Documents RH", icon: FileText },
 ];
 
@@ -129,6 +131,7 @@ export default function ManagementShell() {
         <Route path="carrousel" element={<NewsManager />} />
         <Route path="agenda" element={<AgendaManager />} />
         <Route path="formulaires" element={<FormBuilder />} />
+        {isAdmin && <Route path="utilisateurs" element={<UserManager />} />}
         <Route path="actualites" element={<Navigate to="/management/carrousel" replace />} />
         {isAdmin && <Route path="documents" element={<DocumentsManager />} />}
         <Route path="fil" element={<Navigate to="/actualites" replace />} />

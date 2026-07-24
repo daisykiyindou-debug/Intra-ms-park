@@ -1344,6 +1344,51 @@ async def root():
     return {"app": "MS Park Intranet", "status": "ok"}
 
 
+async def _pending_leave_days(emp_id: str) -> dict:
+    """Return {cp: n_days, rtt: n_days} of pending requests for this employee.
+    Counts only business days according to the employee's weekly pattern.
+    """
+    emp = await db.employees.find_one({"id": emp_id}, {"_id": 0}) or {}
+    pending = await db.requests.find(
+        {"employee_id": emp_id, "status": "pending",
+         "type": {"$in": ["conge", "rtt"]}},
+        {"_id": 0},
+    ).to_list(300)
+    out = {"cp": 0.0, "rtt": 0.0}
+    for r in pending:
+        try:
+            s = date.fromisoformat(r["start_date"])
+            e = date.fromisoformat(r.get("end_date") or r["start_date"])
+        except Exception:
+            continue
+        cur = s
+        while cur <= e:
+            entry = _entry_from_pattern(emp, cur) if emp else None
+            if entry and entry.get("type") != "off":
+                if r["type"] == "conge":
+                    out["cp"] += 1
+                else:
+                    out["rtt"] += 1
+            cur += timedelta(days=1)
+    return out
+
+
+def _display_balance(stored: dict, pending: dict) -> dict:
+    """Subtract pending days from the stored balance to get displayed balance.
+    Negative values are allowed (anticipated leave)."""
+    b = dict(stored or {})
+    cp_pending = pending.get("cp", 0.0)
+    rtt_pending = pending.get("rtt", 0.0)
+    # Consume pending CP against N-1 first, then N (mirrors approval logic)
+    n1 = float(b.get("cp_n_1", 0))
+    take_n1 = min(cp_pending, n1)
+    b["cp_n_1"] = round(n1 - take_n1, 1)
+    remaining = cp_pending - take_n1
+    b["cp_n"] = round(float(b.get("cp_n", 0)) - remaining, 1)
+    b["rtt"] = round(float(b.get("rtt", 0)) - rtt_pending, 1)
+    return b
+
+
 @api.get("/me")
 async def me():
     emp = await db.employees.find_one({"id": current_user()}, {"_id": 0})
@@ -1354,6 +1399,12 @@ async def me():
             raise HTTPException(404, "Current employee not found")
     quota = emp.get("daily_quota") or ROLE_QUOTAS.get(emp.get("role_category", "employe"), 20)
     emp["daily_quota"] = quota
+    # Compute displayed leave balance: subtract pending CP/RTT requests immediately
+    stored = emp.get("leave_balance") or {}
+    pending = await _pending_leave_days(emp["id"])
+    emp["leave_balance"] = _display_balance(stored, pending)
+    emp["leave_balance_stored"] = stored  # for admin views / debugging
+    emp["leave_balance_pending"] = pending
     return emp
 
 
@@ -2268,6 +2319,55 @@ async def create_request(payload: RequestCreate):
     return await _strip(r)
 
 
+@api.post("/requests/{rid}/cancel")
+async def cancel_request(rid: str):
+    """Employee cancels their own pending or approved request as long as start_date is in the future."""
+    r = await db.requests.find_one({"id": rid}, {"_id": 0})
+    if not r:
+        raise HTTPException(404, "Demande introuvable")
+    if r["employee_id"] != current_user():
+        raise HTTPException(403, "Vous ne pouvez annuler que vos propres demandes")
+    if r["status"] not in ("pending", "approved"):
+        raise HTTPException(400, "Seules les demandes en attente ou validées peuvent être annulées")
+    # Only allow if start date not yet passed
+    try:
+        sdate = date.fromisoformat(r["start_date"])
+    except Exception:
+        sdate = date.today()
+    if sdate <= date.today():
+        raise HTTPException(400, "La date de début est passée — annulation impossible")
+
+    # Refund logic: if approved, delete the schedule entries created and credit back balance
+    was_approved = r["status"] == "approved"
+    if was_approved and r["type"] in ("conge", "rtt"):
+        # Approval writes CP entries as type 'leave' and RTT as 'rtt'
+        sched_type = "leave" if r["type"] == "conge" else "rtt"
+        deleted = await db.schedules.delete_many({
+            "employee_id": r["employee_id"],
+            "type": sched_type,
+            "day": {"$gte": r["start_date"], "$lte": r.get("end_date") or r["start_date"]},
+        })
+        # Credit back the balance
+        days_back = float(r.get("days_consumed") or deleted.deleted_count)
+        emp = await db.employees.find_one({"id": r["employee_id"]}, {"_id": 0})
+        if emp and days_back > 0:
+            bal = dict(emp.get("leave_balance") or {})
+            if r["type"] == "conge":
+                # Credit to CP N (current year) — simplest
+                bal["cp_n"] = round(float(bal.get("cp_n", 0)) + days_back, 1)
+            else:
+                bal["rtt"] = round(float(bal.get("rtt", 0)) + days_back, 1)
+            await db.employees.update_one(
+                {"id": r["employee_id"]}, {"$set": {"leave_balance": bal}}
+            )
+
+    await db.requests.update_one(
+        {"id": rid},
+        {"$set": {"status": "cancelled", "decided_at": _now()}},
+    )
+    return {"ok": True, "refunded_days": r.get("days_consumed") if was_approved else 0}
+
+
 # ─── Documents
 @api.get("/documents")
 async def list_documents(category: Optional[str] = None):
@@ -3152,21 +3252,233 @@ _LOGIN_CREDENTIALS = {
 
 @api.post("/auth/login")
 async def auth_login(payload: LoginRequest):
-    creds = _LOGIN_CREDENTIALS.get(payload.email.lower().strip())
+    email = payload.email.lower().strip()
+
+    # 1) Hardcoded demo credentials (kept for backward compatibility)
+    creds = _LOGIN_CREDENTIALS.get(email)
     if creds:
         expected_pwd, eid = creds
         if payload.password != expected_pwd:
             raise HTTPException(401, "Mot de passe incorrect")
         emp = await db.employees.find_one({"id": eid}, {"_id": 0})
         if emp:
+            if emp.get("account_status") in ("suspended", "deactivated"):
+                raise HTTPException(403, "Ce compte est désactivé. Contactez l'administrateur.")
             return {
                 "employee_id": eid,
                 "is_admin": emp.get("is_admin", False),
                 "can_manage_communication": emp.get("can_manage_communication", False),
                 "first_name": emp["first_name"],
                 "last_name": emp["last_name"],
+                "must_change_password": bool(emp.get("must_change_password")),
             }
+
+    # 2) DB users (created via admin panel)
+    emp = await db.employees.find_one(
+        {"$or": [{"email": email}, {"personal_email": email}]}, {"_id": 0}
+    )
+    if emp and emp.get("password") and payload.password == emp["password"]:
+        if emp.get("account_status") in ("suspended", "deactivated"):
+            raise HTTPException(403, "Ce compte est désactivé. Contactez l'administrateur.")
+        return {
+            "employee_id": emp["id"],
+            "is_admin": emp.get("is_admin", False),
+            "can_manage_communication": emp.get("can_manage_communication", False),
+            "first_name": emp["first_name"],
+            "last_name": emp["last_name"],
+            "must_change_password": bool(emp.get("must_change_password")),
+        }
+
     raise HTTPException(401, "Identifiants inconnus. Essayez idriss.malonga@gmail.com, marcus.simeo@mspark.fr ou lea.dubois@mspark.fr.")
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Admin — User management (Utilisateurs)
+# ═══════════════════════════════════════════════════════════════════
+
+def _gen_password(length: int = 12) -> str:
+    """Generate a friendly temp password: 3 upper + 5 lower + 2 digits + 2 punct."""
+    import random, string
+    parts = (
+        random.choices(string.ascii_uppercase, k=3)
+        + random.choices(string.ascii_lowercase, k=5)
+        + random.choices(string.digits, k=2)
+        + random.choices("!@#$%*", k=2)
+    )
+    random.shuffle(parts)
+    return "".join(parts)
+
+
+def _gen_matricule() -> str:
+    """Auto-generated badge number (format MSP-XXXXX)."""
+    import random
+    return f"MSP-{random.randint(10000, 99999)}"
+
+
+class UserCreate(BaseModel):
+    # Section 1 — Account info
+    first_name: str
+    last_name: str
+    birth_date: Optional[str] = None  # YYYY-MM-DD
+    email: Optional[str] = None  # professional
+    personal_email: str  # required
+    phone: Optional[str] = None  # professional
+    personal_phone: str  # required
+    address: Optional[str] = None
+    postal_code: Optional[str] = None
+    city: Optional[str] = None
+    country: Optional[str] = "France"
+    avatar: Optional[str] = None
+    temp_password: Optional[str] = None
+    force_password_change: bool = True
+    account_status: str = "active"  # active | suspended | deactivated
+    # Section 2 — HR
+    statuses: List[str] = []  # ops, management, bureau, direction, alternant, stage
+    department: Optional[str] = None
+    role: Optional[str] = None  # job title
+    manager_id: Optional[str] = None
+    contract_type: Optional[str] = None  # CDI, CDD, Alternance, Stage, Intérim
+    weekly_hours: Optional[str] = None  # 24h, 28h, 35h
+    hire_date: Optional[str] = None
+    contract_end_date: Optional[str] = None
+    category: Optional[str] = None  # Employé, Agent maîtrise, Cadre
+    badge_rfid: Optional[str] = None
+    locker: Optional[str] = None
+    # Section 3 — Planning
+    work_days: List[str] = []  # ["monday", "tuesday", ...]
+    off_days: List[str] = []
+    usual_hours: Optional[str] = None
+    break_time: Optional[str] = None
+    # Section 4 — Payroll
+    gross_salary: Optional[float] = None
+    net_salary: Optional[float] = None
+    hourly_rate: Optional[float] = None
+    iban: Optional[str] = None
+    bic: Optional[str] = None
+    account_holder: Optional[str] = None
+    meal_points: Optional[int] = None
+    # Section 7 — Access
+    admin_role: str = "employe"  # employe | manager | rh | communication | comptabilite | direction | superadmin
+    permissions: List[str] = []
+    groups: List[str] = []
+    # Legacy compat
+    role_category: str = "employe"
+
+
+class UserUpdate(UserCreate):
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    personal_email: Optional[str] = None
+    personal_phone: Optional[str] = None
+
+
+class StatusPayload(BaseModel):
+    account_status: str  # active | suspended | deactivated
+
+
+async def _require_admin_full():
+    me = await db.employees.find_one({"id": current_user()}, {"_id": 0})
+    if not me or not me.get("is_admin"):
+        raise HTTPException(403, "Accès administrateur requis")
+    return me
+
+
+@api.get("/admin/users")
+async def admin_list_users():
+    await _require_admin_full()
+    items = await db.employees.find({}, {"_id": 0, "password": 0}).to_list(500)
+    return items
+
+
+@api.get("/admin/users/{uid}")
+async def admin_get_user(uid: str):
+    await _require_admin_full()
+    u = await db.employees.find_one({"id": uid}, {"_id": 0, "password": 0})
+    if not u:
+        raise HTTPException(404, "Utilisateur introuvable")
+    return u
+
+
+@api.post("/admin/users")
+async def admin_create_user(payload: UserCreate):
+    await _require_admin_full()
+    data = payload.model_dump()
+    data["id"] = _id()
+    data["matricule"] = data.get("matricule") or _gen_matricule()
+    temp_pwd = data.pop("temp_password", None) or _gen_password()
+    data["password"] = temp_pwd
+    data["must_change_password"] = bool(data.pop("force_password_change", True))
+    # Admin role mapping
+    admin_role = data.get("admin_role", "employe")
+    data["is_admin"] = admin_role in ("superadmin", "direction")
+    data["can_manage_communication"] = admin_role in ("communication", "superadmin", "direction")
+    # Legacy fields
+    data.setdefault("available", True)
+    data.setdefault("seniority_months", 0)
+    data.setdefault("skills", [])
+    data.setdefault("avatar", data.get("avatar") or "https://images.unsplash.com/photo-1633332755192-727a05c4013d?w=200&h=200&fit=crop")
+    data.setdefault("email", data.get("email") or data.get("personal_email"))
+    data.setdefault("phone", data.get("phone") or data.get("personal_phone"))
+    data.setdefault("leave_balance", {"cp_n_1": 0, "cp_n": 0, "rtt": 0})
+    data.setdefault("weekly_pattern", {})
+    data.setdefault("created_at", _now())
+    await db.employees.insert_one(data.copy())
+    # Return the generated password so the admin can share it
+    return {"user": {k: v for k, v in data.items() if k != "password"},
+            "temp_password": temp_pwd}
+
+
+@api.put("/admin/users/{uid}")
+async def admin_update_user(uid: str, payload: UserUpdate):
+    await _require_admin_full()
+    u = await db.employees.find_one({"id": uid}, {"_id": 0})
+    if not u:
+        raise HTTPException(404, "Utilisateur introuvable")
+    data = {k: v for k, v in payload.model_dump().items() if v is not None}
+    # Never touch the password via this endpoint (dedicated reset endpoint exists)
+    data.pop("password", None)
+    if "admin_role" in data:
+        data["is_admin"] = data["admin_role"] in ("superadmin", "direction")
+        data["can_manage_communication"] = data["admin_role"] in (
+            "communication", "superadmin", "direction",
+        )
+    await db.employees.update_one({"id": uid}, {"$set": data})
+    updated = await db.employees.find_one({"id": uid}, {"_id": 0, "password": 0})
+    return updated
+
+
+@api.post("/admin/users/{uid}/status")
+async def admin_set_user_status(uid: str, payload: StatusPayload):
+    await _require_admin_full()
+    if payload.account_status not in ("active", "suspended", "deactivated"):
+        raise HTTPException(400, "Statut invalide")
+    await db.employees.update_one(
+        {"id": uid}, {"$set": {"account_status": payload.account_status}}
+    )
+    return {"ok": True, "status": payload.account_status}
+
+
+@api.post("/admin/users/{uid}/reset-password")
+async def admin_reset_user_password(uid: str):
+    await _require_admin_full()
+    u = await db.employees.find_one({"id": uid})
+    if not u:
+        raise HTTPException(404, "Utilisateur introuvable")
+    new_pwd = _gen_password()
+    await db.employees.update_one(
+        {"id": uid},
+        {"$set": {"password": new_pwd, "must_change_password": True}},
+    )
+    return {"ok": True, "temp_password": new_pwd}
+
+
+@api.delete("/admin/users/{uid}")
+async def admin_delete_user(uid: str):
+    await _require_admin_full()
+    if uid in (ADMIN_EMPLOYEE_ID, CURRENT_EMPLOYEE_ID):
+        raise HTTPException(400, "Impossible de supprimer un compte de démonstration")
+    r = await db.employees.delete_one({"id": uid})
+    return {"ok": True, "deleted": r.deleted_count}
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -3656,9 +3968,11 @@ async def admin_approve_request(rid: str, payload: RequestDecision):
                 bal["cp_n_1"] = round(float(bal.get("cp_n_1", 0)) - take_n1, 1)
                 remaining -= take_n1
                 if remaining > 0:
-                    bal["cp_n"] = round(max(0, float(bal.get("cp_n", 0)) - remaining), 1)
+                    # Allow negative balance (anticipated leave). Do NOT clamp to 0.
+                    bal["cp_n"] = round(float(bal.get("cp_n", 0)) - remaining, 1)
             elif is_rtt:
-                bal["rtt"] = round(max(0, float(bal.get("rtt", 0)) - days_consumed), 1)
+                # Allow negative RTT balance (anticipated).
+                bal["rtt"] = round(float(bal.get("rtt", 0)) - days_consumed, 1)
             await db.employees.update_one({"id": emp_id}, {"$set": {"leave_balance": bal}})
 
         # Persist the effective consumption on the request for traceability

@@ -50,6 +50,7 @@ const adminNav = [
   { to: "/management/carrousel", label: "Carrousel accueil", icon: Newspaper, key: "mgmt-carrousel" },
   { to: "/management/agenda", label: "Agenda", icon: Calendar, key: "mgmt-agenda" },
   { to: "/management/formulaires", label: "Formulaires", icon: ListChecks, key: "mgmt-forms" },
+  { to: "/management/utilisateurs", label: "Utilisateurs", icon: Users, key: "mgmt-users" },
   { to: "/management/documents", label: "Documents RH", icon: FileText, key: "mgmt-docs" },
 ];
 

@@ -25,12 +25,14 @@ const STATUSES = [
   { k: "pending", l: "En attente" },
   { k: "approved", l: "Validées" },
   { k: "rejected", l: "Refusées" },
+  { k: "cancelled", l: "Annulées" },
 ];
 
 const statusMeta = {
   pending: { l: "En attente", color: "#F59E0B", bg: "#FEF3C7", icon: Clock },
   approved: { l: "Validée", color: "#10B981", bg: "#D1FAE5", icon: CheckCircle2 },
   rejected: { l: "Refusée", color: "#EF4444", bg: "#FEE2E2", icon: XCircle },
+  cancelled: { l: "Annulée", color: "#94A3B8", bg: "#F1F5F9", icon: XCircle },
 };
 
 export default function Demandes() {
@@ -39,6 +41,8 @@ export default function Demandes() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [open, setOpen] = useState(false);
   const [infoOpen, setInfoOpen] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  const todayIso = new Date().toISOString().slice(0, 10);
   const [form, setForm] = useState({
     type: "conge",
     start_date: "",
@@ -107,12 +111,23 @@ export default function Demandes() {
     }
   };
 
+  const cancelRequest = async (r) => {
+    if (!window.confirm(`Annuler cette demande (${r.type}) du ${r.start_date} ?`)) return;
+    try {
+      const res = await api.post(`/requests/${r.id}/cancel`);
+      const refunded = res.data?.refunded_days || 0;
+      toast.success("Demande annulée", {
+        description: refunded > 0 ? `${refunded} jour(s) recrédité(s) sur votre solde.` : "Vos jours seront disponibles à nouveau.",
+      });
+      refresh();
+      notifyLiveRefresh(["requests", "me", "notifications"]);
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Impossible d'annuler cette demande");
+    }
+  };
+
   const balance = me?.leave_balance || { cp_n_1: 0, cp_n: 0, rtt: 0 };
   const totalCP = balance.cp_n_1 + balance.cp_n;
-  const todayIso = (() => {
-    const d = new Date();
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-  })();
 
   return (
     <div className="space-y-6 ms-fade-up">
@@ -154,71 +169,120 @@ export default function Demandes() {
           <BalanceCard label="CP N" sub="Année en cours" value={balance.cp_n} color="#3BA4FF" />
           <BalanceCard label="RTT" sub="Récup. temps de travail" value={balance.rtt} color="#10B981" />
         </div>
-        <div className="mt-4 rounded-xl bg-[#F4F7FA] p-3 text-xs text-[#475569]">
-          ✨ Total congés payés disponibles :{" "}
-          <strong className="text-[#071B34]">{totalCP} jours</strong> · à utiliser avant le 31 mai 2027.
+        <div className="mt-4 rounded-xl bg-[#F4F7FA] p-3 text-xs text-[#475569] space-y-1.5">
+          <div>
+            ✨ Total congés payés disponibles :{" "}
+            <strong className={totalCP < 0 ? "text-[#EF4444]" : "text-[#071B34]"}>{totalCP} jours</strong>
+            {totalCP < 0 && <span className="text-[#EF4444]"> (anticipé)</span>}
+            {" "}· à utiliser avant le 31 mai 2027.
+          </div>
+          <div className="text-[#3BA4FF]">
+            💡 Les jours sont déduits <strong>immédiatement</strong> dès la demande. Un solde négatif est autorisé (congés anticipés) et se régularise avec l'acquisition mensuelle.
+          </div>
         </div>
       </div>
 
-      <div className="ms-card p-4 flex flex-wrap gap-2">
-        {STATUSES.map((s) => (
-          <button
-            key={s.k}
-            onClick={() => setStatusFilter(s.k)}
-            data-testid={`status-${s.k}`}
-            className={`rounded-full px-4 py-1.5 text-xs font-semibold transition-colors ${
-              statusFilter === s.k ? "bg-[#071B34] text-white" : "bg-[#F4F7FA] text-[#475569] hover:bg-[#071B34]/5"
-            }`}
-          >
-            {s.l}
-          </button>
-        ))}
+      <div className="ms-card p-2 md:p-4 flex flex-wrap gap-2 items-center justify-between">
+        <div className="flex flex-wrap gap-2">
+          {STATUSES.map((s) => (
+            <button
+              key={s.k}
+              onClick={() => { setStatusFilter(s.k); setExpanded(false); }}
+              data-testid={`status-${s.k}`}
+              className={`rounded-full px-4 py-1.5 text-xs font-semibold transition-colors ${
+                statusFilter === s.k ? "bg-[#071B34] text-white" : "bg-[#F4F7FA] text-[#475569] hover:bg-[#071B34]/5"
+              }`}
+            >
+              {s.l}
+            </button>
+          ))}
+        </div>
+        <span className="text-[10px] uppercase tracking-wider text-[#94A3B8] px-2">
+          {items.length} demande{items.length > 1 ? "s" : ""}
+        </span>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      <div className="ms-card divide-y divide-[#071B34]/5" data-testid="requests-list">
         {items.length === 0 && (
-          <div className="ms-card p-8 col-span-full text-center text-sm text-[#475569]">
+          <div className="p-8 text-center text-sm text-[#475569]">
             Aucune demande dans cette catégorie.
           </div>
         )}
-        {items.map((r) => {
+        {items.slice(0, expanded ? items.length : 6).map((r) => {
           const type = TYPES.find((t) => t.k === r.type);
           const sm = statusMeta[r.status];
           const Icon = type?.icon || FileText;
           const StatusIcon = sm.icon;
+          const canCancel =
+            ["pending", "approved"].includes(r.status) &&
+            r.start_date > todayIso;
           return (
-            <div key={r.id} className="ms-card ms-card-hover p-5" data-testid={`req-${r.id}`}>
-              <div className="flex items-start justify-between gap-3">
-                <div
-                  className="flex h-11 w-11 items-center justify-center rounded-xl"
-                  style={{ background: `${type?.color || "#3BA4FF"}1A`, color: type?.color || "#3BA4FF" }}
-                >
-                  <Icon className="h-5 w-5" />
-                </div>
-                <span
-                  className="ms-chip inline-flex items-center gap-1"
-                  style={{ background: sm.bg, color: sm.color }}
-                >
-                  <StatusIcon className="h-3 w-3" /> {sm.l}
-                </span>
+            <div
+              key={r.id}
+              data-testid={`req-${r.id}`}
+              className="flex items-center gap-3 p-3 md:p-4 hover:bg-[#F4F7FA]/50 transition-colors"
+            >
+              <div
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl"
+                style={{ background: `${type?.color || "#3BA4FF"}1A`, color: type?.color || "#3BA4FF" }}
+              >
+                <Icon className="h-4 w-4" />
               </div>
-              <h4 className="mt-3 text-lg font-bold text-[#071B34]">{type?.l || r.type}</h4>
-              <p className="text-sm text-[#475569] mt-1">
-                {formatDateFr(r.start_date)}
-                {r.end_date && r.end_date !== r.start_date ? ` → ${formatDateFr(r.end_date)}` : ""}
-              </p>
-              {r.comment && <p className="mt-2 text-xs text-[#475569] italic">"{r.comment}"</p>}
-              {r.amount && (
-                <div className="mt-3 inline-flex items-center gap-1 rounded-lg bg-[#10B981]/10 px-2 py-1 text-xs font-semibold text-[#065F46]">
-                  Montant : {r.amount.toFixed(2)} €
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-sm font-semibold text-[#071B34]">{type?.l || r.type}</span>
+                  <span
+                    className="ms-chip inline-flex items-center gap-1 !text-[10px] !py-0.5 !px-2"
+                    style={{ background: sm.bg, color: sm.color }}
+                  >
+                    <StatusIcon className="h-2.5 w-2.5" /> {sm.l}
+                  </span>
                 </div>
+                <div className="text-xs text-[#475569] mt-0.5 truncate">
+                  {formatDateFr(r.start_date)}
+                  {r.end_date && r.end_date !== r.start_date ? ` → ${formatDateFr(r.end_date)}` : ""}
+                  {r.amount ? ` · ${r.amount.toFixed(2)} €` : ""}
+                  {r.comment ? ` · ${r.comment.slice(0, 40)}${r.comment.length > 40 ? "…" : ""}` : ""}
+                </div>
+              </div>
+              <div className="text-[10px] uppercase tracking-wider text-[#94A3B8] shrink-0 hidden md:block">
+                {formatDateFr(r.created_at.slice(0, 10))}
+              </div>
+              {canCancel && (
+                <button
+                  type="button"
+                  onClick={() => cancelRequest(r)}
+                  data-testid={`cancel-${r.id}`}
+                  title="Annuler cette demande"
+                  className="shrink-0 flex items-center gap-1 rounded-lg bg-[#EF4444]/10 hover:bg-[#EF4444]/20 text-[#B91C1C] text-[11px] font-semibold px-2.5 py-1.5 transition-colors"
+                >
+                  <XCircle className="h-3 w-3" />
+                  Annuler
+                </button>
               )}
-              <div className="mt-3 text-[10px] uppercase tracking-wider text-[#475569]">
-                Créée le {formatDateFr(r.created_at.slice(0, 10))}
-              </div>
             </div>
           );
         })}
+        {!expanded && items.length > 6 && (
+          <button
+            type="button"
+            onClick={() => setExpanded(true)}
+            data-testid="show-more"
+            className="w-full py-3 text-sm font-semibold text-[#3BA4FF] hover:bg-[#3BA4FF]/5 transition-colors"
+          >
+            Voir plus ({items.length - 6} demande{items.length - 6 > 1 ? "s" : ""} restante{items.length - 6 > 1 ? "s" : ""})
+          </button>
+        )}
+        {expanded && items.length > 6 && (
+          <button
+            type="button"
+            onClick={() => setExpanded(false)}
+            data-testid="show-less"
+            className="w-full py-3 text-sm font-semibold text-[#475569] hover:bg-[#F4F7FA] transition-colors"
+          >
+            Voir moins
+          </button>
+        )}
       </div>
 
       {/* New request modal */}
@@ -415,17 +479,19 @@ export default function Demandes() {
 }
 
 function BalanceCard({ label, sub, value, color }) {
+  const isNeg = value < 0;
   return (
-    <div className="rounded-2xl border border-[#071B34]/5 p-4">
+    <div className={`rounded-2xl border p-4 ${isNeg ? "border-[#EF4444]/40 bg-[#EF4444]/5" : "border-[#071B34]/5"}`}>
       <div className="flex items-center justify-between">
         <span className="ms-overline">{label}</span>
-        <span className="h-2 w-2 rounded-full" style={{ background: color }} />
+        <span className="h-2 w-2 rounded-full" style={{ background: isNeg ? "#EF4444" : color }} />
       </div>
       <div className="mt-2 flex items-baseline gap-1">
-        <span className="text-3xl font-extrabold tracking-tight" style={{ color }}>
+        <span className="text-3xl font-extrabold tracking-tight" style={{ color: isNeg ? "#EF4444" : color }}>
           {value}
         </span>
         <span className="text-sm text-[#475569]">jours</span>
+        {isNeg && <span className="text-[10px] font-bold uppercase text-[#EF4444] ml-1">anticipé</span>}
       </div>
       <div className="text-[11px] text-[#475569] mt-0.5">{sub}</div>
     </div>
