@@ -2014,6 +2014,31 @@ async def get_badging(filter_range: str = "month"):
         {"_id": 0},
     ).sort("day", -1).to_list(100)
 
+    # Merge manual punches (override schedule-derived values)
+    manuals = await db.badging_manual.find(
+        {"employee_id": current_user(), "day": {"$gte": start.isoformat(), "$lt": today_d.isoformat()}},
+        {"_id": 0},
+    ).to_list(100)
+    by_day = {b["day"]: b for b in items}
+    for m in manuals:
+        d = m["day"]
+        base = by_day.get(d) or {
+            "id": f"manual-{d}", "employee_id": current_user(), "day": d,
+            "worked_minutes": 0, "break_minutes": 0, "anomaly": None, "note": "Pointage manuel",
+        }
+        for k in ("clock_in", "pause_out", "pause_in", "clock_out"):
+            if m.get(k):
+                base[k] = m[k]
+        ci = _hm_to_minutes(base.get("clock_in")); co = _hm_to_minutes(base.get("clock_out"))
+        po = _hm_to_minutes(base.get("pause_out")); pi = _hm_to_minutes(base.get("pause_in"))
+        if ci is not None and co is not None:
+            w = max(0, co - ci)
+            if po is not None and pi is not None:
+                w -= max(0, pi - po)
+            base["worked_minutes"] = max(0, w)
+        by_day[d] = base
+    items = sorted(by_day.values(), key=lambda x: x["day"], reverse=True)
+
     # Live entry for today, computed from today's planning
     today_sched = await db.schedules.find_one(
         {"employee_id": current_user(), "day": today_d.isoformat()}, {"_id": 0}
@@ -4614,6 +4639,52 @@ async def on_start():
             "hire_date": "2024-01-01", "skills": [],
             "leave_balance": {"cp_n_1": 0, "cp_n": 0, "rtt": 0},
         })
+    # Simulate a realistic work week for Marcus (35h/week = 7h/day) — idempotent
+    await _seed_marcus_week()
+
+
+async def _seed_marcus_week():
+    """Populate Marcus SIMEO's current week with realistic badging punches for elapsed days."""
+    marcus_id = "emp-marcus-simeo"
+    now = _now_paris()
+    today = now.date()
+    monday = today - timedelta(days=(today.weekday()))
+    week_key = monday.isoformat()
+    # Idempotence marker
+    marker = await db.badging_manual.find_one({"employee_id": marcus_id, "week_seed": week_key})
+    if marker:
+        return
+    # Realistic pattern for each elapsed weekday (Mon–Fri, and partial today if weekday)
+    plan = [
+        ("08:30", "12:30", "13:30", "17:00"),  # Monday    — 7h30 (30min supp)
+        ("08:45", "12:30", "13:30", "16:45"),  # Tuesday   — 7h00 pile
+        ("08:30", "12:30", "13:30", "17:15"),  # Wednesday — 7h45 (45min supp)
+        ("09:00", "12:30", "13:30", "17:00"),  # Thursday  — 7h00 (retard 30min)
+        ("08:30", "12:00", "13:00", "16:00"),  # Friday    — 6h30 (30min manquantes)
+    ]
+    for i, (ci, po, pi, co) in enumerate(plan):
+        day_date = monday + timedelta(days=i)
+        # Skip days in the future
+        if day_date > today:
+            break
+        # For today, only fill up to current moment
+        is_today = day_date == today
+        current_hm = f"{now.hour:02d}:{now.minute:02d}"
+        def _clip(hm):
+            if not is_today:
+                return hm
+            return hm if hm <= current_hm else None
+        doc = {
+            "id": _id(), "employee_id": marcus_id, "day": day_date.isoformat(),
+            "clock_in": _clip(ci), "pause_out": _clip(po),
+            "pause_in": _clip(pi), "clock_out": _clip(co),
+            "punches": [], "created_at": _now(),
+            "week_seed": week_key,
+        }
+        # Insert only if not already present for that day
+        exists = await db.badging_manual.find_one({"employee_id": marcus_id, "day": day_date.isoformat()})
+        if not exists:
+            await db.badging_manual.insert_one(doc)
 
 
 async def _seed_extra_products():

@@ -8,6 +8,7 @@ import {
 import { toast } from "sonner";
 import { api, formatDateFr } from "@/lib/api";
 import useLiveData from "@/hooks/useLiveData";
+import { useApp } from "@/contexts/AppContext";
 import PortalModal from "@/components/PortalModal";
 
 const DAYS = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"];
@@ -19,6 +20,7 @@ const fmtHM = (min) => {
 };
 
 export default function Badgeage() {
+  const { me } = useApp();
   const [history, setHistory] = useState([]);
   const [today, setToday] = useState(null);
   const [counter, setCounter] = useState(null);
@@ -67,7 +69,10 @@ export default function Badgeage() {
   }, [history, today]);
 
   const weekTotal = weekRows.reduce((s, r) => s + (r.entry?.worked_minutes || 0), 0);
-  const weekExpected = 24 * 60; // Idriss demo — could compute from planning
+  const contractWeek = (me?.contract_hours_weekly || 24) * 60;
+  const dailyTarget = Math.round(contractWeek / 5);
+  const monthWorkDaysPassed = Math.max(1, Math.min(22, Math.ceil(new Date().getDate() * 5 / 7)));
+  const monthTarget = Math.round(contractWeek * 4.33);
   const monthTotal = history.reduce((s, h) => s + (h.worked_minutes || 0), 0) + (today?.worked_minutes || 0);
 
   const nextStep = useMemo(() => {
@@ -114,12 +119,37 @@ export default function Badgeage() {
         <PunchCard label="Sortie" time={today?.clock_out} icon={LogOut} accent="#EF4444" />
       </div>
 
+      {/* Objectifs : Jour / Semaine / Mois avec jauges de progression et heures restantes */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <ObjectiveCard
+          label="Aujourd'hui"
+          worked={today?.worked_minutes || 0}
+          target={dailyTarget}
+          accent="#3BA4FF"
+          hint={`Objectif journalier · ${fmtHM(dailyTarget)}`}
+        />
+        <ObjectiveCard
+          label="Cette semaine"
+          worked={weekTotal}
+          target={contractWeek}
+          accent="#10B981"
+          hint={`Contrat ${me?.contract_hours_weekly || 24}h / semaine`}
+        />
+        <ObjectiveCard
+          label="Ce mois-ci"
+          worked={monthTotal}
+          target={monthTarget}
+          accent="#8B5CF6"
+          hint={`≈ ${Math.round(monthTarget / 60)}h prévues`}
+        />
+      </div>
+
       {/* Today's summary */}
       <div className="ms-card p-5 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
         <div>
           <div className="ms-overline">Heures travaillées</div>
           <div className="text-3xl font-bold text-[#071B34] mt-1">{fmtHM(today?.worked_minutes)}</div>
-          <div className="text-xs text-[#94A3B8] mt-0.5">sur {fmtHM(weekExpected / 5)} prévues</div>
+          <div className="text-xs text-[#94A3B8] mt-0.5">sur {fmtHM(dailyTarget)} prévues</div>
         </div>
         <div>
           <div className="ms-overline">Statut du jour</div>
@@ -178,10 +208,10 @@ export default function Badgeage() {
       <div>
         <h2 className="text-lg font-bold text-[#071B34] mb-3">Récapitulatif hebdomadaire</h2>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          <SummaryCard icon={Clock} accent="#10B981" label="Heures travaillées" value={fmtHM(weekTotal)} sub={`sur ${fmtHM(weekExpected)} prévues`} />
-          <SummaryCard icon={TrendingUp} accent="#8B5CF6" label="Heures supplémentaires" value={`+${fmtHM(Math.max(0, weekTotal - weekExpected))}`} sub="cette semaine" />
-          <SummaryCard icon={Users} accent="#F59E0B" label="Heures prévues" value={fmtHM(weekExpected)} sub="" />
-          <SummaryCard icon={AlertCircle} accent="#EF4444" label="Solde hebdomadaire" value={`${weekTotal - weekExpected >= 0 ? "+" : ""}${fmtHM(weekTotal - weekExpected)}`} sub="par rapport aux prévues" />
+          <SummaryCard icon={Clock} accent="#10B981" label="Heures travaillées" value={fmtHM(weekTotal)} sub={`sur ${fmtHM(contractWeek)} prévues`} />
+          <SummaryCard icon={TrendingUp} accent="#8B5CF6" label="Heures supplémentaires" value={`+${fmtHM(Math.max(0, weekTotal - contractWeek))}`} sub="cette semaine" />
+          <SummaryCard icon={Users} accent="#F59E0B" label="Heures prévues" value={fmtHM(contractWeek)} sub="" />
+          <SummaryCard icon={AlertCircle} accent="#EF4444" label="Solde hebdomadaire" value={`${weekTotal - contractWeek >= 0 ? "+" : ""}${fmtHM(weekTotal - contractWeek)}`} sub="par rapport aux prévues" />
         </div>
       </div>
 
@@ -261,6 +291,42 @@ export default function Badgeage() {
     </div>
   );
 }
+
+function ObjectiveCard({ label, worked, target, accent, hint }) {
+  const pct = target > 0 ? Math.min(100, Math.round((worked / target) * 100)) : 0;
+  const remaining = Math.max(0, target - worked);
+  const over = worked > target;
+  return (
+    <div className="ms-card p-5" data-testid={`objective-${label}`}>
+      <div className="flex items-start justify-between gap-2">
+        <div>
+          <div className="ms-overline">{label}</div>
+          <div className="mt-1 text-2xl font-bold text-[#071B34]">
+            {fmtHM(worked)} <span className="text-sm font-normal text-[#94A3B8]">/ {fmtHM(target)}</span>
+          </div>
+        </div>
+        <div className="text-right">
+          <div className="text-[10px] uppercase tracking-widest text-[#94A3B8]">Progression</div>
+          <div className="text-2xl font-bold" style={{ color: accent }}>{pct}%</div>
+        </div>
+      </div>
+      <div className="mt-3 h-2.5 rounded-full bg-[#F4F7FA] overflow-hidden">
+        <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, background: accent }} />
+      </div>
+      <div className="mt-3 flex items-center justify-between text-xs">
+        <span className="text-[#94A3B8]">{hint}</span>
+        <span className={`font-semibold ${over ? "text-[#10B981]" : remaining > 0 ? "text-[#F59E0B]" : "text-[#10B981]"}`}>
+          {over
+            ? `+${fmtHM(worked - target)} · en avance`
+            : remaining > 0
+            ? `Il reste ${fmtHM(remaining)}`
+            : "Objectif atteint"}
+        </span>
+      </div>
+    </div>
+  );
+}
+
 
 function PunchCard({ label, time, icon: Icon, accent }) {
   return (

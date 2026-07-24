@@ -105,13 +105,6 @@ export default function NewslettersList() {
         )}
       </div>
 
-      <div className="rounded-3xl bg-gradient-to-br from-[#EBF4FF] to-[#DBE7FF] p-8">
-        <h2 className="text-2xl md:text-3xl font-bold text-[#071B34]">Restez informé, restez connecté !</h2>
-        <p className="text-sm text-[#475569] mt-2 max-w-2xl">
-          Nos newsletters vous informent sur l&apos;actualité de l&apos;entreprise, les projets en cours et les événements à venir.
-        </p>
-      </div>
-
       <div className="ms-card p-3 flex flex-wrap items-center gap-3">
         <div className="flex-1 min-w-[220px] relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[#94A3B8]" />
