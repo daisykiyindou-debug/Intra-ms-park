@@ -35,19 +35,19 @@ export default function FormationsList() {
   });
 
   const register = async (f) => {
+    // When the admin has configured an external form URL, "S'inscrire" simply
+    // redirects to that form — no local registration state, no green button.
+    if (f.form_url) {
+      const url = /^https?:\/\//i.test(f.form_url) ? f.form_url : `https://${f.form_url}`;
+      window.open(url, "_blank", "noopener,noreferrer");
+      return;
+    }
     if (f.me_registered) {
       await api.delete(`/formations/${f.id}/register`);
       toast.success("Inscription annulée");
     } else {
       await api.post(`/formations/${f.id}/register`);
       toast.success("Inscrit !");
-      // If an external form URL is provided, open it in a new tab so the
-      // employee can complete the additional information required by the
-      // organisation.
-      if (f.form_url) {
-        const url = /^https?:\/\//i.test(f.form_url) ? f.form_url : `https://${f.form_url}`;
-        window.open(url, "_blank", "noopener,noreferrer");
-      }
     }
     load();
   };
@@ -94,7 +94,12 @@ export default function FormationsList() {
           const registrations = f.registrations_count || 0;
           const maxP = f.max_participants || 0;
           const isFull = maxP > 0 && registrations >= maxP;
-          const disabled = !f.is_open || (isFull && !f.me_registered);
+          const hasExternalForm = !!f.form_url;
+          // When an external form is configured, the button always redirects
+          // (no "annuler / inscrit" state, no separate form link).
+          const disabled = hasExternalForm
+            ? (!f.is_open || isFull)
+            : (!f.is_open || (isFull && !f.me_registered));
           return (
           <div key={f.id} className="ms-card overflow-hidden flex flex-col" data-testid={`formation-${f.id}`}>
             <div
@@ -130,31 +135,28 @@ export default function FormationsList() {
                 onClick={() => register(f)}
                 disabled={disabled}
                 data-testid={`register-${f.id}`}
-                className={`mt-3 w-full rounded-xl text-sm font-semibold py-2 transition-colors ${
-                  f.me_registered
+                className={`mt-3 w-full rounded-xl text-sm font-semibold py-2 inline-flex items-center justify-center gap-1.5 transition-colors ${
+                  hasExternalForm
+                    ? isFull
+                      ? "bg-[#EF4444]/10 text-[#B91C1C]"
+                      : "bg-[#3BA4FF] text-white hover:bg-[#2A8DE0]"
+                    : f.me_registered
                     ? "bg-[#10B981]/15 text-[#047857]"
                     : isFull
                     ? "bg-[#EF4444]/10 text-[#B91C1C]"
                     : "bg-[#3BA4FF] text-white hover:bg-[#2A8DE0]"
                 } disabled:opacity-60 disabled:cursor-not-allowed`}
               >
-                {f.me_registered
-                  ? <><CheckCircle2 className="h-4 w-4 inline mr-1" /> Inscrit — annuler</>
-                  : isFull
+                {isFull && !(hasExternalForm)
                   ? "Formation complète"
+                  : isFull && hasExternalForm
+                  ? "Formation complète"
+                  : hasExternalForm
+                  ? <>S&apos;inscrire <ExternalLink className="h-3.5 w-3.5" /></>
+                  : f.me_registered
+                  ? <><CheckCircle2 className="h-4 w-4 inline mr-1" /> Inscrit — annuler</>
                   : "S'inscrire"}
               </button>
-              {f.me_registered && f.form_url && (
-                <a
-                  href={f.form_url}
-                  target="_blank"
-                  rel="noreferrer"
-                  data-testid={`formation-form-${f.id}`}
-                  className="mt-2 w-full inline-flex items-center justify-center gap-1.5 rounded-xl border border-[#3BA4FF]/40 bg-[#3BA4FF]/5 text-[#1D70B8] hover:bg-[#3BA4FF]/10 text-xs font-semibold py-2 transition-colors"
-                >
-                  <ExternalLink className="h-3.5 w-3.5" /> Formulaire d&apos;inscription
-                </a>
-              )}
             </div>
           </div>
           );
