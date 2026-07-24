@@ -2,24 +2,25 @@ import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   GraduationCap, Search, Plus, ArrowLeft, Users, Calendar, Clock, MapPin, X,
-  CheckCircle2, Send, Trash2, Edit3,
+  CheckCircle2, Send, Trash2, Edit3, ExternalLink,
 } from "lucide-react";
 import { toast } from "sonner";
 import { api, absoluteUrl, formatDateFr } from "@/lib/api";
 import { useApp } from "@/contexts/AppContext";
 import PortalModal from "@/components/PortalModal";
+import ImageUpload from "@/components/ImageUpload";
 
 const CATEGORIES = ["Métier", "Sécurité", "Bureautique", "Langues", "Management", "Autres"];
 const FORMATS = ["présentiel", "distanciel", "hybride"];
 
 export default function FormationsList() {
-  const { me } = useApp();
+  const { me, adminMode } = useApp();
   const [items, setItems] = useState([]);
   const [q, setQ] = useState("");
   const [cat, setCat] = useState("all");
   const [proposeOpen, setProposeOpen] = useState(false);
   const navigate = useNavigate();
-  const isAdmin = !!me?.is_admin;
+  const isAdmin = !!me?.is_admin && adminMode !== false;
 
   const load = async () => {
     const { data } = await api.get("/formations");
@@ -82,7 +83,12 @@ export default function FormationsList() {
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {filtered.length === 0 && <div className="ms-card col-span-full p-10 text-center text-sm text-[#475569]">Aucune formation.</div>}
-        {filtered.map((f) => (
+        {filtered.map((f) => {
+          const registrations = f.registrations_count || 0;
+          const maxP = f.max_participants || 0;
+          const isFull = maxP > 0 && registrations >= maxP;
+          const disabled = !f.is_open || (isFull && !f.me_registered);
+          return (
           <div key={f.id} className="ms-card overflow-hidden flex flex-col" data-testid={`formation-${f.id}`}>
             <div
               className="h-32 bg-cover bg-center relative"
@@ -93,6 +99,16 @@ export default function FormationsList() {
                 <span className="text-[10px] uppercase tracking-widest bg-white/95 text-[#071B34] px-2 py-0.5 rounded-full font-semibold">{f.category}</span>
                 <span className="text-[10px] bg-[#3BA4FF]/95 text-white px-2 py-0.5 rounded-full font-semibold capitalize">{f.format}</span>
               </div>
+              {isFull && (
+                <div className="absolute top-3 right-3">
+                  <span
+                    data-testid={`formation-full-${f.id}`}
+                    className="inline-flex items-center gap-1 text-[10px] uppercase tracking-widest bg-[#EF4444] text-white px-2 py-0.5 rounded-full font-bold shadow-md"
+                  >
+                    Formation complète
+                  </span>
+                </div>
+              )}
             </div>
             <div className="p-4 flex flex-col flex-1">
               <h3 className="text-base font-bold text-[#071B34] line-clamp-2">{f.title}</h3>
@@ -101,23 +117,41 @@ export default function FormationsList() {
                 <div className="flex items-center gap-1.5"><Clock className="h-3 w-3" /> {f.duration_hours}h de formation</div>
                 {f.start_date && <div className="flex items-center gap-1.5"><Calendar className="h-3 w-3" /> {formatDateFr(f.start_date)}</div>}
                 {f.location && <div className="flex items-center gap-1.5"><MapPin className="h-3 w-3" /> {f.location}</div>}
-                <div className="flex items-center gap-1.5"><Users className="h-3 w-3" /> {f.registrations_count || 0}/{f.max_participants || "∞"} inscrits</div>
+                <div className="flex items-center gap-1.5"><Users className="h-3 w-3" /> {registrations}/{maxP || "∞"} inscrits</div>
               </div>
               <button
                 onClick={() => register(f)}
-                disabled={!f.is_open}
+                disabled={disabled}
                 data-testid={`register-${f.id}`}
                 className={`mt-3 w-full rounded-xl text-sm font-semibold py-2 transition-colors ${
                   f.me_registered
                     ? "bg-[#10B981]/15 text-[#047857]"
+                    : isFull
+                    ? "bg-[#EF4444]/10 text-[#B91C1C]"
                     : "bg-[#3BA4FF] text-white hover:bg-[#2A8DE0]"
-                } disabled:opacity-50 disabled:cursor-not-allowed`}
+                } disabled:opacity-60 disabled:cursor-not-allowed`}
               >
-                {f.me_registered ? <><CheckCircle2 className="h-4 w-4 inline mr-1" /> Inscrit — annuler</> : "S'inscrire"}
+                {f.me_registered
+                  ? <><CheckCircle2 className="h-4 w-4 inline mr-1" /> Inscrit — annuler</>
+                  : isFull
+                  ? "Formation complète"
+                  : "S'inscrire"}
               </button>
+              {f.me_registered && f.form_url && (
+                <a
+                  href={f.form_url}
+                  target="_blank"
+                  rel="noreferrer"
+                  data-testid={`formation-form-${f.id}`}
+                  className="mt-2 w-full inline-flex items-center justify-center gap-1.5 rounded-xl border border-[#3BA4FF]/40 bg-[#3BA4FF]/5 text-[#1D70B8] hover:bg-[#3BA4FF]/10 text-xs font-semibold py-2 transition-colors"
+                >
+                  <ExternalLink className="h-3.5 w-3.5" /> Formulaire d&apos;inscription
+                </a>
+              )}
             </div>
           </div>
-        ))}
+          );
+        })}
       </div>
 
       {proposeOpen && <ProposeModal onClose={() => setProposeOpen(false)} onSaved={() => setProposeOpen(false)} />}
@@ -171,17 +205,20 @@ function ProposeModal({ onClose, onSaved }) {
 // Admin manager
 // ═══════════════════════════════════════════════════════════════════
 export function FormationsManager() {
+  const { me, adminMode } = useApp();
+  const canManage = !!me?.is_admin && adminMode !== false;
   const [items, setItems] = useState([]);
   const [proposals, setProposals] = useState([]);
   const [editing, setEditing] = useState(null);
   const load = async () => {
+    if (!canManage) return;
     const [f, p] = await Promise.all([
       api.get("/formations").then((r) => r.data),
       api.get("/admin/formation-proposals").then((r) => r.data),
     ]);
     setItems(f); setProposals(p);
   };
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [canManage]);
 
   const del = async (id) => {
     if (!window.confirm("Supprimer cette formation ?")) return;
@@ -189,6 +226,17 @@ export function FormationsManager() {
     toast.success("Supprimée");
     load();
   };
+
+  if (!canManage) {
+    return (
+      <div className="ms-card p-10 text-center">
+        <h2 className="text-lg font-bold text-[#071B34]">Mode administrateur désactivé</h2>
+        <p className="mt-2 text-sm text-[#475569]">
+          Activez le mode administrateur (interrupteur en haut à droite) pour gérer les formations.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-5">
@@ -253,6 +301,7 @@ function FormationEditor({ formation, onClose, onSaved }) {
     trainer: formation?.trainer || "",
     max_participants: formation?.max_participants || 20,
     cover_image: formation?.cover_image || "",
+    form_url: formation?.form_url || "",
     is_open: formation?.is_open ?? true,
   });
 
@@ -273,7 +322,7 @@ function FormationEditor({ formation, onClose, onSaved }) {
           <button onClick={onClose} className="h-9 w-9 rounded-xl hover:bg-[#F4F7FA]"><X className="h-4 w-4 mx-auto" /></button>
         </div>
         <div><label className="ms-overline">Titre *</label>
-          <input value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} className="ms-input mt-1" /></div>
+          <input value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} data-testid="formation-title" className="ms-input mt-1" /></div>
         <div><label className="ms-overline">Description</label>
           <textarea rows={3} value={f.description} onChange={(e) => setF({ ...f, description: e.target.value })} className="ms-input mt-1" /></div>
         <div className="grid grid-cols-2 gap-2">
@@ -294,15 +343,37 @@ function FormationEditor({ formation, onClose, onSaved }) {
           <div><label className="ms-overline">Formateur</label>
             <input value={f.trainer} onChange={(e) => setF({ ...f, trainer: e.target.value })} className="ms-input mt-1" /></div>
         </div>
-        <div><label className="ms-overline">Image de couverture (URL)</label>
-          <input value={f.cover_image} onChange={(e) => setF({ ...f, cover_image: e.target.value })} className="ms-input mt-1" /></div>
+        <div>
+          <label className="ms-overline">Image de couverture</label>
+          <div className="mt-1">
+            <ImageUpload
+              value={f.cover_image}
+              onChange={(url) => setF({ ...f, cover_image: url })}
+              mode="single"
+              testId="formation-cover"
+            />
+          </div>
+        </div>
+        <div>
+          <label className="ms-overline">Lien du formulaire d&apos;inscription (externe)</label>
+          <input
+            value={f.form_url}
+            onChange={(e) => setF({ ...f, form_url: e.target.value })}
+            data-testid="formation-form-url"
+            placeholder="https://forms.google.com/…"
+            className="ms-input mt-1"
+          />
+          <p className="text-[11px] text-[#475569] mt-1">
+            Sera affiché aux inscrits pour compléter des informations complémentaires.
+          </p>
+        </div>
         <label className="flex items-center gap-2 text-sm">
           <input type="checkbox" checked={f.is_open} onChange={(e) => setF({ ...f, is_open: e.target.checked })} />
           Inscriptions ouvertes
         </label>
         <div className="flex gap-2 justify-end pt-3 border-t border-[#071B34]/5">
           <button onClick={onClose} className="ms-btn-outline">Annuler</button>
-          <button onClick={save} className="ms-btn-primary">Enregistrer</button>
+          <button onClick={save} data-testid="formation-save" className="ms-btn-primary">Enregistrer</button>
         </div>
       </div>
     </div>

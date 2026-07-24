@@ -2098,6 +2098,56 @@ async def menu(store: Optional[str] = None):
     return items
 
 
+# ─── Admin: Menu / Products CRUD
+class ProductPayload(BaseModel):
+    name: str
+    description: Optional[str] = ""
+    store: str  # soccer_bar | donut_house | stand_crepes | stand_bonbons
+    category: str
+    points: int = 0
+    price_eur: float = 0.0
+    image: Optional[str] = ""
+    allergens: List[str] = []
+    available: bool = True
+
+
+@api.get("/admin/products")
+async def admin_list_products():
+    await require_admin()
+    items = await db.products.find({}, {"_id": 0}).sort("store", 1).to_list(500)
+    return items
+
+
+@api.post("/admin/products")
+async def admin_create_product(payload: ProductPayload):
+    await require_admin()
+    p = payload.model_dump()
+    p["id"] = _id()
+    p["created_at"] = _now()
+    await db.products.insert_one(p.copy())
+    p.pop("_id", None)
+    return p
+
+
+@api.put("/admin/products/{pid}")
+async def admin_update_product(pid: str, payload: ProductPayload):
+    await require_admin()
+    existing = await db.products.find_one({"id": pid}, {"_id": 0})
+    if not existing:
+        raise HTTPException(404, "Produit introuvable")
+    await db.products.update_one({"id": pid}, {"$set": payload.model_dump()})
+    return await db.products.find_one({"id": pid}, {"_id": 0})
+
+
+@api.delete("/admin/products/{pid}")
+async def admin_delete_product(pid: str):
+    await require_admin()
+    res = await db.products.delete_one({"id": pid})
+    if res.deleted_count == 0:
+        raise HTTPException(404, "Produit introuvable")
+    return {"ok": True}
+
+
 # ─── Orders
 @api.post("/orders")
 async def create_order(payload: OrderCreate):
@@ -5572,6 +5622,7 @@ class FormationCreate(BaseModel):
     trainer: Optional[str] = ""
     max_participants: Optional[int] = 20
     cover_image: Optional[str] = None
+    form_url: Optional[str] = None  # optional external registration/info form
     is_open: bool = True
 
 

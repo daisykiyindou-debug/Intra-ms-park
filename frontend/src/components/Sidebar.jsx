@@ -71,6 +71,7 @@ const adminNav = [
   { to: "/management/attributions", label: "RTT / CP", icon: Gift, key: "mgmt-rtt" },
   { to: "/management/notes-de-frais", label: "Notes de frais", icon: Receipt, key: "mgmt-expenses" },
   { to: "/management/heures-supp", label: "Heures supp. & récup.", icon: Clock, key: "mgmt-overtime" },
+  { to: "/management/restauration", label: "Restauration (menu)", icon: UtensilsCrossed, key: "mgmt-restauration" },
   { to: "/management/formations", label: "Formations", icon: GraduationCap, key: "mgmt-formations" },
   { to: "/management/support", label: "Support IT (tickets)", icon: LifeBuoy, key: "mgmt-support" },
   { to: "/management/carrousel", label: "Carrousel accueil", icon: Newspaper, key: "mgmt-carrousel" },

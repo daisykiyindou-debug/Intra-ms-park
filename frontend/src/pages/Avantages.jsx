@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { QrCode, Tag, Copy, Check } from "lucide-react";
+import { QrCode, Tag, Copy, Check, ExternalLink, Gift } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 
@@ -29,6 +29,38 @@ export default function Avantages() {
           Profitez de réductions exclusives chez nos partenaires et des avantages internes MS Park.
         </p>
       </div>
+
+      {/* MS Group CSE — plateforme externe partenaires */}
+      <a
+        href="https://ms-group-rewards.preview.emergentagent.com"
+        target="_blank"
+        rel="noreferrer"
+        data-testid="cse-ms-group-link"
+        className="relative block overflow-hidden rounded-3xl bg-gradient-to-br from-[#071B34] via-[#0B2545] to-[#1D70B8] p-6 shadow-lg transition-transform hover:-translate-y-0.5"
+      >
+        <div className="absolute -right-8 -top-8 h-40 w-40 rounded-full bg-[#3BA4FF]/25 blur-2xl" />
+        <div className="absolute -right-4 bottom-0 h-24 w-24 rounded-full bg-[#A78BFA]/25 blur-2xl" />
+        <div className="relative flex items-start gap-4 flex-wrap">
+          <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-white/15 backdrop-blur-sm ring-1 ring-white/25">
+            <Gift className="h-7 w-7 text-white" />
+          </div>
+          <div className="flex-1 min-w-[220px] text-white">
+            <div className="text-[10px] uppercase tracking-widest text-white/70 font-semibold">
+              Plateforme externe · Groupe
+            </div>
+            <div className="mt-1 text-xl md:text-2xl font-bold leading-tight">
+              CSE MS Group — Rewards &amp; Avantages
+            </div>
+            <p className="mt-1 text-sm text-white/80 max-w-lg">
+              Accédez à l&apos;espace CSE du groupe MS Group : billetterie, chèques cadeaux,
+              séjours et catalogue de partenaires nationaux.
+            </p>
+          </div>
+          <div className="flex items-center gap-1.5 rounded-full bg-white px-4 py-2 text-sm font-bold text-[#071B34] shadow-md hover:bg-white/95 transition-colors">
+            Ouvrir le portail <ExternalLink className="h-4 w-4" />
+          </div>
+        </div>
+      </a>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
         {partners.map((p) => (

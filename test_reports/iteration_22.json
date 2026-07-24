@@ -1,0 +1,42 @@
+{
+  "summary": "Iteration 22: focused end-to-end verification of the 5 features shipped this turn (Restauration admin CRUD, Formations form_url + cover_image + Formation complète badge, Avantages CSE MS Group CTA, admin-mode gating for Actualités/Formations/Restauration). Backend: 12/12 pytest cases pass. Frontend: full CRUD flow of a product from /management/restauration → immediately reflected on /restaurant (create, edit, delete). Admin-mode OFF correctly blocks /management/restauration and /management/formations with a friendly 'Mode administrateur désactivé' card. Formations manager exposes ImageUpload for cover_image (testid formation-cover*) and 'Lien du formulaire' input (testid formation-form-url). Employee registration surfaces the external form button (formation-form-<id>) with the exact URL saved by admin. A capacity=1 formation shows the red 'Formation complète' badge and disables the register button with label 'Formation complète' for non-registered users. /avantages CSE MS Group CTA (testid cse-ms-group-link) links to https://ms-group-rewards.preview.emergentagent.com with target=_blank. Admin-mode toggle correctly hides the MS Park composer on Actualités and hides the admin sidebar block.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "/management/restauration filter chips", "issues": ["The 'Tous (n)' chip has no data-testid (only per-store chips do). Minor testability gap — consider adding data-testid='filter-store-all'."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_restauration_and_formations.py",
+    "/app/test_reports/pytest/iter22_results.xml"
+  ],
+  "action_items": [
+    "Optional/minor: add data-testid='filter-store-all' to the 'Tous' chip in RestaurationManager for stronger test coverage."
+  ],
+  "critical_code_review_comments": [
+    "server.py ProductPayload + admin_create/update/delete_product correctly gate on require_admin() and always project out _id; response is JSON serializable. GET /api/menu already picks up new products (no cache).",
+    "FormationCreate now accepts form_url and cover_image (line ~5625). Both fields round-trip through POST/PUT/GET as verified by test suite.",
+    "Formations.jsx isFull uses registrations_count from backend, which matches the participants.length count on the server, so 'Formation complète' badge/label logic is correct even though frontend does not read participants[] directly.",
+    "RestaurationManager.jsx and FormationsManager both correctly early-return with 'Mode administrateur désactivé' when adminMode !== true, preventing accidental mutations from stale admin UIs."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_restauration_and_formations.py",
+    "/app/test_reports/pytest/iter22_results.xml",
+    "/app/test_reports/iteration_22.json"
+  ],
+  "success_rate": {
+    "backend": "100% (12/12 pytest)",
+    "frontend": "100% (10/10 UI flows)"
+  },
+  "test_credentials": "admin: emp-marcus-simeo (X-Employee-Id) / employee: emp-idriss-malonga. Login-form creds in /app/memory/test_credentials.md but frontend also honors localStorage.ms_employee_id directly.",
+  "seed_data_creation": "Created and cleaned up transient products ('Test Auto Frites XL' → 'Test Auto Frites Ultra') and two transient formations ('TEST QA Formation FormURL' and 'TEST_FULL_<hex>' capacity=1 with Idriss registered). All deleted at the end of the run — no residual test data.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Backend is mocked in-memory MongoDB (recreated at each startup) but /api endpoints match prod. Auth is X-Employee-Id header; frontend reads it from localStorage 'ms_employee_id' and adminMode from localStorage 'adminMode' ('true'|'false'). To test admin UI: set both keys and reload. RestaurationManager filter chips: only per-store chips have data-testid (filter-store-soccer_bar, ..._donut_house, ..._stand_crepes, ..._stand_bonbons); 'Tous' has none. Formations page uses registrations_count (not participants[].length) — backend already exposes this correctly.",
+  "rca_of_the_issue": "N/A — this iteration is a feature-verification pass, no bugs uncovered."
+}

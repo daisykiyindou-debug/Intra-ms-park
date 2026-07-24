@@ -5,7 +5,7 @@ import {
   BarChart3, ClipboardList, Inbox, Newspaper, ShieldCheck, ArrowRight,
   Users as UsersIcon, AlertTriangle, CheckCircle2, TrendingUp, ChevronLeft, ChevronRight,
   Plus, Trash2, Save, X, CalendarDays, CalendarClock, Clock, MessageCircle, Gift, Sparkles,
-  FileText, Receipt, Send, Megaphone, GripVertical,
+  FileText, Receipt, Send, Megaphone, GripVertical, UtensilsCrossed,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -35,6 +35,7 @@ import { HRDocsManager, HRDocEditor } from "@/pages/HRDocs";
 import OvertimeManager from "@/pages/OvertimeManager";
 import { FormationsManager } from "@/pages/Formations";
 import SupportITList from "@/pages/Support";
+import RestaurationManager from "@/pages/RestaurationManager";
 import ImageUpload from "@/components/ImageUpload";
 
 const subNav = [
@@ -44,6 +45,7 @@ const subNav = [
   { to: "/management/attributions", label: "RTT / CP", icon: Gift },
   { to: "/management/notes-de-frais", label: "Notes de frais", icon: FileText },
   { to: "/management/heures-supp", label: "Heures supp.", icon: FileText },
+  { to: "/management/restauration", label: "Restauration", icon: UtensilsCrossed },
   { to: "/management/carrousel", label: "Carrousel accueil", icon: Newspaper },
   { to: "/management/agenda", label: "Agenda", icon: CalendarDays },
   { to: "/management/formulaires", label: "Formulaires", icon: FileText },
@@ -145,6 +147,7 @@ export default function ManagementShell() {
         {isAdmin && <Route path="notes-de-frais" element={<ExpensesManager />} />}
         {isAdmin && <Route path="heures-supp" element={<OvertimeManager />} />}
         {isAdmin && <Route path="formations" element={<FormationsManager />} />}
+        {isAdmin && <Route path="restauration" element={<RestaurationManager />} />}
         {isAdmin && <Route path="support" element={<SupportITList />} />}
         {isAdmin && <Route path="documents-editor" element={<HRDocsManager />} />}
         {isAdmin && <Route path="documents-editor/:id" element={<HRDocEditor />} />}
