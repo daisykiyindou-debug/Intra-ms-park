@@ -30,6 +30,8 @@ import { useApp } from "@/contexts/AppContext";
 import { notifyLiveRefresh } from "@/hooks/useLiveData";
 import FormBuilder from "@/pages/FormBuilder";
 import UserManager from "@/pages/UserManager";
+import { ExpensesManager } from "@/pages/NotesDeFrais";
+import { HRDocsManager, HRDocEditor } from "@/pages/HRDocs";
 import ImageUpload from "@/components/ImageUpload";
 
 const subNav = [
@@ -37,11 +39,13 @@ const subNav = [
   { to: "/management/planning", label: "Plannings", icon: ClipboardList },
   { to: "/management/demandes", label: "Demandes", icon: Inbox },
   { to: "/management/attributions", label: "RTT / CP", icon: Gift },
+  { to: "/management/notes-de-frais", label: "Notes de frais", icon: FileText },
   { to: "/management/carrousel", label: "Carrousel accueil", icon: Newspaper },
   { to: "/management/agenda", label: "Agenda", icon: CalendarDays },
   { to: "/management/formulaires", label: "Formulaires", icon: FileText },
   { to: "/management/utilisateurs", label: "Utilisateurs", icon: UsersIcon },
-  { to: "/management/documents", label: "Documents RH", icon: FileText },
+  { to: "/management/documents", label: "Fichiers RH", icon: FileText },
+  { to: "/management/documents-editor", label: "Rédiger documents", icon: FileText },
 ];
 
 const isoDate = (d) =>
@@ -134,6 +138,9 @@ export default function ManagementShell() {
         {isAdmin && <Route path="utilisateurs" element={<UserManager />} />}
         <Route path="actualites" element={<Navigate to="/management/carrousel" replace />} />
         {isAdmin && <Route path="documents" element={<DocumentsManager />} />}
+        {isAdmin && <Route path="notes-de-frais" element={<ExpensesManager />} />}
+        {isAdmin && <Route path="documents-editor" element={<HRDocsManager />} />}
+        {isAdmin && <Route path="documents-editor/:id" element={<HRDocEditor />} />}
         <Route path="fil" element={<Navigate to="/actualites" replace />} />
         {/* Comm editor without admin lands on carrousel by default */}
         {!isAdmin && <Route index element={<Navigate to="/management/carrousel" replace />} />}

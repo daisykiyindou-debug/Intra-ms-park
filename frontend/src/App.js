@@ -26,6 +26,9 @@ import Payslip from "@/pages/Payslip";
 import NewsDetail, { EventDetail } from "@/pages/NewsDetail";
 import PublicForm from "@/pages/PublicForm";
 import NewslettersList, { NewsletterDetail, NewsletterEditor } from "@/pages/Newsletters";
+import GalerieList, { GalerieAlbum } from "@/pages/Galerie";
+import NotesDeFrais from "@/pages/NotesDeFrais";
+import { HRDocView } from "@/pages/HRDocs";
 
 function ProtectedShell() {
   const isOut = typeof window !== "undefined" && localStorage.getItem("ms_logged_out") === "1";
@@ -101,6 +104,10 @@ function App() {
               <Route path="/newsletters/new" element={<NewsletterEditor />} />
               <Route path="/newsletters/:id/edit" element={<NewsletterEditor />} />
               <Route path="/newsletters/:id" element={<NewsletterDetail />} />
+              <Route path="/galerie" element={<GalerieList />} />
+              <Route path="/galerie/:id" element={<GalerieAlbum />} />
+              <Route path="/notes-de-frais" element={<NotesDeFrais />} />
+              <Route path="/documents/rediger/:id" element={<HRDocView />} />
               <Route path="/avantages" element={<Avantages />} />
               <Route path="/contacts" element={<Contacts />} />
               <Route path="/profil" element={<Profil />} />

@@ -168,6 +168,17 @@ Intranet premium pour employés du parc MS Park + espace administrateur pour le 
 
 ## Changelog
 
+### 2026-02-24 — Galerie Photos + Notes de frais + Documents (iter 8)
+- **Galerie Photos** (`/galerie`, `/galerie/:id`) : albums avec catégories (Événement, Team Building, Formation, Restaurant, Vie du parc), image de couverture, contributions toggle par album, recherche/filtre par catégorie. Album détail : upload multi-photos (drag&drop file input), favoris (toggle par photo, filtre "Favoris"), téléchargement, lightbox plein écran, suppression (par uploader ou admin/comm). Backend : `galleries` + `photos` + `photo_favorites` collections, endpoints `/api/galleries*` (public) + `/api/admin/galleries*` (editors). Règle métier : contributions bloquées (403) si `allow_contributions=false` pour non-editors.
+- **Notes de frais** — employé + admin :
+  - Employé (`/notes-de-frais`) : soumission multi-lignes (Transport / Repas / Hébergement / Autres), justificatifs, commentaire, KPI cards par statut, historique.
+  - Admin (`/management/notes-de-frais`) : tableau avec avatar + rôle, stats globales (Reçues / En attente / Approuvées / Refusées / Montant total), filtres (statut/recherche), panneau détail latéral (résumé, détail par catégorie, justificatifs), boutons **Refuser / Approuver / Approuver et rembourser**, transition automatique de statut (`pending` → `approved` → `refunded`).
+  - Backend : `expenses` collection, endpoints `/api/expenses` (own) + `/api/admin/expenses*` (admin), notifications push aux admins à la soumission et à l'employé à chaque décision.
+- **Documents RH renommé "Documents"** + refonte page employé : nouveau layout premium (cartes par extension colorée PDF/DOCX/XLSX/PPTX/HTML), 3 onglets (Tous / Favoris / Récents), rails latéraux (Accès rapide favoris + compteurs par catégorie), fusion transparente entre documents fichiers (upload) et documents rich text (rédigés). Favoris persistés en localStorage.
+- **Rédaction de documents admin** (`/management/documents-editor` + `/:id`) : nouvelle page admin de création/édition avec **RichTextEditor** (WYSIWYG), **en-tête personnalisable** (upload logo), **pied de page**, 3 modes de visibilité (Tous / Groupes / Utilisateurs spécifiques), 5 options avancées (important, download, print, track_reads, expires_at), broadcast notifications à la publication. Modèle `hr_documents` distinct des fichiers uploadés. Vue lecture premium (`/documents/rediger/:id`) avec logo + contenu + footer + bouton impression.
+- **Sidebar** : nouveaux items "Notes de frais" (Receipt), "Galerie photos" (Camera), renommage "Documents RH" → "Documents". Admin : "Notes de frais", "Fichiers RH", "Rédiger documents".
+- **Fix critique répétition** : le `app.include_router(api)` reste à la toute fin du fichier — toute nouvelle route `@api.*` doit être ajoutée AVANT cette ligne.
+
 ### 2026-02-24 — Module Newsletters (iter 7)
 - **Backend** : nouveaux endpoints `/api/newsletters` (public) + `/api/admin/newsletters` (CRUD, archive) protégés par `require_communication_editor`. Notifications broadcast automatiques à la publication (lien vers `/newsletters/:id`, exclut l'auteur).
 - **Fix critique** : `app.include_router(api)` était appelé au milieu du fichier (ligne 4544) → toutes les routes définies APRÈS n'étaient jamais enregistrées (les endpoints newsletter renvoyaient 404). Déplacé à la toute fin du fichier après TOUS les décorateurs `@api.*`.

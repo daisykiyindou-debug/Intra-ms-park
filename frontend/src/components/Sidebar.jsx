@@ -8,6 +8,8 @@ import {
   FileText,
   Newspaper,
   Mail,
+  Camera,
+  Receipt,
   MessageSquare,
   Folder,
   Calendar,
@@ -21,6 +23,7 @@ import {
   BarChart3,
   Megaphone,
   ListChecks,
+  Edit3,
 } from "lucide-react";
 import { useApp } from "@/contexts/AppContext";
 
@@ -33,11 +36,13 @@ const nav = [
   { to: "/rh/planning", label: "Planning", icon: CalendarDays, key: "planning" },
   { to: "/rh/badgeage", label: "Badge", icon: Fingerprint, key: "badge" },
   { to: "/rh/demandes", label: "Demandes RH", icon: FileText, key: "demandes" },
+  { to: "/notes-de-frais", label: "Notes de frais", icon: Receipt, key: "expenses" },
   { divider: "Entreprise" },
   { to: "/actualites", label: "Actualités", icon: Newspaper, key: "news" },
   { to: "/newsletters", label: "Newsletters", icon: Mail, key: "newsletters" },
+  { to: "/galerie", label: "Galerie photos", icon: Camera, key: "gallery" },
   { to: "/messagerie", label: "Messagerie", icon: MessageSquare, key: "messagerie" },
-  { to: "/documents", label: "Documents RH", icon: Folder, key: "documents" },
+  { to: "/documents", label: "Documents", icon: Folder, key: "documents" },
   { to: "/agenda", label: "Agenda", icon: Calendar, key: "agenda" },
   { to: "/avantages", label: "Avantages", icon: Gift, key: "avantages" },
   { to: "/contacts", label: "Contacts", icon: Users, key: "contacts" },
@@ -49,11 +54,13 @@ const adminNav = [
   { to: "/management/planning", label: "Plannings employés", icon: ClipboardList, key: "mgmt-planning" },
   { to: "/management/demandes", label: "Validation demandes", icon: Inbox, key: "mgmt-demandes" },
   { to: "/management/attributions", label: "RTT / CP", icon: Gift, key: "mgmt-rtt" },
+  { to: "/management/notes-de-frais", label: "Notes de frais", icon: Receipt, key: "mgmt-expenses" },
   { to: "/management/carrousel", label: "Carrousel accueil", icon: Newspaper, key: "mgmt-carrousel" },
   { to: "/management/agenda", label: "Agenda", icon: Calendar, key: "mgmt-agenda" },
   { to: "/management/formulaires", label: "Formulaires", icon: ListChecks, key: "mgmt-forms" },
   { to: "/management/utilisateurs", label: "Utilisateurs", icon: Users, key: "mgmt-users" },
-  { to: "/management/documents", label: "Documents RH", icon: FileText, key: "mgmt-docs" },
+  { to: "/management/documents", label: "Fichiers RH", icon: FileText, key: "mgmt-docs" },
+  { to: "/management/documents-editor", label: "Rédiger documents", icon: Edit3, key: "mgmt-hrdocs" },
 ];
 
 const commNav = [

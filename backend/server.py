@@ -4717,8 +4717,402 @@ async def archive_newsletter(nid: str):
     return {"ok": True}
 
 
+# ═══════════════════════════════════════════════════════════════════
+# Notes de frais (Expenses)
+# ═══════════════════════════════════════════════════════════════════
+class ExpenseItem(BaseModel):
+    category: str  # transport | repas | hebergement | autres
+    amount: float
+    date: Optional[str] = None
+    description: Optional[str] = ""
+
+
+class ExpenseCreate(BaseModel):
+    period: str  # "YYYY-MM"
+    items: List[ExpenseItem]
+    receipts: List[dict] = []  # [{name, url}]
+    comment: Optional[str] = ""
+
+
+def _expense_totals(exp: dict) -> dict:
+    by_cat = {"transport": 0.0, "repas": 0.0, "hebergement": 0.0, "autres": 0.0}
+    total = 0.0
+    for it in exp.get("items", []):
+        c = it.get("category", "autres")
+        a = float(it.get("amount", 0) or 0)
+        by_cat[c] = by_cat.get(c, 0) + a
+        total += a
+    exp["total"] = round(total, 2)
+    exp["by_category"] = {k: round(v, 2) for k, v in by_cat.items()}
+    return exp
+
+
+@api.get("/expenses")
+async def list_own_expenses():
+    me = await _me()
+    items = await db.expenses.find({"employee_id": me["id"]}, {"_id": 0}).sort("created_at", -1).to_list(200)
+    return items
+
+
+@api.post("/expenses")
+async def submit_expense(payload: ExpenseCreate):
+    me = await _me()
+    e = payload.model_dump()
+    e["id"] = _id()
+    e["number"] = f"NF-{datetime.now(timezone.utc).strftime('%Y%m%d')}-{uuid.uuid4().hex[:4].upper()}"
+    e["employee_id"] = me["id"]
+    e["status"] = "pending"
+    e["created_at"] = _now()
+    e["decided_at"] = None
+    e["decided_by"] = None
+    e["decision_comment"] = ""
+    e["refunded_at"] = None
+    e["items"] = [it if isinstance(it, dict) else it.model_dump() for it in e.get("items", [])]
+    _expense_totals(e)
+    await db.expenses.insert_one(e.copy())
+    admins = await db.employees.find({"is_admin": True}, {"id": 1}).to_list(20)
+    for a in admins:
+        await _push_notification(
+            employee_id=a["id"],
+            type="expense",
+            title=f"Nouvelle note de frais · {me.get('first_name','')} {me.get('last_name','')}",
+            content=f"Montant : {e['total']:.2f} €",
+            icon="receipt",
+            link="/management/notes-de-frais",
+        )
+    return await _strip(e)
+
+
+@api.get("/admin/expenses")
+async def admin_list_expenses(status: Optional[str] = None, period: Optional[str] = None):
+    await require_admin()
+    query: dict = {}
+    if status:
+        query["status"] = status
+    if period:
+        query["period"] = period
+    items = await db.expenses.find(query, {"_id": 0}).sort("created_at", -1).to_list(500)
+    # enrich with employee name
+    emp_ids = {i.get("employee_id") for i in items}
+    emps = {e["id"]: e async for e in db.employees.find({"id": {"$in": list(emp_ids)}}, {"_id": 0})}
+    for it in items:
+        e = emps.get(it.get("employee_id"))
+        if e:
+            it["employee_name"] = f"{e.get('first_name','')} {e.get('last_name','')}".strip()
+            it["employee_avatar"] = e.get("avatar_url")
+            it["employee_role"] = e.get("role_title") or e.get("role_category", "")
+    # aggregated stats
+    stats = {"received": len(items), "pending": 0, "approved": 0, "rejected": 0, "total_amount": 0.0}
+    for it in items:
+        stats[it.get("status", "pending")] = stats.get(it.get("status", "pending"), 0) + 1
+        stats["total_amount"] += float(it.get("total", 0))
+    stats["total_amount"] = round(stats["total_amount"], 2)
+    return {"items": items, "stats": stats}
+
+
+@api.get("/admin/expenses/{eid}")
+async def admin_get_expense(eid: str):
+    await require_admin()
+    e = await db.expenses.find_one({"id": eid}, {"_id": 0})
+    if not e:
+        raise HTTPException(404, "Note de frais introuvable")
+    return e
+
+
+class ExpenseDecision(BaseModel):
+    status: str  # approved | rejected
+    comment: Optional[str] = ""
+
+
+@api.put("/admin/expenses/{eid}/decide")
+async def admin_decide_expense(eid: str, payload: ExpenseDecision):
+    me = await require_admin()
+    if payload.status not in ("approved", "rejected"):
+        raise HTTPException(400, "Statut invalide")
+    upd = {"status": payload.status, "decision_comment": payload.comment or "",
+           "decided_at": _now(), "decided_by": me["id"]}
+    await db.expenses.update_one({"id": eid}, {"$set": upd})
+    e = await db.expenses.find_one({"id": eid}, {"_id": 0})
+    if e:
+        await _push_notification(
+            employee_id=e["employee_id"],
+            type="expense",
+            title=f"Note de frais {payload.status == 'approved' and 'approuvée' or 'refusée'}",
+            content=payload.comment or "",
+            icon="receipt",
+            link="/notes-de-frais",
+        )
+    return e
+
+
+@api.post("/admin/expenses/{eid}/refund")
+async def admin_refund_expense(eid: str):
+    await require_admin()
+    await db.expenses.update_one({"id": eid}, {"$set": {"status": "refunded", "refunded_at": _now()}})
+    e = await db.expenses.find_one({"id": eid}, {"_id": 0})
+    if e:
+        await _push_notification(
+            employee_id=e["employee_id"],
+            type="expense",
+            title="Note de frais remboursée",
+            content=f"Montant : {e['total']:.2f} €",
+            icon="receipt",
+            link="/notes-de-frais",
+        )
+    return e
+
 
 # ═══════════════════════════════════════════════════════════════════
-# Register the API router (must be at the very end so ALL @api routes are picked up)
+# Galerie Photos
+# ═══════════════════════════════════════════════════════════════════
+class AlbumCreate(BaseModel):
+    title: str
+    description: Optional[str] = ""
+    category: Optional[str] = "Événement"
+    cover_image: Optional[str] = None
+    allow_contributions: bool = False
+    event_date: Optional[str] = None
+
+
+class PhotoAdd(BaseModel):
+    url: str
+    caption: Optional[str] = ""
+
+
+@api.get("/galleries")
+async def list_galleries(category: Optional[str] = None, q: Optional[str] = None):
+    query: dict = {}
+    if category:
+        query["category"] = category
+    items = await db.galleries.find(query, {"_id": 0}).sort("created_at", -1).to_list(200)
+    if q:
+        needle = q.lower()
+        items = [g for g in items if needle in (g.get("title", "") + g.get("description", "")).lower()]
+    # add photo counts
+    for g in items:
+        g["photo_count"] = await db.photos.count_documents({"album_id": g["id"]})
+    return items
+
+
+@api.get("/galleries/{gid}")
+async def get_gallery(gid: str):
+    g = await db.galleries.find_one({"id": gid}, {"_id": 0})
+    if not g:
+        raise HTTPException(404, "Album introuvable")
+    photos = await db.photos.find({"album_id": gid}, {"_id": 0}).sort("created_at", -1).to_list(500)
+    me = await _me_optional()
+    my_favs = set()
+    if me:
+        favs = await db.photo_favorites.find({"employee_id": me["id"]}, {"photo_id": 1, "_id": 0}).to_list(1000)
+        my_favs = {f["photo_id"] for f in favs}
+    for p in photos:
+        p["is_favorite"] = p["id"] in my_favs
+    g["photos"] = photos
+    return g
+
+
+@api.post("/admin/galleries")
+async def create_gallery(payload: AlbumCreate):
+    me = await require_communication_editor()
+    g = payload.model_dump()
+    g["id"] = _id()
+    g["author_id"] = me["id"]
+    g["created_at"] = _now()
+    await db.galleries.insert_one(g.copy())
+    return await _strip(g)
+
+
+@api.put("/admin/galleries/{gid}")
+async def update_gallery(gid: str, payload: AlbumCreate):
+    await require_communication_editor()
+    upd = payload.model_dump()
+    await db.galleries.update_one({"id": gid}, {"$set": upd})
+    return await db.galleries.find_one({"id": gid}, {"_id": 0})
+
+
+@api.delete("/admin/galleries/{gid}")
+async def delete_gallery(gid: str):
+    await require_communication_editor()
+    await db.galleries.delete_one({"id": gid})
+    await db.photos.delete_many({"album_id": gid})
+    return {"ok": True}
+
+
+@api.post("/galleries/{gid}/photos")
+async def add_photo(gid: str, payload: PhotoAdd):
+    me = await _me()
+    g = await db.galleries.find_one({"id": gid}, {"_id": 0})
+    if not g:
+        raise HTTPException(404, "Album introuvable")
+    is_editor = me.get("is_admin") or me.get("can_manage_communication")
+    if not is_editor and not g.get("allow_contributions"):
+        raise HTTPException(403, "Contribution non autorisée sur cet album")
+    p = {
+        "id": _id(),
+        "album_id": gid,
+        "url": payload.url,
+        "caption": payload.caption or "",
+        "uploader_id": me["id"],
+        "uploader_name": f"{me.get('first_name','')} {me.get('last_name','')}".strip(),
+        "created_at": _now(),
+    }
+    await db.photos.insert_one(p.copy())
+    if not g.get("cover_image"):
+        await db.galleries.update_one({"id": gid}, {"$set": {"cover_image": payload.url}})
+    return await _strip(p)
+
+
+@api.delete("/photos/{pid}")
+async def delete_photo(pid: str):
+    me = await _me()
+    p = await db.photos.find_one({"id": pid}, {"_id": 0})
+    if not p:
+        raise HTTPException(404, "Photo introuvable")
+    if not (me.get("is_admin") or me.get("can_manage_communication") or p.get("uploader_id") == me["id"]):
+        raise HTTPException(403, "Accès refusé")
+    await db.photos.delete_one({"id": pid})
+    await db.photo_favorites.delete_many({"photo_id": pid})
+    return {"ok": True}
+
+
+@api.post("/photos/{pid}/favorite")
+async def toggle_favorite_photo(pid: str):
+    me = await _me()
+    existing = await db.photo_favorites.find_one({"employee_id": me["id"], "photo_id": pid})
+    if existing:
+        await db.photo_favorites.delete_one({"_id": existing["_id"]})
+        return {"favorite": False}
+    await db.photo_favorites.insert_one({"employee_id": me["id"], "photo_id": pid, "created_at": _now()})
+    return {"favorite": True}
+
+
+@api.get("/photos/favorites")
+async def my_favorite_photos():
+    me = await _me()
+    favs = await db.photo_favorites.find({"employee_id": me["id"]}, {"_id": 0}).sort("created_at", -1).to_list(500)
+    ids = [f["photo_id"] for f in favs]
+    photos = await db.photos.find({"id": {"$in": ids}}, {"_id": 0}).to_list(500)
+    for p in photos:
+        p["is_favorite"] = True
+    return photos
+
+
+# ═══════════════════════════════════════════════════════════════════
+# HR authored documents (rich text — Documents RH admin editor)
+# ═══════════════════════════════════════════════════════════════════
+class HRDocCreate(BaseModel):
+    title: str
+    category: str = "Ressources Humaines"
+    subcategory: Optional[str] = ""
+    doc_type: Optional[str] = "Procédure"
+    summary: Optional[str] = ""
+    body_html: str = ""
+    header_logo: Optional[str] = None
+    footer_text: Optional[str] = ""
+    visibility: str = "all"  # all | groups | employees
+    group_targets: List[str] = []
+    employee_targets: List[str] = []
+    important: bool = False
+    allow_download: bool = True
+    allow_print: bool = True
+    track_reads: bool = False
+    published: bool = False
+    published_at: Optional[str] = None
+    expires_at: Optional[str] = None
+
+
+def _hrdoc_visible_to(doc: dict, me: dict) -> bool:
+    if not doc.get("published"):
+        return me.get("is_admin") or me.get("can_manage_communication")
+    vis = doc.get("visibility", "all")
+    if vis == "all":
+        return True
+    if vis == "groups":
+        role = me.get("role_category")
+        return role in (doc.get("group_targets") or []) or "all" in (doc.get("group_targets") or [])
+    if vis == "employees":
+        return me["id"] in (doc.get("employee_targets") or [])
+    return False
+
+
+@api.get("/hr-documents")
+async def list_hr_docs():
+    me = await _me()
+    all_docs = await db.hr_documents.find({}, {"_id": 0}).sort("created_at", -1).to_list(300)
+    return [d for d in all_docs if _hrdoc_visible_to(d, me)]
+
+
+@api.get("/hr-documents/{did}")
+async def get_hr_doc(did: str):
+    me = await _me()
+    d = await db.hr_documents.find_one({"id": did}, {"_id": 0})
+    if not d or not _hrdoc_visible_to(d, me):
+        raise HTTPException(404, "Document introuvable")
+    return d
+
+
+@api.post("/admin/hr-documents")
+async def create_hr_doc(payload: HRDocCreate):
+    me = await require_communication_editor()
+    d = payload.model_dump()
+    d["id"] = _id()
+    d["author_id"] = me["id"]
+    d["created_at"] = _now()
+    if d.get("published") and not d.get("published_at"):
+        d["published_at"] = _now()
+    await db.hr_documents.insert_one(d.copy())
+    if d.get("published"):
+        await _broadcast_notification(
+            type="document",
+            title=f"Nouveau document · {d['title']}",
+            content=d.get("summary") or "",
+            icon="file-text",
+            link=f"/documents/rediger/{d['id']}",
+            exclude_ids=[me["id"]],
+        )
+    return await _strip(d)
+
+
+@api.put("/admin/hr-documents/{did}")
+async def update_hr_doc(did: str, payload: HRDocCreate):
+    await require_communication_editor()
+    old = await db.hr_documents.find_one({"id": did}, {"_id": 0})
+    if not old:
+        raise HTTPException(404, "Document introuvable")
+    upd = payload.model_dump()
+    if upd.get("published") and not old.get("published"):
+        upd["published_at"] = _now()
+    await db.hr_documents.update_one({"id": did}, {"$set": upd})
+    return await db.hr_documents.find_one({"id": did}, {"_id": 0})
+
+
+@api.delete("/admin/hr-documents/{did}")
+async def delete_hr_doc(did: str):
+    await require_communication_editor()
+    await db.hr_documents.delete_one({"id": did})
+    return {"ok": True}
+
+
+# helpers used above (idempotent — defined here to avoid ordering issues)
+async def _me():
+    eid = current_user() or CURRENT_EMPLOYEE_ID
+    e = await db.employees.find_one({"id": eid}, {"_id": 0})
+    if not e:
+        raise HTTPException(401, "Non authentifié")
+    return e
+
+
+async def _me_optional():
+    try:
+        return await _me()
+    except Exception:
+        return None
+
+
+
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Register the API router (must be at the very end)
 # ═══════════════════════════════════════════════════════════════════
 app.include_router(api)
