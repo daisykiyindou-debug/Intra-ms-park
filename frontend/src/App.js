@@ -25,6 +25,7 @@ import ManagementShell from "@/pages/Management";
 import Payslip from "@/pages/Payslip";
 import NewsDetail, { EventDetail } from "@/pages/NewsDetail";
 import PublicForm from "@/pages/PublicForm";
+import NewslettersList, { NewsletterDetail, NewsletterEditor } from "@/pages/Newsletters";
 
 function ProtectedShell() {
   const isOut = typeof window !== "undefined" && localStorage.getItem("ms_logged_out") === "1";
@@ -96,6 +97,10 @@ function App() {
               <Route path="/agenda/event/:id" element={<EventDetail />} />
               <Route path="/formulaires/:id" element={<PublicForm />} />
               <Route path="/agenda" element={<Agenda />} />
+              <Route path="/newsletters" element={<NewslettersList />} />
+              <Route path="/newsletters/new" element={<NewsletterEditor />} />
+              <Route path="/newsletters/:id/edit" element={<NewsletterEditor />} />
+              <Route path="/newsletters/:id" element={<NewsletterDetail />} />
               <Route path="/avantages" element={<Avantages />} />
               <Route path="/contacts" element={<Contacts />} />
               <Route path="/profil" element={<Profil />} />

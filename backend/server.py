@@ -4541,7 +4541,7 @@ async def admin_stats():
     }
 
 
-app.include_router(api)
+# Router will be included at the end of the file — see bottom of server.py
 
 app.add_middleware(
     CORSMiddleware,
@@ -4716,3 +4716,9 @@ async def archive_newsletter(nid: str):
     await db.newsletters.update_one({"id": nid}, {"$set": {"archived": True}})
     return {"ok": True}
 
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Register the API router (must be at the very end so ALL @api routes are picked up)
+# ═══════════════════════════════════════════════════════════════════
+app.include_router(api)

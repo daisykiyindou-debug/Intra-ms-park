@@ -168,6 +168,23 @@ Intranet premium pour employés du parc MS Park + espace administrateur pour le 
 
 ## Changelog
 
+### 2026-02-24 — Module Newsletters (iter 7)
+- **Backend** : nouveaux endpoints `/api/newsletters` (public) + `/api/admin/newsletters` (CRUD, archive) protégés par `require_communication_editor`. Notifications broadcast automatiques à la publication (lien vers `/newsletters/:id`, exclut l'auteur).
+- **Fix critique** : `app.include_router(api)` était appelé au milieu du fichier (ligne 4544) → toutes les routes définies APRÈS n'étaient jamais enregistrées (les endpoints newsletter renvoyaient 404). Déplacé à la toute fin du fichier après TOUS les décorateurs `@api.*`.
+- **Frontend** `Newsletters.jsx` — 3 pages fusionnées dans un seul fichier :
+  - `NewslettersList` : hero banner + filtres (recherche, catégorie, Publiées/Archivées), cartes newsletter avec image de couverture, badge Nouveau/Brouillon/Archivée, menu ⋮ (Modifier / Archiver / Supprimer) pour éditeurs.
+  - `NewsletterDetail` : rendu premium en lecture seule (hero cover, bloc par bloc, pièces jointes, footer MS Park).
+  - `NewsletterEditor` : **éditeur drag-and-drop par blocs**, 3 colonnes (palette + canvas + inspecteur) :
+    - 7 types de blocs : Titre (H1/H2/H3), Texte, Image, Bouton CTA, Séparateur, 2 colonnes (image+texte), Bloc hero coloré.
+    - Réordonnancement par drag natif HTML5 + boutons ↑↓, duplication, suppression.
+    - Inspecteur latéral avec propriétés spécifiques par bloc (texte, alignement, couleur via palette de swatches + input color, upload image dédié par bloc).
+    - Toggle Aperçu (WYSIWYG plein écran) / Éditer.
+    - Informations générales (titre, catégorie, objet, préheader, temps de lecture), upload cover, pièces jointes.
+    - Actions : Enregistrer brouillon / Publier (broadcast auto de notification).
+- **Sidebar** : nouvel item "Newsletters" (icône Mail) dans le bloc Entreprise, accessible à tous.
+- **App.js** : 4 nouvelles routes `/newsletters`, `/newsletters/new`, `/newsletters/:id`, `/newsletters/:id/edit`.
+- Testé end-to-end via curl : GET list/detail (public), CRUD complet admin, blocage 403 pour non-editors, ajout d'un editor communication (Léa) qui peut créer.
+
 ### 2026-02-XX — Notifications interactives + Form Builder aperçu (iter 6)
 - **Notifications interactives** : clic sur notification → redirection vers page cible (`/actualites/:id`, `/agenda`, `/documents`, `/messagerie?channel=…`, `/rh/demandes`, etc.) + marquage `read=true` automatique.
 - **Déclencheurs de notifications** ajoutés : création d'actualité, événement, post fil, message channel, broadcast admin, fiche de paie, document RH, planning bulk/edit/delete, réponse à formulaire, décisions demandes.
