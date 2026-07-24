@@ -1,34 +1,55 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
-  Hash, Lock, Send, Smile, Paperclip, Phone, Video, Search, User, Users,
-  Plus, X, MoreVertical, Archive, Trash2, ArchiveRestore, ArrowLeft, MessageSquare,
+  Send, Smile, Paperclip, Phone, Video, Search, Users, Plus, X, ArrowLeft,
+  Info, MoreVertical, MessageSquare, SlidersHorizontal, Star, Pencil, Trash2, Archive,
 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { useApp } from "@/contexts/AppContext";
 
+function formatTimestamp(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  const now = new Date();
+  const sameDay = d.toDateString() === now.toDateString();
+  const y = new Date(now); y.setDate(now.getDate() - 1);
+  if (sameDay) return d.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+  if (d.toDateString() === y.toDateString()) return "Hier";
+  const diffDays = Math.floor((now - d) / (1000 * 60 * 60 * 24));
+  if (diffDays < 7) return d.toLocaleDateString("fr-FR", { weekday: "long" }).replace(/^./, (c) => c.toUpperCase());
+  return d.toLocaleDateString("fr-FR");
+}
+
+function initials(name) {
+  return (name || "?")
+    .split(/\s+/)
+    .map((s) => s[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+}
+
 export default function Messagerie() {
   const { me, employees, findEmployee } = useApp();
   const [channels, setChannels] = useState([]);
   const [searchParams, setSearchParams] = useSearchParams();
-  const initialCh = searchParams.get("ch") || "ch-accueil";
+  const initialCh = searchParams.get("ch") || null;
   const [active, setActive] = useState(initialCh);
   const [messages, setMessages] = useState([]);
   const [draft, setDraft] = useState("");
-  const [dmModal, setDmModal] = useState(false);
-  const [groupModal, setGroupModal] = useState(false);
+  const [tab, setTab] = useState("all"); // all | unread | favorites
+  const [q, setQ] = useState("");
+  const [composer, setComposer] = useState(null); // "dm" | "group" | null
+  const [empSearch, setEmpSearch] = useState("");
   const [groupName, setGroupName] = useState("");
   const [groupMembers, setGroupMembers] = useState([]);
-  const [empSearch, setEmpSearch] = useState("");
-  const [menuOpen, setMenuOpen] = useState(null); // channel id of opened context menu
-  const [showArchived, setShowArchived] = useState(false);
   const [mobileShowChat, setMobileShowChat] = useState(false);
-  const [confirmDelete, setConfirmDelete] = useState(null);
-  const [activeTab, setActiveTab] = useState("all"); // all | unread | favorites
-  const [favorites, setFavorites] = useState(() => new Set(JSON.parse(localStorage.getItem("msgFavs") || "[]")));
+  const [favorites, setFavorites] = useState(
+    () => new Set(JSON.parse(localStorage.getItem("msgFavs") || "[]"))
+  );
   const scrollRef = useRef(null);
-  const bottomRef = useRef(null);
+  const inputRef = useRef(null);
 
   const toggleFav = (cid) => {
     const next = new Set(favorites);
@@ -36,629 +57,497 @@ export default function Messagerie() {
     setFavorites(next);
     localStorage.setItem("msgFavs", JSON.stringify(Array.from(next)));
   };
-  const filterByTab = (list) => {
-    if (activeTab === "unread") return list.filter((c) => ((c.unread_count || c.unread || 0)) > 0);
-    if (activeTab === "favorites") return list.filter((c) => favorites.has(c.id));
-    return list;
-  };
 
   const loadChannels = () => api.get("/channels").then((r) => setChannels(r.data));
 
   useEffect(() => { loadChannels(); }, []);
+
+  // Auto-select the first conversation if none selected
+  useEffect(() => {
+    if (!active && channels.length > 0) {
+      const first = channels
+        .filter((c) => !c.archived)
+        .sort((a, b) => (b.last_message_ts || "").localeCompare(a.last_message_ts || ""))[0];
+      if (first) setActive(first.id);
+    }
+  }, [active, channels]);
+
   useEffect(() => {
     if (!active) return;
     api.get(`/channels/${active}/messages`).then((r) => {
       setMessages(r.data);
-      // Scroll to bottom when channel changes (inside the scroll container, not the whole page)
       requestAnimationFrame(() => {
         if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
       });
     });
+    // Mark as read → this clears the badge + the header notification counter
+    api.post(`/channels/${active}/read`).then(() => {
+      loadChannels();
+      window.dispatchEvent(new CustomEvent("ms-notifications-refresh"));
+    }).catch(() => {});
   }, [active]);
-  useEffect(() => {
-    // Scroll inside the chat scroll container, never the page
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
-  }, [messages]);
 
-  // Close 3-dot menu on outside click
+  // Auto-scroll on new messages
   useEffect(() => {
-    const onClick = () => setMenuOpen(null);
-    if (menuOpen) {
-      document.addEventListener("click", onClick);
-      return () => document.removeEventListener("click", onClick);
-    }
-  }, [menuOpen]);
+    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+  }, [messages.length]);
 
-  const send = async (e) => {
-    e.preventDefault();
-    if (!draft.trim()) return;
-    const { data } = await api.post(`/channels/${active}/messages`, { content: draft });
-    setMessages((prev) => [...prev, data]);
+  // Rich decorated list of conversations
+  const conversations = useMemo(() => {
+    return channels
+      .filter((c) => !c.archived)
+      .map((c) => {
+        const isDm = c.is_dm;
+        const otherId = isDm ? (c.members_ids || []).find((id) => id !== me?.id) : null;
+        const other = otherId ? findEmployee(otherId) : null;
+        const displayName = c.name || (other ? `${other.first_name} ${other.last_name}` : "Conversation");
+        const subtitle = other?.role || (c.is_group ? `${(c.members_ids || []).length} membres` : "");
+        return {
+          ...c,
+          _display_name: displayName,
+          _subtitle: subtitle,
+          _avatar: other?.avatar || null,
+          _kind: isDm ? "dm" : c.is_group ? "group" : "team",
+        };
+      })
+      .sort((a, b) => (b.last_message_ts || b.created_at || "").localeCompare(a.last_message_ts || a.created_at || ""));
+  }, [channels, me?.id, findEmployee]);
+
+  const filtered = useMemo(() => {
+    let list = conversations;
+    if (tab === "unread") list = list.filter((c) => (c.unread_count || 0) > 0);
+    if (tab === "favorites") list = list.filter((c) => favorites.has(c.id));
+    if (q.trim()) {
+      const needle = q.toLowerCase();
+      list = list.filter((c) => (c._display_name || "").toLowerCase().includes(needle) || (c.last_message_preview || "").toLowerCase().includes(needle));
+    }
+    return list;
+  }, [conversations, tab, favorites, q]);
+
+  const counts = useMemo(() => ({
+    all: conversations.length,
+    unread: conversations.reduce((s, c) => s + (c.unread_count || 0), 0),
+    favorites: conversations.filter((c) => favorites.has(c.id)).length,
+  }), [conversations, favorites]);
+
+  const currentChannel = channels.find((c) => c.id === active);
+  const currentDisplay = useMemo(() => conversations.find((c) => c.id === active), [conversations, active]);
+
+  const send = async () => {
+    if (!draft.trim() || !active) return;
+    const { data } = await api.post(`/channels/${active}/messages`, { content: draft.trim() });
+    setMessages((m) => [...m, data]);
     setDraft("");
+    inputRef.current?.focus();
+    loadChannels();
   };
 
-  const startDM = async (empId) => {
-    const { data } = await api.post("/channels/dm", { employee_id: empId });
-    await loadChannels();
-    setActive(data.id);
-    setMobileShowChat(true);
-    setDmModal(false);
-    setEmpSearch("");
-    setSearchParams({ ch: data.id });
+  const startDm = async (empId) => {
+    try {
+      const { data } = await api.post("/channels/dm", { employee_id: empId });
+      setActive(data.id);
+      setSearchParams({ ch: data.id });
+      setComposer(null);
+      setEmpSearch("");
+      setMobileShowChat(true);
+      loadChannels();
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Impossible d'ouvrir la conversation");
+    }
   };
 
   const createGroup = async () => {
     if (!groupName.trim() || groupMembers.length === 0) {
-      toast.error("Nom et au moins 1 membre requis");
+      toast.error("Nommez le groupe et ajoutez au moins un membre");
       return;
     }
-    const { data } = await api.post("/channels/group", {
-      name: groupName.trim(),
-      member_ids: groupMembers,
-    });
-    await loadChannels();
-    setActive(data.id);
-    setMobileShowChat(true);
-    setGroupModal(false);
-    setGroupName("");
-    setGroupMembers([]);
-    setEmpSearch("");
-    toast.success(`Groupe "${data.name}" créé`);
-    setSearchParams({ ch: data.id });
-  };
-
-  const toggleArchive = async (ch) => {
-    const { data } = await api.post(`/channels/${ch.id}/archive`);
-    toast.success(data.archived ? "Conversation archivée" : "Conversation restaurée");
-    await loadChannels();
-    setMenuOpen(null);
-  };
-
-  const deleteChannel = async (ch) => {
     try {
-      await api.delete(`/channels/${ch.id}`);
-      toast.success("Conversation supprimée");
-      if (active === ch.id) {
-        setActive("ch-accueil");
-        setSearchParams({ ch: "ch-accueil" });
-      }
-      await loadChannels();
-    } catch (e) {
-      toast.error("Suppression impossible");
+      const { data } = await api.post("/channels/group", {
+        name: groupName.trim(),
+        member_ids: groupMembers,
+      });
+      setActive(data.id);
+      setSearchParams({ ch: data.id });
+      setComposer(null);
+      setGroupName("");
+      setGroupMembers([]);
+      setMobileShowChat(true);
+      loadChannels();
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Impossible de créer le groupe");
     }
-    setConfirmDelete(null);
-    setMenuOpen(null);
   };
 
-  const currentChannel = channels.find((c) => c.id === active);
-  const teamChannels = filterByTab(channels.filter((c) => !c.is_dm && !c.is_group && !c.archived));
-  const groupChannels = filterByTab(channels.filter((c) => c.is_group && !c.archived));
-  const dmChannels = filterByTab(channels.filter((c) => c.is_dm && !c.archived));
-  const archivedChannels = channels.filter((c) => c.archived);
-  const totalUnread = channels.reduce((s, c) => s + (c.unread_count || c.unread || 0), 0);
-  const totalFav = channels.filter((c) => favorites.has(c.id)).length;
-
-  const employeeOptions = useMemo(
-    () =>
-      employees
-        .filter((e) => e.id !== me?.id)
-        .filter((e) =>
-          empSearch
-            ? `${e.first_name} ${e.last_name} ${e.role}`.toLowerCase().includes(empSearch.toLowerCase())
-            : true
-        ),
-    [employees, me, empSearch]
+  const otherEmployees = useMemo(
+    () => (employees || []).filter((e) => e.id !== me?.id && !e.is_super_admin),
+    [employees, me?.id]
   );
+  const filteredEmployees = useMemo(() => {
+    if (!empSearch.trim()) return otherEmployees;
+    const n = empSearch.toLowerCase();
+    return otherEmployees.filter((e) => `${e.first_name} ${e.last_name} ${e.role || ""}`.toLowerCase().includes(n));
+  }, [otherEmployees, empSearch]);
 
-  const toggleMember = (id) => {
-    setGroupMembers((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
-  };
+  // Group messages by day for the "Aujourd'hui / date" separator
+  const messagesByDay = useMemo(() => {
+    const groups = [];
+    for (const m of messages) {
+      const day = (m.ts || "").slice(0, 10);
+      let g = groups[groups.length - 1];
+      if (!g || g.day !== day) {
+        g = { day, items: [] };
+        groups.push(g);
+      }
+      g.items.push(m);
+    }
+    return groups;
+  }, [messages]);
 
-  const onSelectChannel = (cid) => {
-    setActive(cid);
-    setSearchParams({ ch: cid });
-    setMobileShowChat(true);
-  };
-
-  // Responsive: on mobile show either sidebar OR chat
   return (
-    <div className="ms-fade-up h-[calc(100vh-8rem)] md:h-[calc(100vh-10rem)] flex flex-col">
-      <div className="flex items-end justify-between gap-3 pb-4 shrink-0">
-        <div>
-          <div className="ms-overline">Messagerie</div>
-          <h1 className="text-2xl md:text-4xl font-bold tracking-tight text-[#071B34] mt-1">
-            Discussions internes
-          </h1>
-        </div>
-      </div>
-
-      <div className="ms-card overflow-hidden grid grid-cols-1 md:grid-cols-12 flex-1 min-h-0">
-        {/* SIDEBAR */}
-        <aside
-          className={`md:col-span-4 lg:col-span-3 border-r border-[#071B34]/5 bg-[#F8FAFC] flex flex-col min-h-0 ${
-            mobileShowChat ? "hidden md:flex" : "flex"
-          }`}
-          data-testid="msg-sidebar"
-        >
-          <div className="p-3 border-b border-[#071B34]/5 space-y-2 shrink-0">
+    <div className="ms-fade-up">
+      <div className="ms-card overflow-hidden grid grid-cols-1 lg:grid-cols-[340px_1fr] min-h-[calc(100vh-160px)]">
+        {/* ── LEFT column: conversations ── */}
+        <aside className={`border-r border-[#071B34]/5 flex flex-col ${mobileShowChat ? "hidden lg:flex" : "flex"}`}>
+          {/* Search + compose */}
+          <div className="p-3 border-b border-[#071B34]/5 flex items-center gap-2">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[#94A3B8]" />
+              <input
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                placeholder="Rechercher une conversation…"
+                data-testid="msg-search"
+                className="w-full h-10 pl-9 pr-3 rounded-xl bg-[#F4F7FA] focus:bg-white focus:ring-2 focus:ring-[#3BA4FF]/30 outline-none text-sm"
+              />
+            </div>
             <button
-              onClick={() => setDmModal(true)}
-              data-testid="new-dm"
-              className="ms-btn-primary w-full text-xs"
+              className="h-10 w-10 rounded-xl bg-[#F4F7FA] hover:bg-[#071B34]/5 inline-flex items-center justify-center text-[#475569]"
+              title="Filtres"
+              aria-label="Filtres"
             >
-              <Plus className="h-3.5 w-3.5" /> Discussion directe
+              <SlidersHorizontal className="h-4 w-4" />
             </button>
             <button
-              onClick={() => setGroupModal(true)}
-              data-testid="new-group"
-              className="ms-btn-outline w-full text-xs"
+              onClick={() => setComposer("dm")}
+              className="h-10 w-10 rounded-xl bg-[#3BA4FF] hover:bg-[#2A8DE0] text-white inline-flex items-center justify-center"
+              title="Nouveau message"
+              data-testid="msg-compose"
             >
-              <Users className="h-3.5 w-3.5" /> Créer un groupe
+              <Pencil className="h-4 w-4" />
             </button>
           </div>
 
-          {/* Tabs: Toutes / Non lues / Favoris */}
-          <div className="flex border-b border-[#071B34]/5 shrink-0 bg-white">
+          {/* Tabs */}
+          <div className="px-3 pt-2 border-b border-[#071B34]/5 flex items-center gap-4">
             {[
-              { k: "all", l: "Toutes" },
-              { k: "unread", l: "Non lues", badge: totalUnread },
-              { k: "favorites", l: "Favoris", badge: totalFav },
+              { k: "all", l: "Toutes", n: counts.all },
+              { k: "unread", l: "Non lues", n: counts.unread },
+              { k: "favorites", l: "Favoris", n: counts.favorites },
             ].map((t) => (
               <button
                 key={t.k}
-                onClick={() => setActiveTab(t.k)}
+                onClick={() => setTab(t.k)}
                 data-testid={`msg-tab-${t.k}`}
-                className={`flex-1 px-2 py-2.5 text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors relative ${
-                  activeTab === t.k ? "text-[#3BA4FF]" : "text-[#475569] hover:text-[#071B34]"
+                className={`relative pb-3 text-sm font-semibold transition-colors ${
+                  tab === t.k ? "text-[#3BA4FF]" : "text-[#475569] hover:text-[#071B34]"
                 }`}
               >
-                {t.l}
-                {t.badge > 0 && (
-                  <span className={`inline-flex items-center justify-center h-4 min-w-[16px] rounded-full text-[10px] font-bold px-1 ${activeTab === t.k ? "bg-[#3BA4FF] text-white" : "bg-[#3BA4FF]/15 text-[#1D70B8]"}`}>
-                    {t.badge}
-                  </span>
-                )}
-                {activeTab === t.k && <span className="absolute bottom-0 left-2 right-2 h-0.5 bg-[#3BA4FF] rounded-full" />}
+                <span className="inline-flex items-center gap-1.5">
+                  {t.l}
+                  {t.n > 0 && (
+                    <span className={`inline-flex items-center justify-center h-4 min-w-[16px] rounded-full text-[10px] font-bold px-1 ${tab === t.k ? "bg-[#3BA4FF] text-white" : "bg-[#3BA4FF]/15 text-[#1D70B8]"}`}>
+                      {t.n}
+                    </span>
+                  )}
+                </span>
+                {tab === t.k && <span className="absolute left-0 right-0 -bottom-px h-0.5 bg-[#3BA4FF] rounded-t" />}
               </button>
             ))}
           </div>
 
-          <div className="overflow-y-auto flex-1 p-2 min-h-0">
-            <div className="ms-overline px-3 mt-1 mb-1">Canaux</div>
-            {teamChannels.map((c) => (
-              <ChannelRow
+          {/* Conversations list */}
+          <div className="flex-1 overflow-y-auto">
+            {filtered.length === 0 && (
+              <div className="p-10 text-center text-sm text-[#475569]">
+                Aucune conversation.
+              </div>
+            )}
+            {filtered.map((c) => (
+              <button
                 key={c.id}
-                channel={c}
-                active={active === c.id}
-                onClick={() => onSelectChannel(c.id)}
-                menuOpen={menuOpen === c.id}
-                onMenuClick={(e) => {
-                  e.stopPropagation();
-                  setMenuOpen(menuOpen === c.id ? null : c.id);
-                }}
-              />
+                onClick={() => { setActive(c.id); setSearchParams({ ch: c.id }); setMobileShowChat(true); }}
+                data-testid={`msg-conv-${c.id}`}
+                className={`w-full text-left px-3 py-3 border-b border-[#071B34]/5 transition-colors flex items-center gap-3 ${
+                  active === c.id ? "bg-[#3BA4FF]/8" : "hover:bg-[#F4F7FA]"
+                }`}
+              >
+                {c._avatar ? (
+                  <img src={c._avatar} alt="" className="h-11 w-11 rounded-full object-cover shrink-0" />
+                ) : c._kind === "group" || c._kind === "team" ? (
+                  <div className="h-11 w-11 rounded-full bg-[#EEF2FF] text-[#4338CA] flex items-center justify-center shrink-0">
+                    <Users className="h-5 w-5" />
+                  </div>
+                ) : (
+                  <div className="h-11 w-11 rounded-full bg-[#3BA4FF]/15 text-[#1D70B8] flex items-center justify-center font-bold shrink-0">
+                    {initials(c._display_name)}
+                  </div>
+                )}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className={`text-sm font-semibold truncate ${c.unread_count > 0 ? "text-[#071B34]" : "text-[#334155]"}`}>
+                      {c._display_name}
+                    </div>
+                    <div className="text-[11px] text-[#94A3B8] shrink-0">
+                      {formatTimestamp(c.last_message_ts || c.created_at)}
+                    </div>
+                  </div>
+                  <div className="mt-0.5 flex items-center justify-between gap-2">
+                    <div className={`text-xs truncate ${c.unread_count > 0 ? "text-[#071B34] font-semibold" : "text-[#94A3B8]"}`}>
+                      {c.last_message_preview || (c._subtitle || "Nouveau contact")}
+                    </div>
+                    {c.unread_count > 0 && (
+                      <span
+                        data-testid={`msg-unread-${c.id}`}
+                        className="inline-flex items-center justify-center h-5 min-w-[20px] rounded-full bg-[#3BA4FF] text-white text-[10px] font-bold px-1.5 shrink-0"
+                      >
+                        {c.unread_count}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </button>
             ))}
-            {groupChannels.length > 0 && (
-              <>
-                <div className="ms-overline px-3 mt-4 mb-1">Groupes</div>
-                {groupChannels.map((c) => (
-                  <ChannelRow
-                    key={c.id}
-                    channel={c}
-                    active={active === c.id}
-                    onClick={() => onSelectChannel(c.id)}
-                    menuOpen={menuOpen === c.id}
-                    onMenuClick={(e) => {
-                      e.stopPropagation();
-                      setMenuOpen(menuOpen === c.id ? null : c.id);
-                    }}
-                    onArchive={() => toggleArchive(c)}
-                    onDelete={() => setConfirmDelete(c)}
-                  />
-                ))}
-              </>
-            )}
-            {dmChannels.length > 0 && (
-              <>
-                <div className="ms-overline px-3 mt-4 mb-1">Messages directs</div>
-                {dmChannels.map((c) => (
-                  <ChannelRow
-                    key={c.id}
-                    channel={c}
-                    active={active === c.id}
-                    onClick={() => onSelectChannel(c.id)}
-                    menuOpen={menuOpen === c.id}
-                    onMenuClick={(e) => {
-                      e.stopPropagation();
-                      setMenuOpen(menuOpen === c.id ? null : c.id);
-                    }}
-                    onArchive={() => toggleArchive(c)}
-                    onDelete={() => setConfirmDelete(c)}
-                  />
-                ))}
-              </>
-            )}
-            {/* Archived section */}
-            {archivedChannels.length > 0 && (
-              <>
-                <button
-                  onClick={() => setShowArchived((v) => !v)}
-                  data-testid="toggle-archived"
-                  className="mt-4 mb-1 flex items-center gap-2 w-full px-3 text-[10px] font-bold uppercase tracking-[0.15em] text-[#475569] hover:text-[#071B34]"
-                >
-                  <Archive className="h-3 w-3" />
-                  Archivées ({archivedChannels.length})
-                  <span className="ml-auto">{showArchived ? "−" : "+"}</span>
-                </button>
-                {showArchived &&
-                  archivedChannels.map((c) => (
-                    <ChannelRow
-                      key={c.id}
-                      channel={c}
-                      active={active === c.id}
-                      onClick={() => onSelectChannel(c.id)}
-                      menuOpen={menuOpen === c.id}
-                      onMenuClick={(e) => {
-                        e.stopPropagation();
-                        setMenuOpen(menuOpen === c.id ? null : c.id);
-                      }}
-                      onArchive={() => toggleArchive(c)}
-                      onDelete={() => setConfirmDelete(c)}
-                      dimmed
-                    />
-                  ))}
-              </>
-            )}
           </div>
         </aside>
 
-        {/* CHAT AREA */}
-        <section
-          className={`md:col-span-8 lg:col-span-9 flex flex-col min-h-0 min-w-0 ${
-            mobileShowChat ? "flex" : "hidden md:flex"
-          }`}
-          data-testid="chat-area"
-        >
-          {currentChannel && (
-            <div className="flex items-center justify-between gap-2 px-4 md:px-5 py-3 border-b border-[#071B34]/5 shrink-0 bg-white">
+        {/* ── RIGHT column: chat ── */}
+        <section className={`flex flex-col ${!mobileShowChat ? "hidden lg:flex" : "flex"}`}>
+          {!currentDisplay ? (
+            <div className="flex-1 flex flex-col items-center justify-center text-center p-10">
+              <div className="h-16 w-16 rounded-2xl bg-[#3BA4FF]/10 text-[#3BA4FF] flex items-center justify-center">
+                <MessageSquare className="h-8 w-8" />
+              </div>
+              <h3 className="mt-4 text-lg font-bold text-[#071B34]">Sélectionnez une conversation</h3>
+              <p className="mt-1 text-sm text-[#475569]">Ou démarrez-en une nouvelle avec vos collègues.</p>
               <button
-                onClick={() => setMobileShowChat(false)}
-                className="md:hidden flex h-9 w-9 items-center justify-center rounded-xl hover:bg-[#071B34]/5 shrink-0"
-                data-testid="chat-back"
+                onClick={() => setComposer("dm")}
+                className="mt-4 ms-btn-primary"
               >
-                <ArrowLeft className="h-4 w-4 text-[#475569]" />
+                <Pencil className="h-4 w-4" /> Nouveau message
               </button>
-              <div className="flex items-center gap-2 min-w-0 flex-1">
-                {currentChannel.is_dm ? (
-                  <img
-                    src={currentChannel.avatar}
-                    alt=""
-                    className="h-8 w-8 rounded-full object-cover shrink-0"
-                  />
-                ) : currentChannel.is_group ? (
-                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#3BA4FF]/15 text-[#1D70B8] shrink-0">
-                    <Users className="h-4 w-4" />
+            </div>
+          ) : (
+            <>
+              {/* Chat header */}
+              <div className="flex items-center gap-3 px-5 py-3 border-b border-[#071B34]/5">
+                <button
+                  onClick={() => setMobileShowChat(false)}
+                  className="lg:hidden h-9 w-9 rounded-lg hover:bg-[#F4F7FA] inline-flex items-center justify-center"
+                >
+                  <ArrowLeft className="h-4 w-4" />
+                </button>
+                {currentDisplay._avatar ? (
+                  <div className="relative">
+                    <img src={currentDisplay._avatar} alt="" className="h-11 w-11 rounded-full object-cover" />
+                    <span className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full bg-[#10B981] ring-2 ring-white" />
                   </div>
-                ) : currentChannel.icon === "lock" ? (
-                  <Lock className="h-4 w-4 text-[#475569] shrink-0" />
                 ) : (
-                  <Hash className="h-4 w-4 text-[#475569] shrink-0" />
+                  <div className="h-11 w-11 rounded-full bg-[#EEF2FF] text-[#4338CA] flex items-center justify-center">
+                    <Users className="h-5 w-5" />
+                  </div>
                 )}
-                <div className="min-w-0">
-                  <h3 className="text-sm md:text-base font-bold text-[#071B34] truncate">
-                    {currentChannel.name}
-                  </h3>
-                  {!currentChannel.is_dm && (
-                    <div className="text-[11px] text-[#475569]">
-                      {currentChannel.members} membres
-                      {currentChannel.archived && " · archivée"}
-                    </div>
-                  )}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-base font-bold text-[#071B34] truncate">{currentDisplay._display_name}</h2>
+                    <button
+                      onClick={() => toggleFav(currentDisplay.id)}
+                      className="shrink-0"
+                      aria-label="Favori"
+                      data-testid={`msg-fav-${currentDisplay.id}`}
+                    >
+                      <Star className={`h-4 w-4 ${favorites.has(currentDisplay.id) ? "fill-[#F59E0B] text-[#F59E0B]" : "text-[#94A3B8]"}`} />
+                    </button>
+                  </div>
+                  <div className="text-xs text-[#475569] truncate">{currentDisplay._subtitle}</div>
+                </div>
+                <div className="flex items-center gap-1">
+                  <IconBtn title="Appel audio"><Phone className="h-4 w-4" /></IconBtn>
+                  <IconBtn title="Appel vidéo"><Video className="h-4 w-4" /></IconBtn>
+                  <IconBtn title="Informations"><Info className="h-4 w-4" /></IconBtn>
+                  <IconBtn title="Plus"><MoreVertical className="h-4 w-4" /></IconBtn>
                 </div>
               </div>
-              <div className="flex items-center gap-1 shrink-0">
-                <button className="hidden sm:flex h-9 w-9 items-center justify-center rounded-xl hover:bg-[#071B34]/5" title="Appel audio (bientôt)">
-                  <Phone className="h-4 w-4 text-[#475569]" />
-                </button>
-                <button className="hidden sm:flex h-9 w-9 items-center justify-center rounded-xl hover:bg-[#071B34]/5" title="Appel vidéo (bientôt)">
-                  <Video className="h-4 w-4 text-[#475569]" />
-                </button>
-              </div>
-            </div>
-          )}
 
-          {/* MESSAGES SCROLL CONTAINER - critical: min-h-0 + overflow-y-auto */}
-          <div
-            ref={scrollRef}
-            data-testid="messages-scroll"
-            className="flex-1 overflow-y-auto overflow-x-hidden px-3 md:px-5 py-4 space-y-3 min-h-0 bg-[#F8FAFC]"
-          >
-            {messages.length === 0 && (
-              <div className="h-full flex flex-col items-center justify-center text-center text-sm text-[#475569] py-12">
-                <MessageSquare className="h-10 w-10 text-[#3BA4FF]/40 mb-3" />
-                Pas encore de message. Lancez la discussion !
-              </div>
-            )}
-            {messages.map((m, idx) => {
-              const isMe = m.author_id === me?.id;
-              const author = findEmployee(m.author_id);
-              const prev = messages[idx - 1];
-              const showAuthor = !prev || prev.author_id !== m.author_id;
-              return (
-                <div
-                  key={m.id}
-                  className={`flex items-end gap-2 ${isMe ? "justify-end" : ""}`}
-                  data-testid={`msg-${m.id}`}
-                >
-                  {!isMe && (
-                    <div className="w-8 shrink-0">
-                      {showAuthor && (
-                        <img
-                          src={author?.avatar}
-                          alt=""
-                          className="h-8 w-8 rounded-full object-cover"
-                        />
-                      )}
+              {/* Messages */}
+              <div ref={scrollRef} className="flex-1 overflow-y-auto px-5 py-6 space-y-4 bg-white">
+                {messagesByDay.length === 0 && (
+                  <div className="text-center text-sm text-[#94A3B8] py-6">
+                    Aucun message. Envoyez le premier !
+                  </div>
+                )}
+                {messagesByDay.map((g) => (
+                  <div key={g.day}>
+                    <div className="flex items-center justify-center my-2">
+                      <span className="text-[11px] uppercase tracking-widest text-[#94A3B8] font-semibold bg-white px-3">
+                        {dayLabel(g.day)}
+                      </span>
                     </div>
-                  )}
-                  <div
-                    className={`max-w-[78%] sm:max-w-[70%] md:max-w-[60%] min-w-0 flex flex-col ${
-                      isMe ? "items-end" : "items-start"
-                    }`}
-                  >
-                    {!isMe && showAuthor && (
-                      <div className="text-[11px] font-semibold text-[#071B34] mb-1 ml-1">
-                        {author?.first_name} {author?.last_name}
-                      </div>
-                    )}
-                    <div
-                      className={`rounded-2xl px-3.5 py-2 text-sm shadow-sm break-words whitespace-pre-wrap ${
-                        isMe
-                          ? "bg-[#3BA4FF] text-white rounded-br-md"
-                          : "bg-white border border-[#071B34]/5 text-[#071B34] rounded-bl-md"
-                      }`}
-                      style={{ wordBreak: "break-word", overflowWrap: "anywhere" }}
-                    >
-                      {m.content}
-                    </div>
-                    <div
-                      className={`text-[10px] text-[#475569] mt-1 px-1 ${
-                        isMe ? "text-right" : "text-left"
-                      }`}
-                    >
-                      {new Date(m.ts).toLocaleTimeString("fr-FR", {
-                        hour: "2-digit",
-                        minute: "2-digit",
+                    <div className="space-y-2.5">
+                      {g.items.map((m) => {
+                        const mine = m.author_id === me?.id;
+                        const author = findEmployee(m.author_id);
+                        return (
+                          <div key={m.id} className={`flex items-end gap-2 ${mine ? "justify-end" : "justify-start"}`}>
+                            {!mine && (
+                              author?.avatar
+                                ? <img src={author.avatar} alt="" className="h-7 w-7 rounded-full object-cover shrink-0" />
+                                : <div className="h-7 w-7 rounded-full bg-[#3BA4FF]/15 text-[#1D70B8] text-[10px] font-bold flex items-center justify-center shrink-0">
+                                    {initials(author?.first_name)}
+                                  </div>
+                            )}
+                            <div className={`max-w-[70%] rounded-2xl px-3.5 py-2 text-sm ${
+                              mine
+                                ? "bg-[#DBEAFE] text-[#0B2545] rounded-br-sm"
+                                : "bg-[#F1F5F9] text-[#0B2545] rounded-bl-sm"
+                            }`}>
+                              <div className="whitespace-pre-wrap break-words">{m.content}</div>
+                              <div className={`mt-1 text-[10px] ${mine ? "text-[#1D4ED8]/70" : "text-[#94A3B8]"} text-right`}>
+                                {new Date(m.ts).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}
+                                {mine && <span className="ml-1">✓✓</span>}
+                              </div>
+                            </div>
+                            {mine && (
+                              me?.avatar
+                                ? <img src={me.avatar} alt="" className="h-7 w-7 rounded-full object-cover shrink-0" />
+                                : <div className="h-7 w-7 rounded-full bg-[#3BA4FF]/15 text-[#1D70B8] text-[10px] font-bold flex items-center justify-center shrink-0">
+                                    {initials(me?.first_name)}
+                                  </div>
+                            )}
+                          </div>
+                        );
                       })}
                     </div>
                   </div>
-                </div>
-              );
-            })}
-            <div ref={bottomRef} />
-          </div>
+                ))}
+              </div>
 
-          {/* COMPOSER */}
-          <form
-            onSubmit={send}
-            className="border-t border-[#071B34]/5 p-2.5 md:p-3 flex items-center gap-2 bg-white shrink-0"
-          >
-            <button
-              type="button"
-              className="hidden sm:flex h-10 w-10 items-center justify-center rounded-xl hover:bg-[#071B34]/5 shrink-0"
-              title="Joindre un fichier (bientôt)"
-            >
-              <Paperclip className="h-4 w-4 text-[#475569]" />
-            </button>
-            <input
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              placeholder={`Message dans ${currentChannel?.is_dm ? "" : "#"}${
-                currentChannel?.name || ""
-              }`}
-              data-testid="msg-input"
-              className="ms-input flex-1 min-w-0"
-            />
-            <button
-              type="button"
-              className="hidden sm:flex h-10 w-10 items-center justify-center rounded-xl hover:bg-[#071B34]/5 shrink-0"
-              title="Emoji (bientôt)"
-            >
-              <Smile className="h-4 w-4 text-[#475569]" />
-            </button>
-            <button
-              type="submit"
-              data-testid="send-msg"
-              className="ms-btn-primary !px-4 shrink-0"
-              disabled={!draft.trim()}
-            >
-              <Send className="h-4 w-4" />
-            </button>
-          </form>
+              {/* Composer */}
+              <div className="border-t border-[#071B34]/5 p-3 flex items-center gap-2 bg-white">
+                <button className="h-10 w-10 rounded-xl bg-[#F4F7FA] hover:bg-[#071B34]/5 inline-flex items-center justify-center text-[#475569]" aria-label="Joindre">
+                  <Paperclip className="h-4 w-4" />
+                </button>
+                <div className="flex-1 relative">
+                  <input
+                    ref={inputRef}
+                    value={draft}
+                    onChange={(e) => setDraft(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
+                    placeholder="Écrire un message…"
+                    data-testid="msg-input"
+                    className="w-full h-11 pl-4 pr-11 rounded-xl bg-[#F4F7FA] focus:bg-white focus:ring-2 focus:ring-[#3BA4FF]/30 outline-none text-sm"
+                  />
+                  <button
+                    className="absolute right-2 top-1/2 -translate-y-1/2 h-8 w-8 rounded-lg hover:bg-[#071B34]/5 inline-flex items-center justify-center text-[#475569]"
+                    aria-label="Emoji"
+                  >
+                    <Smile className="h-4 w-4" />
+                  </button>
+                </div>
+                <button
+                  onClick={send}
+                  disabled={!draft.trim()}
+                  data-testid="msg-send"
+                  className="h-11 w-11 rounded-xl bg-[#3BA4FF] hover:bg-[#2A8DE0] disabled:opacity-40 disabled:cursor-not-allowed text-white inline-flex items-center justify-center transition-colors"
+                >
+                  <Send className="h-4 w-4" />
+                </button>
+              </div>
+            </>
+          )}
         </section>
       </div>
 
-      {/* New DM modal */}
-      {dmModal && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          onClick={() => setDmModal(false)}
-          className="fixed inset-0 z-50 bg-black/40 backdrop-blur-md flex items-center justify-center p-4"
-        >
-          <div onClick={(e) => e.stopPropagation()} className="ms-card max-w-lg w-full p-6 max-h-[90vh] flex flex-col">
-            <div className="flex items-start justify-between mb-4">
-              <div>
-                <div className="ms-overline">Nouvelle discussion</div>
-                <h3 className="text-xl font-bold text-[#071B34] mt-1">Choisir un employé</h3>
-              </div>
-              <button
-                onClick={() => setDmModal(false)}
-                className="flex h-9 w-9 items-center justify-center rounded-xl hover:bg-[#071B34]/5"
-              >
+      {/* Compose modal (DM + group tabs) */}
+      {composer && (
+        <div onClick={() => setComposer(null)} className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
+          <div onClick={(e) => e.stopPropagation()} className="bg-white rounded-3xl w-full max-w-md max-h-[80vh] overflow-hidden flex flex-col">
+            <div className="flex items-center justify-between px-5 py-3 border-b border-[#071B34]/5">
+              <h3 className="text-base font-bold text-[#071B34]">Nouveau message</h3>
+              <button onClick={() => setComposer(null)} className="h-9 w-9 rounded-lg hover:bg-[#F4F7FA] inline-flex items-center justify-center">
                 <X className="h-4 w-4" />
               </button>
             </div>
-            <div className="relative mb-3 shrink-0">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[#475569]" />
-              <input
-                value={empSearch}
-                onChange={(e) => setEmpSearch(e.target.value)}
-                placeholder="Rechercher un employé…"
-                data-testid="search-emp"
-                className="ms-input pl-10"
-                autoFocus
-              />
-            </div>
-            <div className="flex-1 overflow-y-auto space-y-1 min-h-0">
-              {employeeOptions.map((e) => (
+            <div className="flex items-center gap-2 px-5 pt-3">
+              {[
+                { k: "dm", l: "Contact" },
+                { k: "group", l: "Groupe" },
+              ].map((t) => (
                 <button
-                  key={e.id}
-                  onClick={() => startDM(e.id)}
-                  data-testid={`pick-${e.id}`}
-                  className="flex items-center gap-3 w-full rounded-xl hover:bg-[#F4F7FA] p-2 text-left transition-colors"
+                  key={t.k}
+                  onClick={() => setComposer(t.k)}
+                  className={`px-3 py-1.5 rounded-full text-xs font-semibold ${
+                    composer === t.k ? "bg-[#3BA4FF] text-white" : "bg-[#F4F7FA] text-[#475569]"
+                  }`}
                 >
-                  <img src={e.avatar} alt="" className="h-10 w-10 rounded-full object-cover shrink-0" />
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm font-semibold text-[#071B34] truncate">
-                      {e.first_name} {e.last_name}
-                    </div>
-                    <div className="text-xs text-[#475569] truncate">{e.role}</div>
-                  </div>
-                  <span
-                    className={`h-2 w-2 rounded-full shrink-0 ${
-                      e.available ? "bg-[#10B981]" : "bg-[#94A3B8]"
-                    }`}
-                  />
+                  {t.l}
                 </button>
               ))}
             </div>
-          </div>
-        </div>
-      )}
-
-      {/* Group creation modal */}
-      {groupModal && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          onClick={() => setGroupModal(false)}
-          className="fixed inset-0 z-50 bg-black/40 backdrop-blur-md flex items-center justify-center p-4"
-        >
-          <div onClick={(e) => e.stopPropagation()} className="ms-card max-w-lg w-full p-6 max-h-[90vh] flex flex-col">
-            <div className="flex items-start justify-between mb-4 shrink-0">
+            <div className="p-5 space-y-3 flex-1 overflow-y-auto">
+              {composer === "group" && (
+                <div>
+                  <label className="ms-overline">Nom du groupe</label>
+                  <input
+                    value={groupName}
+                    onChange={(e) => setGroupName(e.target.value)}
+                    placeholder="Ex : Équipe accueil"
+                    className="ms-input mt-1"
+                  />
+                </div>
+              )}
               <div>
-                <div className="ms-overline">Nouveau groupe</div>
-                <h3 className="text-xl font-bold text-[#071B34] mt-1">Créer un groupe de discussion</h3>
-              </div>
-              <button
-                onClick={() => setGroupModal(false)}
-                className="flex h-9 w-9 items-center justify-center rounded-xl hover:bg-[#071B34]/5"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-            <div className="space-y-3 flex-1 flex flex-col min-h-0">
-              <div className="shrink-0">
-                <label className="ms-overline">Nom du groupe</label>
-                <input
-                  value={groupName}
-                  onChange={(e) => setGroupName(e.target.value)}
-                  data-testid="group-name"
-                  placeholder="Ex. Équipe Karting weekend"
-                  className="ms-input mt-2"
-                />
-              </div>
-              <div className="flex-1 flex flex-col min-h-0">
-                <label className="ms-overline shrink-0">
-                  Membres ({groupMembers.length} sélectionnés)
+                <label className="ms-overline">
+                  {composer === "group" ? "Membres" : "Contact"}
                 </label>
-                <div className="relative mt-2 mb-2 shrink-0">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[#475569]" />
+                <div className="relative mt-1">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[#94A3B8]" />
                   <input
                     value={empSearch}
                     onChange={(e) => setEmpSearch(e.target.value)}
-                    placeholder="Rechercher…"
-                    className="ms-input pl-10"
+                    placeholder="Rechercher un collègue…"
+                    className="w-full h-10 pl-9 pr-3 rounded-xl bg-[#F4F7FA] outline-none text-sm"
                   />
                 </div>
-                <div className="flex-1 overflow-y-auto space-y-1 rounded-xl border border-[#071B34]/5 p-2 min-h-0">
-                  {employeeOptions.map((e) => {
-                    const checked = groupMembers.includes(e.id);
+                <div className="mt-2 space-y-1 max-h-64 overflow-y-auto pr-1">
+                  {filteredEmployees.map((e) => {
+                    const isSelected = groupMembers.includes(e.id);
                     return (
                       <button
                         key={e.id}
-                        onClick={() => toggleMember(e.id)}
-                        data-testid={`group-pick-${e.id}`}
-                        className={`flex items-center gap-3 w-full rounded-lg p-2 text-left transition-colors ${
-                          checked ? "bg-[#3BA4FF]/12" : "hover:bg-[#F4F7FA]"
-                        }`}
+                        onClick={() => {
+                          if (composer === "dm") startDm(e.id);
+                          else setGroupMembers((m) => isSelected ? m.filter((x) => x !== e.id) : [...m, e.id]);
+                        }}
+                        className={`w-full flex items-center gap-2 rounded-xl px-2 py-2 hover:bg-[#F4F7FA] ${isSelected ? "bg-[#3BA4FF]/8" : ""}`}
                       >
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          readOnly
-                          className="h-4 w-4 accent-[#3BA4FF] shrink-0"
-                        />
-                        <img src={e.avatar} alt="" className="h-8 w-8 rounded-full object-cover shrink-0" />
-                        <div className="flex-1 min-w-0">
-                          <div className="text-sm font-semibold text-[#071B34] truncate">
-                            {e.first_name} {e.last_name}
-                          </div>
-                          <div className="text-[11px] text-[#475569] truncate">{e.role}</div>
+                        {e.avatar
+                          ? <img src={e.avatar} alt="" className="h-8 w-8 rounded-full object-cover" />
+                          : <div className="h-8 w-8 rounded-full bg-[#3BA4FF]/15 text-[#1D70B8] text-[10px] font-bold flex items-center justify-center">{initials(e.first_name)}</div>}
+                        <div className="flex-1 text-left min-w-0">
+                          <div className="text-sm font-semibold text-[#071B34] truncate">{e.first_name} {e.last_name}</div>
+                          <div className="text-xs text-[#475569] truncate">{e.role || "—"}</div>
                         </div>
+                        {composer === "group" && isSelected && <span className="text-xs font-bold text-[#3BA4FF]">✓</span>}
                       </button>
                     );
                   })}
                 </div>
               </div>
-              <button
-                onClick={createGroup}
-                data-testid="create-group"
-                disabled={!groupName.trim() || groupMembers.length === 0}
-                className="ms-btn-primary w-full disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
-              >
-                Créer le groupe
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Delete confirmation */}
-      {confirmDelete && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          onClick={() => setConfirmDelete(null)}
-          className="fixed inset-0 z-50 bg-black/50 backdrop-blur-md flex items-center justify-center p-4"
-        >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            className="ms-card max-w-md w-full p-6"
-            data-testid="confirm-delete-modal"
-          >
-            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[#FEE2E2] text-[#EF4444]">
-              <Trash2 className="h-5 w-5" />
-            </div>
-            <h3 className="mt-3 text-lg font-bold text-[#071B34]">Supprimer la conversation ?</h3>
-            <p className="mt-1 text-sm text-[#475569]">
-              "<strong>{confirmDelete.name}</strong>" et tous ses messages seront définitivement
-              supprimés. Cette action est irréversible.
-            </p>
-            <div className="mt-5 flex gap-2">
-              <button onClick={() => setConfirmDelete(null)} className="ms-btn-outline flex-1">
-                Annuler
-              </button>
-              <button
-                onClick={() => deleteChannel(confirmDelete)}
-                data-testid="confirm-delete"
-                className="ms-btn-primary flex-1 !bg-[#EF4444] hover:!bg-[#DC2626] shadow-[0_4px_14px_rgba(239,68,68,0.35)]"
-              >
-                <Trash2 className="h-4 w-4" /> Supprimer
-              </button>
+              {composer === "group" && (
+                <button onClick={createGroup} className="w-full ms-btn-primary">
+                  <Plus className="h-4 w-4" /> Créer le groupe
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -667,77 +556,23 @@ export default function Messagerie() {
   );
 }
 
-function ChannelRow({ channel, active, onClick, menuOpen, onMenuClick, onArchive, onDelete, dimmed }) {
-  const canManage = channel.is_dm || channel.is_group;
-  const Icon = channel.icon === "lock"
-    ? Lock
-    : channel.is_dm
-    ? User
-    : channel.is_group
-    ? Users
-    : Hash;
+function IconBtn({ children, title }) {
   return (
-    <div className="relative group">
-      <button
-        onClick={onClick}
-        data-testid={`channel-${channel.id}`}
-        className={`flex items-center gap-2 w-full rounded-lg px-3 py-2 text-sm transition-colors ${
-          active
-            ? "bg-[#3BA4FF]/12 text-[#071B34] font-semibold"
-            : "text-[#475569] hover:bg-[#071B34]/5"
-        } ${dimmed ? "opacity-60" : ""}`}
-      >
-        {channel.is_dm ? (
-          <img src={channel.avatar} alt="" className="h-5 w-5 rounded-full object-cover shrink-0" />
-        ) : (
-          <Icon className="h-3.5 w-3.5 shrink-0" />
-        )}
-        <span className="flex-1 text-left truncate">{channel.name}</span>
-        {channel.unread > 0 && !channel.archived && (
-          <span className="flex h-5 min-w-[20px] items-center justify-center rounded-full bg-[#EF4444] text-[10px] font-bold text-white px-1 shrink-0">
-            {channel.unread}
-          </span>
-        )}
-        {canManage && (
-          <span
-            onClick={onMenuClick}
-            data-testid={`menu-${channel.id}`}
-            className="opacity-0 group-hover:opacity-100 hover:bg-[#071B34]/10 rounded-md p-0.5 shrink-0 cursor-pointer"
-          >
-            <MoreVertical className="h-3.5 w-3.5" />
-          </span>
-        )}
-      </button>
-      {canManage && menuOpen && (
-        <div
-          className="absolute right-2 top-full mt-1 z-20 w-48 rounded-xl bg-white border border-[#071B34]/8 shadow-xl overflow-hidden ms-fade-up"
-          onClick={(e) => e.stopPropagation()}
-          data-testid={`menu-pop-${channel.id}`}
-        >
-          <button
-            onClick={onArchive}
-            data-testid={`archive-${channel.id}`}
-            className="flex items-center gap-2 w-full px-3 py-2 text-sm text-[#071B34] hover:bg-[#F4F7FA] transition-colors"
-          >
-            {channel.archived ? (
-              <>
-                <ArchiveRestore className="h-4 w-4 text-[#475569]" /> Restaurer
-              </>
-            ) : (
-              <>
-                <Archive className="h-4 w-4 text-[#475569]" /> Archiver
-              </>
-            )}
-          </button>
-          <button
-            onClick={onDelete}
-            data-testid={`delete-${channel.id}`}
-            className="flex items-center gap-2 w-full px-3 py-2 text-sm text-[#EF4444] hover:bg-[#FEE2E2] transition-colors"
-          >
-            <Trash2 className="h-4 w-4" /> Supprimer
-          </button>
-        </div>
-      )}
-    </div>
+    <button
+      title={title}
+      className="h-9 w-9 rounded-xl bg-[#F4F7FA] hover:bg-[#071B34]/5 inline-flex items-center justify-center text-[#475569]"
+    >
+      {children}
+    </button>
   );
+}
+
+function dayLabel(day) {
+  if (!day) return "";
+  const d = new Date(day + "T00:00:00");
+  const today = new Date();
+  const y = new Date(); y.setDate(today.getDate() - 1);
+  if (d.toDateString() === today.toDateString()) return "Aujourd'hui";
+  if (d.toDateString() === y.toDateString()) return "Hier";
+  return d.toLocaleDateString("fr-FR", { day: "2-digit", month: "long", year: "numeric" });
 }

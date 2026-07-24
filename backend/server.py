@@ -2082,8 +2082,12 @@ async def meal_points_today():
         {"employee_id": current_user(), "ts": {"$gte": today + "T00:00:00"}},
         {"_id": 0},
     ).sort("ts", -1).to_list(50)
-    used = sum(t.get("points_spent", 0) for t in transactions)
+    # Only count daily-quota consumption, not bonus (bonus is tracked separately)
+    used = sum(t.get("points_daily", t.get("points_spent", 0)) for t in transactions)
     remaining = max(0, credited_points - used)
+
+    # Birthday bonus (10 points valid 30 days, granted once/year on birthday)
+    birthday_bonus = _active_birthday_bonus(emp)
 
     last_tx = await db.meal_tx.find_one(
         {"employee_id": current_user()}, {"_id": 0}, sort=[("ts", -1)]
@@ -2093,12 +2097,36 @@ async def meal_points_today():
         "credited": credited,
         "credited_points": credited_points,
         "used": used,
-        "remaining": remaining,
+        "remaining": remaining + (birthday_bonus["remaining"] if birthday_bonus else 0),
+        "birthday_bonus": birthday_bonus,
         "transactions": transactions,
         "last_badge": today_badge,
         "last_transaction_ts": last_tx.get("ts") if last_tx else None,
         "role_category": emp.get("role_category"),
         "expires_at": f"{today}T23:59:59",
+    }
+
+
+def _active_birthday_bonus(emp: dict) -> Optional[dict]:
+    """Return the currently active birthday meal bonus (10 pts) or None if expired/absent."""
+    bb = emp.get("birthday_bonus")
+    if not bb:
+        return None
+    try:
+        expires = date.fromisoformat(bb.get("expires_at", "")[:10])
+    except Exception:
+        return None
+    if expires < date.today():
+        return None
+    remaining = max(0, int(bb.get("points", 0)) - int(bb.get("spent", 0)))
+    if remaining <= 0:
+        return None
+    return {
+        "points": int(bb.get("points", 0)),
+        "spent": int(bb.get("spent", 0)),
+        "remaining": remaining,
+        "granted_at": bb.get("granted_at"),
+        "expires_at": bb.get("expires_at"),
     }
 
 
@@ -2108,6 +2136,260 @@ async def menu(store: Optional[str] = None):
     q = {"store": store} if store else {}
     items = await db.products.find(q, {"_id": 0}).to_list(200)
     return items
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Birthdays & birthday gift
+# ═══════════════════════════════════════════════════════════════════
+def _birthday_meta(bd_str: Optional[str], today: date) -> Optional[dict]:
+    """Given an ISO birth date string, return meta for the *next* birthday."""
+    if not bd_str:
+        return None
+    try:
+        bd = date.fromisoformat(bd_str[:10])
+    except Exception:
+        return None
+    # Next occurrence
+    try:
+        this_year = bd.replace(year=today.year)
+    except ValueError:  # Feb 29 fallback
+        this_year = bd.replace(year=today.year, day=28)
+    if this_year < today:
+        try:
+            next_bd = bd.replace(year=today.year + 1)
+        except ValueError:
+            next_bd = bd.replace(year=today.year + 1, day=28)
+    else:
+        next_bd = this_year
+    days_until = (next_bd - today).days
+    age_on_next = next_bd.year - bd.year
+    is_today = (next_bd == today)
+    return {
+        "birth_date": bd_str,
+        "next_birthday": next_bd.isoformat(),
+        "day": bd.day,
+        "month": bd.month,
+        "days_until": days_until,
+        "age_on_next": age_on_next,
+        "is_today": is_today,
+    }
+
+
+@api.get("/birthdays")
+async def list_birthdays(view: str = "upcoming", limit: int = 60):
+    """List employees sorted by their upcoming birthday (or past this year)."""
+    today = date.today()
+    employees = await db.employees.find(
+        {"birth_date": {"$ne": None}, "account_status": {"$ne": "deactivated"}},
+        {"_id": 0, "id": 1, "first_name": 1, "last_name": 1, "avatar": 1, "role": 1,
+         "department": 1, "birth_date": 1},
+    ).to_list(500)
+    results = []
+    for e in employees:
+        meta = _birthday_meta(e.get("birth_date"), today)
+        if not meta:
+            continue
+        results.append({**e, **meta})
+    if view == "past":
+        # Anniversaries that already occurred this year (last 90 days)
+        results = [r for r in results if r["days_until"] > 275]
+        results.sort(key=lambda r: r["days_until"], reverse=True)
+    else:
+        results.sort(key=lambda r: r["days_until"])
+    return results[:limit]
+
+
+@api.get("/me/birthday")
+async def my_birthday_status():
+    """Return whether today is my birthday + whether the gift popup has been shown this year."""
+    me = await db.employees.find_one({"id": current_user()}, {"_id": 0})
+    if not me:
+        raise HTTPException(404, "Employé introuvable")
+    meta = _birthday_meta(me.get("birth_date"), date.today())
+    today = date.today()
+    is_today = bool(meta and meta["is_today"])
+    last_seen = me.get("birthday_popup_year")
+    claimed_year = (me.get("birthday_bonus") or {}).get("year")
+    return {
+        "is_birthday_today": is_today,
+        "already_seen_this_year": last_seen == today.year,
+        "gift_claimed_this_year": claimed_year == today.year,
+        "birth_date": me.get("birth_date"),
+        "birthday_bonus": _active_birthday_bonus(me),
+    }
+
+
+@api.post("/me/birthday/claim")
+async def claim_birthday_gift():
+    """Mark popup seen for the year and credit 10 meal points valid 30 days.
+    Idempotent — subsequent calls same year return current state without granting again."""
+    me = await db.employees.find_one({"id": current_user()}, {"_id": 0})
+    if not me:
+        raise HTTPException(404, "Employé introuvable")
+    meta = _birthday_meta(me.get("birth_date"), date.today())
+    if not (meta and meta["is_today"]):
+        raise HTTPException(400, "Ce n'est pas votre anniversaire aujourd'hui.")
+    today = date.today()
+    updates: dict = {"birthday_popup_year": today.year}
+    already_granted = (me.get("birthday_bonus") or {}).get("year") == today.year
+    if not already_granted:
+        updates["birthday_bonus"] = {
+            "points": 10,
+            "spent": 0,
+            "granted_at": _now(),
+            "expires_at": (today + timedelta(days=30)).isoformat(),
+            "year": today.year,
+        }
+    await db.employees.update_one({"id": current_user()}, {"$set": updates})
+    # Notification
+    await _push_notification(
+        employee_id=current_user(),
+        type="birthday",
+        title="🎂 Joyeux anniversaire !",
+        content="10 points repas ont été ajoutés à votre compte, valables 30 jours.",
+        icon="cake",
+        link="/anniversaires",
+    )
+    fresh = await db.employees.find_one({"id": current_user()}, {"_id": 0})
+    return {
+        "ok": True,
+        "birthday_bonus": _active_birthday_bonus(fresh),
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Ideas box (anonymous submissions + voting + admin moderation)
+# ═══════════════════════════════════════════════════════════════════
+IDEA_STATUSES = ["new", "reviewing", "accepted", "rejected"]
+IDEA_CATEGORIES = ["Amélioration", "Événement", "Bien-être", "Technologie", "Environnement", "Autres"]
+
+
+class IdeaCreate(BaseModel):
+    title: str
+    description: str
+    category: Optional[str] = "Autres"
+    is_anonymous: bool = True
+
+
+class IdeaModerate(BaseModel):
+    status: Optional[str] = None  # new | reviewing | accepted | rejected
+    admin_response: Optional[str] = None
+
+
+def _sanitize_idea(idea: dict, me: dict) -> dict:
+    is_admin = bool(me.get("is_admin"))
+    out = {**idea}
+    votes = out.get("votes") or {}
+    out["upvotes"] = sum(1 for v in votes.values() if v == "up")
+    out["downvotes"] = sum(1 for v in votes.values() if v == "down")
+    out["my_vote"] = votes.get(me["id"])
+    out["score"] = out["upvotes"] - out["downvotes"]
+    # Hide identity for anonymous submissions (even from admin, per user requirement)
+    if idea.get("is_anonymous"):
+        out["author_id"] = None
+        out["author_snapshot"] = {"first_name": "Anonyme", "last_name": ""}
+    if not is_admin:
+        out.pop("admin_note", None)
+    out.pop("votes", None)
+    return out
+
+
+@api.get("/ideas")
+async def list_ideas(status: Optional[str] = None, category: Optional[str] = None):
+    me = await _me()
+    q: dict = {}
+    if status:
+        q["status"] = status
+    if category:
+        q["category"] = category
+    items = await db.ideas.find(q, {"_id": 0}).sort("created_at", -1).to_list(200)
+    # Attach non-anonymous author snapshot
+    non_anon_ids = list({i["author_id"] for i in items if not i.get("is_anonymous") and i.get("author_id")})
+    emps = {e["id"]: e async for e in db.employees.find({"id": {"$in": non_anon_ids}}, {"_id": 0})}
+    for i in items:
+        if not i.get("is_anonymous"):
+            e = emps.get(i.get("author_id"), {})
+            i["author_snapshot"] = {
+                "first_name": e.get("first_name"), "last_name": e.get("last_name"),
+                "avatar": e.get("avatar"), "role": e.get("role"),
+            }
+    return [_sanitize_idea(i, me) for i in items]
+
+
+@api.post("/ideas")
+async def create_idea(payload: IdeaCreate):
+    me = await _me()
+    idea = {
+        "id": _id(),
+        "title": payload.title.strip() or "Sans titre",
+        "description": payload.description.strip(),
+        "category": payload.category or "Autres",
+        "author_id": me["id"],
+        "is_anonymous": bool(payload.is_anonymous),
+        "status": "new",
+        "admin_response": None,
+        "votes": {},
+        "created_at": _now(),
+    }
+    await db.ideas.insert_one(idea.copy())
+    return _sanitize_idea(idea, me)
+
+
+@api.post("/ideas/{idea_id}/vote")
+async def vote_idea(idea_id: str, direction: str):
+    """direction: up | down | clear"""
+    me = await _me()
+    idea = await db.ideas.find_one({"id": idea_id}, {"_id": 0})
+    if not idea:
+        raise HTTPException(404, "Idée introuvable")
+    if direction not in ("up", "down", "clear"):
+        raise HTTPException(400, "Direction invalide (up|down|clear)")
+    votes = idea.get("votes") or {}
+    if direction == "clear":
+        votes.pop(me["id"], None)
+    else:
+        votes[me["id"]] = direction
+    await db.ideas.update_one({"id": idea_id}, {"$set": {"votes": votes}})
+    fresh = await db.ideas.find_one({"id": idea_id}, {"_id": 0})
+    return _sanitize_idea(fresh, me)
+
+
+@api.put("/admin/ideas/{idea_id}")
+async def moderate_idea(idea_id: str, payload: IdeaModerate):
+    me = await require_admin()
+    idea = await db.ideas.find_one({"id": idea_id}, {"_id": 0})
+    if not idea:
+        raise HTTPException(404, "Idée introuvable")
+    updates: dict = {}
+    if payload.status is not None:
+        if payload.status not in IDEA_STATUSES:
+            raise HTTPException(400, f"Statut invalide : {payload.status}")
+        updates["status"] = payload.status
+    if payload.admin_response is not None:
+        updates["admin_response"] = payload.admin_response
+        updates["moderated_by"] = me["id"]
+        updates["moderated_at"] = _now()
+    if updates:
+        await db.ideas.update_one({"id": idea_id}, {"$set": updates})
+    fresh = await db.ideas.find_one({"id": idea_id}, {"_id": 0})
+    # If it was submitted non-anonymously, notify the author of the status change
+    if not fresh.get("is_anonymous") and payload.status and payload.status != idea.get("status"):
+        await _push_notification(
+            employee_id=fresh["author_id"],
+            type="idea",
+            title="Mise à jour de votre idée",
+            content=f"« {fresh['title']} » — statut : {payload.status}",
+            icon="lightbulb",
+            link="/idees",
+        )
+    return _sanitize_idea(fresh, me)
+
+
+@api.delete("/admin/ideas/{idea_id}")
+async def delete_idea(idea_id: str):
+    await require_admin()
+    await db.ideas.delete_one({"id": idea_id})
+    return {"ok": True}
 
 
 # ─── Admin: Menu / Products CRUD
@@ -2198,6 +2480,11 @@ async def create_order(payload: OrderCreate):
     info = await meal_points_today()
     remaining = info["remaining"]
     points_used = min(remaining, total_points)
+    # Split: consume birthday bonus first, then daily quota
+    bb = info.get("birthday_bonus")
+    bonus_pool = bb["remaining"] if bb else 0
+    points_bonus = min(bonus_pool, points_used)
+    points_daily = points_used - points_bonus
     points_left_to_pay = max(0, total_points - points_used)
     surcharge_eur = round(points_left_to_pay * (total_eur / total_points) if total_points else 0, 2)
 
@@ -2208,6 +2495,8 @@ async def create_order(payload: OrderCreate):
         "items": line_items,
         "total_points": total_points,
         "points_used": points_used,
+        "points_used_bonus": points_bonus,
+        "points_used_daily": points_daily,
         "surcharge_eur": surcharge_eur,
         "pickup_point": pickup_point,
         "pickup_date": payload.pickup_date,
@@ -2217,18 +2506,26 @@ async def create_order(payload: OrderCreate):
         "created_at": _now(),
     }
     await db.orders.insert_one(order.copy())
-    # Record transaction
+    # Record transaction (split fields so meal_points_today can display it accurately)
     if points_used > 0:
         await db.meal_tx.insert_one({
             "id": _id(),
             "employee_id": current_user(),
             "ts": _now(),
             "points_spent": points_used,
+            "points_daily": points_daily,
+            "points_bonus": points_bonus,
             "surcharge_eur": surcharge_eur,
             "location": payload.pickup_point,
             "items": [{"name": li["name"], "quantity": li["quantity"]} for li in line_items],
             "order_id": order_id,
         })
+        # Decrement birthday bonus balance
+        if points_bonus > 0:
+            await db.employees.update_one(
+                {"id": current_user()},
+                {"$inc": {"birthday_bonus.spent": points_bonus}},
+            )
     return await _strip(order)
 
 
@@ -3156,7 +3453,48 @@ async def list_partners():
 # ─── Channels & messages
 @api.get("/channels")
 async def list_channels():
-    return await db.channels.find({}, {"_id": 0}).to_list(100)
+    """Return every conversation with a live-computed `unread` count
+    based on the caller's `channel_reads` timestamp for that channel."""
+    uid = current_user()
+    channels = await db.channels.find({}, {"_id": 0}).to_list(200)
+    # Fetch all read markers for the caller in one round-trip
+    reads = await db.channel_reads.find({"employee_id": uid}, {"_id": 0}).to_list(500)
+    read_map = {r["channel_id"]: r.get("last_read_ts") for r in reads}
+    for c in channels:
+        last_read = read_map.get(c["id"])
+        query = {"channel_id": c["id"], "author_id": {"$ne": uid}}
+        if last_read:
+            query["ts"] = {"$gt": last_read}
+        count = await db.messages.count_documents(query)
+        c["unread"] = count
+        c["unread_count"] = count
+        # Attach a small preview + last message ts for the sidebar rendering
+        last = await db.messages.find_one({"channel_id": c["id"]}, {"_id": 0}, sort=[("ts", -1)])
+        if last:
+            c["last_message_ts"] = last.get("ts")
+            c["last_message_preview"] = (last.get("content") or "")[:120]
+            c["last_message_author_id"] = last.get("author_id")
+    return channels
+
+
+@api.post("/channels/{cid}/read")
+async def mark_channel_read(cid: str):
+    """Mark every message of this channel as read for the caller."""
+    uid = current_user()
+    ch = await db.channels.find_one({"id": cid}, {"_id": 0})
+    if not ch:
+        raise HTTPException(404, "Conversation introuvable")
+    await db.channel_reads.update_one(
+        {"employee_id": uid, "channel_id": cid},
+        {"$set": {"employee_id": uid, "channel_id": cid, "last_read_ts": _now()}},
+        upsert=True,
+    )
+    # Also mark linked "message" notifications as read
+    await db.notifications.update_many(
+        {"employee_id": uid, "type": "message", "link": {"$regex": f"channel={cid}"}, "read": False},
+        {"$set": {"read": True}},
+    )
+    return {"ok": True}
 
 
 @api.get("/channels/{cid}/messages")
@@ -5024,6 +5362,8 @@ async def attach_current_user(request: Request, call_next):
 async def on_start():
     await _seed_once()
     await _seed_extra_products()
+    # Idempotent post-seed backfills (always run so demo data stays realistic).
+    await _seed_birth_dates()
     try:
         await _seed_formations()
     except Exception as e:
@@ -5049,6 +5389,32 @@ async def on_start():
     await _seed_marcus_week()
     # Clean up any duplicate schedule rows for the same (employee_id, day)
     await _dedupe_schedules()
+
+
+async def _seed_birth_dates():
+    """Ensure every demo employee has a birth_date. Idriss is today (for demo popup)."""
+    today = date.today()
+    plan = {
+        "emp-idriss-malonga": today.isoformat(),  # 🎂 today for the demo popup
+        "emp-marcus-simeo": "1985-03-12",
+        "emp-sophie": "1992-04-05",
+        "emp-thomas": "1990-05-21",
+        "emp-emma": "1996-06-14",
+        "emp-karim": "1988-08-02",
+        "emp-julie": "1994-09-27",
+        "emp-lucas": "1991-10-11",
+        "emp-amelie": "1993-11-30",
+        "emp-noah": "1997-12-18",
+        "emp-leila": "1989-01-25",
+        "emp-pierre": "1987-02-08",
+        "emp-camille": "1995-04-19",
+        "emp-super-admin": "1980-06-01",
+    }
+    for eid, bd in plan.items():
+        await db.employees.update_one(
+            {"id": eid, "$or": [{"birth_date": None}, {"birth_date": {"$exists": False}}]},
+            {"$set": {"birth_date": bd}},
+        )
 
 
 async def _dedupe_schedules():

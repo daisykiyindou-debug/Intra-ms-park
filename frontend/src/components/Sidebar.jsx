@@ -23,6 +23,8 @@ import {
   Edit3,
   Mail,
   Camera,
+  Cake,
+  Lightbulb,
   Receipt,
   Clock,
   GraduationCap,
@@ -57,6 +59,8 @@ const employeeNav = [
   { to: "/agenda", label: "Agenda", icon: Calendar, key: "agenda" },
   { to: "/formations", label: "Formation", icon: GraduationCap, key: "formations" },
   { to: "/galerie", label: "Galerie photos", icon: Camera, key: "gallery" },
+  { to: "/idees", label: "Boîte à idées", icon: Lightbulb, key: "ideas" },
+  { to: "/anniversaires", label: "Anniversaires", icon: Cake, key: "birthdays" },
 
   { divider: "Support & IT" },
   { to: "/support", label: "Support Informatique", icon: LifeBuoy, key: "support" },

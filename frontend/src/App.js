@@ -31,6 +31,9 @@ import NotesDeFrais from "@/pages/NotesDeFrais";
 import { HRDocView } from "@/pages/HRDocs";
 import FormationsList from "@/pages/Formations";
 import SupportITList, { TicketDetail, CentreAide } from "@/pages/Support";
+import Ideas from "@/pages/Ideas";
+import Birthdays from "@/pages/Birthdays";
+import BirthdayGate from "@/components/BirthdayGate";
 
 function ProtectedShell() {
   const isOut = typeof window !== "undefined" && localStorage.getItem("ms_logged_out") === "1";
@@ -126,12 +129,15 @@ function App() {
               <Route path="/support/tickets/:id" element={<TicketDetail />} />
               <Route path="/aide" element={<CentreAide />} />
               <Route path="/avantages" element={<Avantages />} />
+              <Route path="/idees" element={<Ideas />} />
+              <Route path="/anniversaires" element={<Birthdays />} />
               <Route path="/contacts" element={<Contacts />} />
               <Route path="/profil" element={<Profil />} />
               <Route path="/management/*" element={<ManagementShell />} />
             </Route>
           </Routes>
         </BrowserRouter>
+        <BirthdayGate />
         <Toaster position="top-right" richColors />
       </div>
     </AppContext.Provider>

@@ -1,16 +1,22 @@
 import { useEffect, useRef, useState } from "react";
-import { Bell, Menu, Search, LogOut, User, ShieldCheck } from "lucide-react";
+import { Bell, Menu, Search, LogOut, User, ShieldCheck, Cake } from "lucide-react";
 import { useNavigate, Link } from "react-router-dom";
 import { useApp } from "@/contexts/AppContext";
-import { setAuthId } from "@/lib/api";
+import { api, setAuthId } from "@/lib/api";
 
 export default function Header({ onMenuClick, onNotifClick }) {
   const { me, notifications, adminMode, toggleAdminMode } = useApp();
   const canToggleAdmin = !!me && (me.is_admin || me.can_manage_communication);
   const unread = notifications.filter((n) => !n.read).length;
   const [open, setOpen] = useState(false);
+  const [isBirthday, setIsBirthday] = useState(false);
   const ref = useRef(null);
   const navigate = useNavigate();
+
+  useEffect(() => {
+    if (!me?.id) return;
+    api.get("/me/birthday").then((r) => setIsBirthday(!!r.data?.is_birthday_today)).catch(() => {});
+  }, [me?.id]);
 
   useEffect(() => {
     const onClick = (e) => {
@@ -95,8 +101,17 @@ export default function Header({ onMenuClick, onNotifClick }) {
               className="flex items-center gap-3 pl-2 md:pl-3 border-l border-[#071B34]/8 cursor-pointer rounded-xl hover:bg-[#071B34]/5 px-2 py-1 transition-colors"
             >
               <div className="hidden md:block text-right">
-                <div className="text-sm font-semibold text-[#071B34] leading-tight">
+                <div className="text-sm font-semibold text-[#071B34] leading-tight inline-flex items-center gap-1.5">
                   {me.first_name} {me.last_name}
+                  {isBirthday && (
+                    <span
+                      title="C'est votre anniversaire aujourd'hui !"
+                      className="inline-flex items-center justify-center h-5 w-5 rounded-full bg-gradient-to-br from-[#F0ABFC] to-[#A78BFA] text-white shadow-sm animate-pulse"
+                      data-testid="header-birthday-cake"
+                    >
+                      <Cake className="h-3 w-3" />
+                    </span>
+                  )}
                 </div>
                 <div className="text-xs text-[#475569]">{me.role}</div>
               </div>
