@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Bell, Menu, Search, LogOut, User, ShieldCheck, Cake } from "lucide-react";
+import { Bell, Menu, Search, LogOut, User, ShieldCheck, Cake, Mail, MessageSquare } from "lucide-react";
 import { useNavigate, Link } from "react-router-dom";
 import { useApp } from "@/contexts/AppContext";
 import { api, setAuthId } from "@/lib/api";
@@ -7,16 +7,43 @@ import { api, setAuthId } from "@/lib/api";
 export default function Header({ onMenuClick, onNotifClick }) {
   const { me, notifications, adminMode, toggleAdminMode } = useApp();
   const canToggleAdmin = !!me && (me.is_admin || me.can_manage_communication);
-  const unread = notifications.filter((n) => !n.read).length;
+
+  const messageNotifs = notifications.filter((n) => n.type === "message");
+  const otherNotifs = notifications.filter((n) => n.type !== "message");
+  const unreadOther = otherNotifs.filter((n) => !n.read).length;
+  const unreadMessages = messageNotifs.filter((n) => !n.read).length;
+
   const [open, setOpen] = useState(false);
+  const [msgOpen, setMsgOpen] = useState(false);
   const [isBirthday, setIsBirthday] = useState(false);
   const ref = useRef(null);
+  const msgRef = useRef(null);
   const navigate = useNavigate();
 
   useEffect(() => {
     if (!me?.id) return;
     api.get("/me/birthday").then((r) => setIsBirthday(!!r.data?.is_birthday_today)).catch(() => {});
   }, [me?.id]);
+
+  // Close menus on outside click
+  useEffect(() => {
+    const onClick = (e) => {
+      if (msgRef.current && !msgRef.current.contains(e.target)) setMsgOpen(false);
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onClick);
+    return () => document.removeEventListener("mousedown", onClick);
+  }, []);
+
+  const openMessage = (n) => {
+    setMsgOpen(false);
+    // Extract channel id from link like /messagerie?ch=xxx
+    let target = n.link || "/messagerie";
+    if (!target.startsWith("/messagerie")) target = "/messagerie";
+    // Mark this notification as read
+    api.post(`/notifications/${n.id}/read`).catch(() => {});
+    navigate(target);
+  };
 
   useEffect(() => {
     const onClick = (e) => {
@@ -79,6 +106,69 @@ export default function Header({ onMenuClick, onNotifClick }) {
             </span>
           </button>
         )}
+        <div ref={msgRef} className="relative">
+          <button
+            onClick={() => setMsgOpen((s) => !s)}
+            data-testid="msg-notif-button"
+            className="relative flex h-10 w-10 items-center justify-center rounded-xl bg-white border border-[#071B34]/8 hover:border-[#3BA4FF]/40 hover:shadow-[0_4px_14px_rgba(59,164,255,0.15)] transition-all"
+            aria-label="Messages personnels"
+            title="Messages personnels"
+          >
+            <Mail className="h-4 w-4 text-[#071B34]" />
+            {unreadMessages > 0 && (
+              <span className="absolute -top-1 -right-1 flex h-5 min-w-[20px] items-center justify-center rounded-full bg-[#3BA4FF] px-1 text-[10px] font-bold text-white shadow-md">
+                {unreadMessages}
+              </span>
+            )}
+          </button>
+          {msgOpen && (
+            <div className="absolute right-0 top-12 z-40 w-80 max-w-[calc(100vw-24px)] rounded-2xl bg-white shadow-2xl ring-1 ring-[#071B34]/10 overflow-hidden">
+              <div className="px-4 py-3 border-b border-[#071B34]/5 flex items-center justify-between">
+                <div className="inline-flex items-center gap-2 text-sm font-bold text-[#071B34]">
+                  <MessageSquare className="h-4 w-4" /> Messages personnels
+                </div>
+                {unreadMessages > 0 && (
+                  <span className="text-[10px] uppercase tracking-widest text-[#1D70B8] font-bold bg-[#3BA4FF]/10 rounded-full px-2 py-0.5">
+                    {unreadMessages} non lus
+                  </span>
+                )}
+              </div>
+              <div className="max-h-80 overflow-y-auto">
+                {messageNotifs.length === 0 && (
+                  <div className="p-6 text-center text-sm text-[#475569]">
+                    Aucun message personnel.
+                  </div>
+                )}
+                {messageNotifs.slice(0, 12).map((n) => (
+                  <button
+                    key={n.id}
+                    onClick={() => openMessage(n)}
+                    data-testid={`msg-notif-${n.id}`}
+                    className={`w-full text-left px-3 py-2.5 flex items-start gap-2 border-b border-[#071B34]/5 transition-colors hover:bg-[#F4F7FA] ${!n.read ? "bg-[#3BA4FF]/5" : ""}`}
+                  >
+                    <div className="h-8 w-8 rounded-full bg-[#3BA4FF]/15 text-[#1D70B8] flex items-center justify-center shrink-0">
+                      <MessageSquare className="h-4 w-4" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className={`text-xs font-semibold truncate ${!n.read ? "text-[#071B34]" : "text-[#334155]"}`}>{n.title}</div>
+                      <div className="text-[11px] text-[#475569] truncate">{n.content}</div>
+                      <div className="text-[10px] text-[#94A3B8] mt-0.5">
+                        {new Date(n.created_at).toLocaleString("fr-FR", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
+                      </div>
+                    </div>
+                    {!n.read && <span className="h-2 w-2 rounded-full bg-[#3BA4FF] shrink-0 mt-1" />}
+                  </button>
+                ))}
+              </div>
+              <button
+                onClick={() => { setMsgOpen(false); navigate("/messagerie"); }}
+                className="w-full py-2.5 text-sm font-semibold text-[#3BA4FF] hover:bg-[#3BA4FF]/5 border-t border-[#071B34]/5"
+              >
+                Ouvrir la messagerie →
+              </button>
+            </div>
+          )}
+        </div>
         <button
           onClick={onNotifClick}
           data-testid="notif-button"
@@ -86,9 +176,9 @@ export default function Header({ onMenuClick, onNotifClick }) {
           aria-label="Notifications"
         >
           <Bell className="h-4 w-4 text-[#071B34]" />
-          {unread > 0 && (
+          {unreadOther > 0 && (
             <span className="absolute -top-1 -right-1 flex h-5 min-w-[20px] items-center justify-center rounded-full bg-[#EF4444] px-1 text-[10px] font-bold text-white shadow-md">
-              {unread}
+              {unreadOther}
             </span>
           )}
         </button>

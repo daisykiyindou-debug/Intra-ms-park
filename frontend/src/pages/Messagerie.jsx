@@ -3,6 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import {
   Send, Smile, Paperclip, Phone, Video, Search, Users, Plus, X, ArrowLeft,
   Info, MoreVertical, MessageSquare, SlidersHorizontal, Star, Pencil, Trash2, Archive,
+  Cake, Check, BellOff, CheckCheck, User as UserIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
@@ -30,6 +31,14 @@ function initials(name) {
     .toUpperCase();
 }
 
+// Helper — is today the person's birthday? (based on birth_date on the employee)
+function isBirthdayToday(emp) {
+  if (!emp?.birth_date) return false;
+  const bd = new Date(emp.birth_date);
+  const now = new Date();
+  return bd.getDate() === now.getDate() && bd.getMonth() === now.getMonth();
+}
+
 export default function Messagerie() {
   const { me, employees, findEmployee } = useApp();
   const [channels, setChannels] = useState([]);
@@ -48,6 +57,10 @@ export default function Messagerie() {
   const [favorites, setFavorites] = useState(
     () => new Set(JSON.parse(localStorage.getItem("msgFavs") || "[]"))
   );
+  const [showFilters, setShowFilters] = useState(false);
+  const [showActions, setShowActions] = useState(false);
+  const [showInfo, setShowInfo] = useState(false);
+  const [filterKind, setFilterKind] = useState("all"); // all | dm | group | unread | archived
   const scrollRef = useRef(null);
   const inputRef = useRef(null);
 
@@ -98,16 +111,35 @@ export default function Messagerie() {
       .filter((c) => !c.archived)
       .map((c) => {
         const isDm = c.is_dm;
-        const otherId = isDm ? (c.members_ids || []).find((id) => id !== me?.id) : null;
+        // Resolve the "other" participant. Prefer members_ids when present,
+        // fall back to the encoded DM id pattern `dm-<employee_id>`.
+        let otherId = null;
+        if (isDm) {
+          if (Array.isArray(c.members_ids)) {
+            otherId = c.members_ids.find((id) => id !== me?.id);
+          }
+          if (!otherId && typeof c.id === "string" && c.id.startsWith("dm-")) {
+            const enc = c.id.slice(3);
+            if (enc && enc !== me?.id) otherId = enc;
+          }
+        }
         const other = otherId ? findEmployee(otherId) : null;
-        const displayName = c.name || (other ? `${other.first_name} ${other.last_name}` : "Conversation");
-        const subtitle = other?.role || (c.is_group ? `${(c.members_ids || []).length} membres` : "");
+        // For DMs we ALWAYS use the other member's identity (never c.name)
+        // so the displayed avatar and displayed name are always coherent.
+        const displayName = isDm
+          ? (other ? `${other.first_name} ${other.last_name}` : (c.name || "Conversation"))
+          : (c.name || "Conversation");
+        const subtitle = isDm
+          ? (other?.role || "")
+          : (c.is_group ? `${(c.members_ids || []).length} membres` : "Conversation d'équipe");
         return {
           ...c,
           _display_name: displayName,
           _subtitle: subtitle,
-          _avatar: other?.avatar || null,
+          _avatar: isDm ? (other?.avatar || null) : null,
+          _other: other,
           _kind: isDm ? "dm" : c.is_group ? "group" : "team",
+          _is_birthday: isBirthdayToday(other),
         };
       })
       .sort((a, b) => (b.last_message_ts || b.created_at || "").localeCompare(a.last_message_ts || a.created_at || ""));
@@ -117,12 +149,15 @@ export default function Messagerie() {
     let list = conversations;
     if (tab === "unread") list = list.filter((c) => (c.unread_count || 0) > 0);
     if (tab === "favorites") list = list.filter((c) => favorites.has(c.id));
+    if (filterKind === "dm") list = list.filter((c) => c._kind === "dm");
+    if (filterKind === "group") list = list.filter((c) => c._kind === "group" || c._kind === "team");
+    if (filterKind === "unread") list = list.filter((c) => (c.unread_count || 0) > 0);
     if (q.trim()) {
       const needle = q.toLowerCase();
       list = list.filter((c) => (c._display_name || "").toLowerCase().includes(needle) || (c.last_message_preview || "").toLowerCase().includes(needle));
     }
     return list;
-  }, [conversations, tab, favorites, q]);
+  }, [conversations, tab, favorites, q, filterKind]);
 
   const counts = useMemo(() => ({
     all: conversations.length,
@@ -140,6 +175,34 @@ export default function Messagerie() {
     setDraft("");
     inputRef.current?.focus();
     loadChannels();
+  };
+
+  const archiveActive = async () => {
+    if (!active) return;
+    if (!window.confirm("Archiver cette conversation ? Elle n'apparaîtra plus dans vos messages.")) return;
+    try {
+      await api.post(`/channels/${active}/archive`);
+      toast.success("Conversation archivée");
+      setActive(null);
+      setShowActions(false);
+      loadChannels();
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Impossible d'archiver");
+    }
+  };
+
+  const deleteActive = async () => {
+    if (!active) return;
+    if (!window.confirm("Supprimer définitivement cette conversation et son historique ?")) return;
+    try {
+      await api.delete(`/channels/${active}`);
+      toast.success("Conversation supprimée");
+      setActive(null);
+      setShowActions(false);
+      loadChannels();
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Impossible de supprimer");
+    }
   };
 
   const startDm = async (empId) => {
@@ -220,13 +283,44 @@ export default function Messagerie() {
                 className="w-full h-10 pl-9 pr-3 rounded-xl bg-[#F4F7FA] focus:bg-white focus:ring-2 focus:ring-[#3BA4FF]/30 outline-none text-sm"
               />
             </div>
-            <button
-              className="h-10 w-10 rounded-xl bg-[#F4F7FA] hover:bg-[#071B34]/5 inline-flex items-center justify-center text-[#475569]"
-              title="Filtres"
-              aria-label="Filtres"
-            >
-              <SlidersHorizontal className="h-4 w-4" />
-            </button>
+            <div className="relative">
+              <button
+                onClick={() => setShowFilters((s) => !s)}
+                className={`h-10 w-10 rounded-xl inline-flex items-center justify-center transition-colors ${
+                  showFilters || filterKind !== "all"
+                    ? "bg-[#3BA4FF]/15 text-[#1D70B8]"
+                    : "bg-[#F4F7FA] hover:bg-[#071B34]/5 text-[#475569]"
+                }`}
+                title="Filtres"
+                aria-label="Filtres"
+                data-testid="msg-filter"
+              >
+                <SlidersHorizontal className="h-4 w-4" />
+              </button>
+              {showFilters && (
+                <div className="absolute right-0 top-11 z-30 w-56 rounded-2xl bg-white shadow-lg ring-1 ring-[#071B34]/10 overflow-hidden">
+                  <div className="px-3 py-2 text-[10px] uppercase tracking-widest font-semibold text-[#475569] border-b border-[#071B34]/5">
+                    Filtrer par type
+                  </div>
+                  {[
+                    { k: "all", l: "Toutes les conversations", i: MessageSquare },
+                    { k: "dm", l: "Messages privés (1-1)", i: UserIcon },
+                    { k: "group", l: "Groupes & équipes", i: Users },
+                    { k: "unread", l: "Non lues seulement", i: BellOff },
+                  ].map((o) => (
+                    <button
+                      key={o.k}
+                      onClick={() => { setFilterKind(o.k); setShowFilters(false); }}
+                      data-testid={`msg-filter-${o.k}`}
+                      className={`w-full text-left px-3 py-2 flex items-center gap-2 text-sm hover:bg-[#F4F7FA] ${filterKind === o.k ? "bg-[#3BA4FF]/8 text-[#1D70B8] font-semibold" : "text-[#334155]"}`}
+                    >
+                      <o.i className="h-4 w-4" /> {o.l}
+                      {filterKind === o.k && <Check className="h-3.5 w-3.5 ml-auto" />}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
             <button
               onClick={() => setComposer("dm")}
               className="h-10 w-10 rounded-xl bg-[#3BA4FF] hover:bg-[#2A8DE0] text-white inline-flex items-center justify-center"
@@ -277,10 +371,15 @@ export default function Messagerie() {
                 key={c.id}
                 onClick={() => { setActive(c.id); setSearchParams({ ch: c.id }); setMobileShowChat(true); }}
                 data-testid={`msg-conv-${c.id}`}
-                className={`w-full text-left px-3 py-3 border-b border-[#071B34]/5 transition-colors flex items-center gap-3 ${
-                  active === c.id ? "bg-[#3BA4FF]/8" : "hover:bg-[#F4F7FA]"
+                className={`w-full text-left px-3 py-3 border-b border-[#071B34]/5 transition-all flex items-center gap-3 relative ${
+                  active === c.id
+                    ? "bg-gradient-to-r from-[#3BA4FF]/15 to-[#3BA4FF]/5"
+                    : "hover:bg-[#F4F7FA]"
                 }`}
               >
+                {active === c.id && (
+                  <span className="absolute left-0 top-2 bottom-2 w-1 rounded-r-full bg-[#3BA4FF]" />
+                )}
                 {c._avatar ? (
                   <img src={c._avatar} alt="" className="h-11 w-11 rounded-full object-cover shrink-0" />
                 ) : c._kind === "group" || c._kind === "team" ? (
@@ -294,8 +393,16 @@ export default function Messagerie() {
                 )}
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between gap-2">
-                    <div className={`text-sm font-semibold truncate ${c.unread_count > 0 ? "text-[#071B34]" : "text-[#334155]"}`}>
+                    <div className={`text-sm font-semibold truncate inline-flex items-center gap-1.5 ${c.unread_count > 0 ? "text-[#071B34]" : active === c.id ? "text-[#0B2545]" : "text-[#334155]"}`}>
                       {c._display_name}
+                      {c._is_birthday && (
+                        <span
+                          title={`Anniversaire de ${c._display_name} aujourd'hui !`}
+                          className="inline-flex items-center justify-center h-4 w-4 rounded-full bg-gradient-to-br from-[#F0ABFC] to-[#A78BFA] text-white"
+                        >
+                          <Cake className="h-2.5 w-2.5" />
+                        </span>
+                      )}
                     </div>
                     <div className="text-[11px] text-[#94A3B8] shrink-0">
                       {formatTimestamp(c.last_message_ts || c.created_at)}
@@ -321,7 +428,7 @@ export default function Messagerie() {
         </aside>
 
         {/* ── RIGHT column: chat ── */}
-        <section className={`flex flex-col ${!mobileShowChat ? "hidden lg:flex" : "flex"}`}>
+        <section className={`flex flex-col relative ${!mobileShowChat ? "hidden lg:flex" : "flex"}`}>
           {!currentDisplay ? (
             <div className="flex-1 flex flex-col items-center justify-center text-center p-10">
               <div className="h-16 w-16 rounded-2xl bg-[#3BA4FF]/10 text-[#3BA4FF] flex items-center justify-center">
@@ -339,7 +446,7 @@ export default function Messagerie() {
           ) : (
             <>
               {/* Chat header */}
-              <div className="flex items-center gap-3 px-5 py-3 border-b border-[#071B34]/5">
+              <div className="flex items-center gap-3 px-5 py-3 border-b border-[#071B34]/5 relative">
                 <button
                   onClick={() => setMobileShowChat(false)}
                   className="lg:hidden h-9 w-9 rounded-lg hover:bg-[#F4F7FA] inline-flex items-center justify-center"
@@ -351,6 +458,10 @@ export default function Messagerie() {
                     <img src={currentDisplay._avatar} alt="" className="h-11 w-11 rounded-full object-cover" />
                     <span className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full bg-[#10B981] ring-2 ring-white" />
                   </div>
+                ) : currentDisplay._kind === "dm" ? (
+                  <div className="h-11 w-11 rounded-full bg-[#3BA4FF]/15 text-[#1D70B8] flex items-center justify-center font-bold">
+                    {initials(currentDisplay._display_name)}
+                  </div>
                 ) : (
                   <div className="h-11 w-11 rounded-full bg-[#EEF2FF] text-[#4338CA] flex items-center justify-center">
                     <Users className="h-5 w-5" />
@@ -358,7 +469,18 @@ export default function Messagerie() {
                 )}
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
-                    <h2 className="text-base font-bold text-[#071B34] truncate">{currentDisplay._display_name}</h2>
+                    <h2 className="text-base font-bold text-[#071B34] truncate inline-flex items-center gap-1.5">
+                      {currentDisplay._display_name}
+                      {currentDisplay._is_birthday && (
+                        <span
+                          title={`Anniversaire de ${currentDisplay._display_name} aujourd'hui !`}
+                          className="inline-flex items-center justify-center h-5 w-5 rounded-full bg-gradient-to-br from-[#F0ABFC] to-[#A78BFA] text-white shadow-sm animate-pulse"
+                          data-testid={`msg-header-cake-${currentDisplay.id}`}
+                        >
+                          <Cake className="h-3 w-3" />
+                        </span>
+                      )}
+                    </h2>
                     <button
                       onClick={() => toggleFav(currentDisplay.id)}
                       className="shrink-0"
@@ -371,12 +493,105 @@ export default function Messagerie() {
                   <div className="text-xs text-[#475569] truncate">{currentDisplay._subtitle}</div>
                 </div>
                 <div className="flex items-center gap-1">
-                  <IconBtn title="Appel audio"><Phone className="h-4 w-4" /></IconBtn>
-                  <IconBtn title="Appel vidéo"><Video className="h-4 w-4" /></IconBtn>
-                  <IconBtn title="Informations"><Info className="h-4 w-4" /></IconBtn>
-                  <IconBtn title="Plus"><MoreVertical className="h-4 w-4" /></IconBtn>
+                  <IconBtn title="Appel audio" onClick={() => toast.info("Appel audio bientôt disponible")}><Phone className="h-4 w-4" /></IconBtn>
+                  <IconBtn title="Appel vidéo" onClick={() => toast.info("Appel vidéo bientôt disponible")}><Video className="h-4 w-4" /></IconBtn>
+                  <IconBtn title="Informations" onClick={() => setShowInfo((s) => !s)} testid="msg-info-btn"><Info className="h-4 w-4" /></IconBtn>
+                  <div className="relative">
+                    <IconBtn title="Plus" onClick={() => setShowActions((s) => !s)} testid="msg-more-btn"><MoreVertical className="h-4 w-4" /></IconBtn>
+                    {showActions && (
+                      <div className="absolute right-0 top-11 z-30 w-56 rounded-2xl bg-white shadow-lg ring-1 ring-[#071B34]/10 overflow-hidden">
+                        <button
+                          onClick={() => { toggleFav(currentDisplay.id); setShowActions(false); }}
+                          className="w-full text-left px-3 py-2 flex items-center gap-2 text-sm hover:bg-[#F4F7FA] text-[#334155]"
+                        >
+                          <Star className="h-4 w-4" />
+                          {favorites.has(currentDisplay.id) ? "Retirer des favoris" : "Ajouter aux favoris"}
+                        </button>
+                        <button
+                          onClick={archiveActive}
+                          data-testid="msg-archive"
+                          className="w-full text-left px-3 py-2 flex items-center gap-2 text-sm hover:bg-[#F4F7FA] text-[#334155]"
+                        >
+                          <Archive className="h-4 w-4" /> Archiver la conversation
+                        </button>
+                        <button
+                          onClick={deleteActive}
+                          data-testid="msg-delete"
+                          className="w-full text-left px-3 py-2 flex items-center gap-2 text-sm hover:bg-[#FEE2E2] text-[#B91C1C]"
+                        >
+                          <Trash2 className="h-4 w-4" /> Supprimer la conversation
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
+
+              {/* Info side panel */}
+              {showInfo && (
+                <div className="absolute right-0 top-[57px] z-20 w-80 max-w-full bg-white shadow-2xl border-l border-[#071B34]/10 h-[calc(100%-57px)] overflow-y-auto" data-testid="msg-info-panel">
+                  <div className="px-4 py-3 border-b border-[#071B34]/5 flex items-center justify-between">
+                    <div className="text-sm font-bold text-[#071B34]">Informations</div>
+                    <button onClick={() => setShowInfo(false)} className="h-8 w-8 rounded-lg hover:bg-[#F4F7FA] inline-flex items-center justify-center">
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+                  <div className="p-4 flex flex-col items-center text-center border-b border-[#071B34]/5">
+                    {currentDisplay._avatar ? (
+                      <img src={currentDisplay._avatar} alt="" className="h-20 w-20 rounded-full object-cover" />
+                    ) : (
+                      <div className="h-20 w-20 rounded-full bg-[#3BA4FF]/15 text-[#1D70B8] flex items-center justify-center font-bold text-2xl">
+                        {initials(currentDisplay._display_name)}
+                      </div>
+                    )}
+                    <h3 className="mt-3 text-lg font-bold text-[#071B34] inline-flex items-center gap-1.5">
+                      {currentDisplay._display_name}
+                      {currentDisplay._is_birthday && <Cake className="h-4 w-4 text-[#A78BFA]" />}
+                    </h3>
+                    <div className="text-xs text-[#475569]">{currentDisplay._subtitle}</div>
+                  </div>
+                  <dl className="divide-y divide-[#071B34]/5 px-4">
+                    {currentDisplay._other?.email && (
+                      <InfoRow label="Email" value={currentDisplay._other.email} />
+                    )}
+                    {currentDisplay._other?.phone && (
+                      <InfoRow label="Téléphone" value={currentDisplay._other.phone} />
+                    )}
+                    {currentDisplay._other?.department && (
+                      <InfoRow label="Service" value={currentDisplay._other.department} />
+                    )}
+                    {currentDisplay._other?.role && (
+                      <InfoRow label="Poste" value={currentDisplay._other.role} />
+                    )}
+                    {currentDisplay._kind !== "dm" && (
+                      <InfoRow label="Membres" value={(currentDisplay.members_ids || []).length} />
+                    )}
+                    <InfoRow label="Type" value={currentDisplay._kind === "dm" ? "Message privé" : currentDisplay._kind === "group" ? "Groupe" : "Équipe"} />
+                    <InfoRow label="Créée le" value={currentDisplay.created_at ? new Date(currentDisplay.created_at).toLocaleDateString("fr-FR") : "—"} />
+                  </dl>
+                  <div className="p-4 space-y-2">
+                    <button
+                      onClick={() => toggleFav(currentDisplay.id)}
+                      className="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-[#F4F7FA] hover:bg-[#071B34]/5 py-2 text-sm font-semibold text-[#334155]"
+                    >
+                      <Star className={`h-4 w-4 ${favorites.has(currentDisplay.id) ? "fill-[#F59E0B] text-[#F59E0B]" : ""}`} />
+                      {favorites.has(currentDisplay.id) ? "Retirer des favoris" : "Ajouter aux favoris"}
+                    </button>
+                    <button
+                      onClick={archiveActive}
+                      className="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-[#F4F7FA] hover:bg-[#071B34]/5 py-2 text-sm font-semibold text-[#334155]"
+                    >
+                      <Archive className="h-4 w-4" /> Archiver
+                    </button>
+                    <button
+                      onClick={deleteActive}
+                      className="w-full inline-flex items-center justify-center gap-2 rounded-xl text-[#B91C1C] hover:bg-[#FEE2E2] py-2 text-sm font-semibold"
+                    >
+                      <Trash2 className="h-4 w-4" /> Supprimer
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {/* Messages */}
               <div ref={scrollRef} className="flex-1 overflow-y-auto px-5 py-6 space-y-4 bg-white">
@@ -556,14 +771,25 @@ export default function Messagerie() {
   );
 }
 
-function IconBtn({ children, title }) {
+function IconBtn({ children, title, onClick, testid }) {
   return (
     <button
       title={title}
+      onClick={onClick}
+      data-testid={testid}
       className="h-9 w-9 rounded-xl bg-[#F4F7FA] hover:bg-[#071B34]/5 inline-flex items-center justify-center text-[#475569]"
     >
       {children}
     </button>
+  );
+}
+
+function InfoRow({ label, value }) {
+  return (
+    <div className="flex items-center justify-between gap-3 py-2 text-sm">
+      <dt className="text-[#475569] text-xs uppercase tracking-widest font-semibold">{label}</dt>
+      <dd className="text-[#071B34] font-semibold text-right truncate max-w-[60%]">{value}</dd>
+    </div>
   );
 }
 

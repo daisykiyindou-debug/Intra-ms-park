@@ -1,0 +1,33 @@
+{
+  "summary": "Iteration 25 — Messagerie polish tested end-to-end. Backend: 9/9 pytest tests PASS in test_iter25_messagerie_polish.py (ch=<cid> regex, DM visibility incl. legacy hidden-from-owner rule, DM notif scoped to member only, envelope counter, single-notif read, birthday endpoint). Frontend (Idriss + Marcus impersonations): (1) active conversation shows blue gradient + 4px left rail ✓, (2) DM avatar/name uses OTHER person's photo (Marcus DM header shows Idriss's real photo when logged as Marcus) ✓, (3) 3-dot menu exposes msg-archive + msg-delete (+favorite toggle) ✓, (4) Info button opens msg-info-panel with email/phone/service/poste/type ✓, (5) Filter dropdown has 4 options and dm-filter narrows list to 1 as expected ✓, (6) Cake pill appears next to Idriss's name in the conversation list AND in the chat header (data-testid msg-header-cake-<cid>) when Marcus opens DM with Idriss ✓, (7) Header envelope (msg-notif-button) shows unread=1 badge, Bell (notif-button) shows 0 → no badge; envelope dropdown lists 4 message notifs (data-testid msg-notif-<id>); clicking navigates to /messagerie?ch=<cid> and calls POST /notifications/{id}/read ✓, (8) DM messages NOT broadcast — Idriss (non-member) has no notif for a Marcus↔Lucas DM ✓, (9) ch=<cid> regex marks message notifs read on POST /channels/{id}/read ✓. Ideas + Birthdays regression endpoints still 200.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Messagerie list (Marcus)", "issues": ["Duplicate DM rows with Idriss visible — legacy id 'dm-emp-idriss-malonga' + new sorted id 'dm-emp-idriss-malonga--emp-marcus-simeo' both surface. Backend list_channels correctly keeps both (legacy is visitor-visible), but from UX standpoint the same contact shows twice. Not introduced by iter25; noted for future consolidation."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter25_messagerie_polish.py",
+    "/app/test_reports/pytest/iter25.xml"
+  ],
+  "action_items": [
+    "(Optional/future) Consider migrating any remaining legacy 'dm-<empId>' channels into the new sorted 'dm-<a>--<b>' format so the same DM does not appear twice in either user's list."
+  ],
+  "critical_code_review_comments": [
+    "server.py still 6757 lines — split into modules (channels, notifications, ideas, birthdays…) for maintainability.",
+    "create_group() uses field 'member_ids' while create_dm() uses 'members_ids' — inconsistent. list_channels filter uses 'members_ids' so groups may not be filtered by participation the same way as DMs. Not part of iter25 scope but should be unified.",
+    "Messagerie.jsx: showFilters/showActions/showInfo dropdowns are not closed on outside click (only Escape closes info panel). Minor UX polish."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter25_messagerie_polish.py"
+  ],
+  "success_rate": {"backend": "100% (9/9)", "frontend": "100% (10/10 features)"},
+  "test_credentials": "Idriss: emp-idriss-malonga (birthday today). Marcus: emp-marcus-simeo (admin). Lucas: emp-lucas.",
+  "seed_data_creation": "Tests create TEST_iter25 messages inside DM channels. Notifications get created + read as part of test cases; no cleanup needed (they self-mark read).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iter25 tests live in /app/backend/tests/test_iter25_messagerie_polish.py (9 tests, all green). Idriss has both legacy dm-emp-idriss-malonga and new dm-emp-idriss-malonga--emp-marcus-simeo channels. Marcus viewing either shows Idriss's cake + photo correctly. Envelope badge tested at value=1 when 1 unread message notif exists; bell hidden when 0 non-message unreads.",
+  "rca of the issue": "N/A — no bugs found. All 10 iteration-25 features work correctly on backend and frontend."
+}

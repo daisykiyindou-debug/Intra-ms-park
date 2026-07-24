@@ -3456,7 +3456,26 @@ async def list_channels():
     """Return every conversation with a live-computed `unread` count
     based on the caller's `channel_reads` timestamp for that channel."""
     uid = current_user()
-    channels = await db.channels.find({}, {"_id": 0}).to_list(200)
+    all_channels = await db.channels.find({}, {"_id": 0}).to_list(200)
+    # Filter DMs to only those where current user is a participant.
+    # Legacy DMs (id = `dm-<empId>`) are considered participants if either uid
+    # matches the encoded employee OR the caller is the counterpart.
+    def _is_dm_participant(c):
+        if not c.get("is_dm"):
+            return True
+        members = c.get("members_ids") or []
+        if uid in members:
+            return True
+        # legacy pattern dm-<empId> — this is the "inbox" of employee <empId>.
+        # Historically it acted as a public wall; for the current UX it makes
+        # no sense to show it to the owner (looks like a self-DM), only to
+        # visitors so they can leave a message.
+        cid = c.get("id", "")
+        if cid.startswith("dm-") and "--" not in cid:
+            encoded = cid[3:]
+            return encoded != uid  # hide own inbox, keep for visitors
+        return False
+    channels = [c for c in all_channels if _is_dm_participant(c)]
     # Fetch all read markers for the caller in one round-trip
     reads = await db.channel_reads.find({"employee_id": uid}, {"_id": 0}).to_list(500)
     read_map = {r["channel_id"]: r.get("last_read_ts") for r in reads}
@@ -3491,7 +3510,8 @@ async def mark_channel_read(cid: str):
     )
     # Also mark linked "message" notifications as read
     await db.notifications.update_many(
-        {"employee_id": uid, "type": "message", "link": {"$regex": f"channel={cid}"}, "read": False},
+        {"employee_id": uid, "type": "message",
+         "link": {"$regex": f"(channel|ch)={cid}"}, "read": False},
         {"$set": {"read": True}},
     )
     return {"ok": True}
@@ -3514,7 +3534,8 @@ async def post_message(cid: str, payload: MessageCreate):
         "ts": _now(),
     }
     await db.messages.insert_one(msg.copy())
-    # Notify other employees about the new message on this channel
+    # Notify only channel members (DM: the other person; group: every member;
+    # team channel: broadcast fallback) — spare the whole company when a DM lands.
     ch = await db.channels.find_one({"id": cid}, {"_id": 0})
     author = await db.employees.find_one({"id": current_user()}, {"_id": 0})
     author_name = (
@@ -3525,14 +3546,31 @@ async def post_message(cid: str, payload: MessageCreate):
     if len(preview) > 90:
         preview = preview[:87] + "…"
     ch_label = (ch or {}).get("name") or cid
-    await _broadcast_notification(
-        type="message",
-        title=f"Nouveau message · #{ch_label}",
-        content=f"{author_name} : {preview or 'Nouveau message'}",
-        icon="message-circle",
-        link=f"/messagerie?channel={cid}",
-        exclude_ids=[current_user()],
-    )
+    if ch and (ch.get("is_dm") or ch.get("is_group")):
+        member_ids = [mid for mid in (ch.get("members_ids") or []) if mid != current_user()]
+        if ch.get("is_dm"):
+            title = f"Message de {author_name}"
+        else:
+            title = f"{author_name} · #{ch_label}"
+        for mid in member_ids:
+            await _push_notification(
+                employee_id=mid,
+                type="message",
+                title=title,
+                content=preview or "Nouveau message",
+                icon="message-circle",
+                link=f"/messagerie?ch={cid}",
+            )
+    else:
+        # Public team channel — keep the broadcast so followers see activity
+        await _broadcast_notification(
+            type="message",
+            title=f"Nouveau message · #{ch_label}",
+            content=f"{author_name} : {preview or 'Nouveau message'}",
+            icon="message-circle",
+            link=f"/messagerie?ch={cid}",
+            exclude_ids=[current_user()],
+        )
     return await _strip(msg)
 
 
@@ -3989,23 +4027,39 @@ async def create_dm(payload: DMCreate):
     other = await db.employees.find_one({"id": payload.employee_id}, {"_id": 0})
     if not other:
         raise HTTPException(404, "Employee not found")
-    cid = f"dm-{payload.employee_id}"
+    # Deterministic channel id for both sides — sort the two IDs alphabetically
+    a, b = sorted([current_user(), payload.employee_id])
+    cid = f"dm-{a}--{b}"
+    # Backwards compatibility: keep the legacy id `dm-<other>` if it already
+    # exists (created before we introduced sorted ids).
+    legacy_cid = f"dm-{payload.employee_id}"
     existing = await db.channels.find_one({"id": cid}, {"_id": 0})
     if not existing:
-        ch = {
-            "id": cid,
-            "name": f"{other['first_name']} {other['last_name']}",
-            "icon": "user",
-            "members": 2,
-            "unread": 0,
-            "is_dm": True,
-            "is_group": False,
-            "archived": False,
-            "avatar": other["avatar"],
-        }
-        await db.channels.insert_one(ch.copy())
-        existing = ch
-    return await _strip(existing)
+        existing = await db.channels.find_one({"id": legacy_cid}, {"_id": 0})
+    if existing:
+        # Ensure members_ids is filled for old channels
+        if not existing.get("members_ids"):
+            await db.channels.update_one(
+                {"id": existing["id"]},
+                {"$set": {"members_ids": [current_user(), payload.employee_id]}},
+            )
+            existing["members_ids"] = [current_user(), payload.employee_id]
+        return await _strip(existing)
+    ch = {
+        "id": cid,
+        "name": f"{other['first_name']} {other['last_name']}",
+        "icon": "user",
+        "members": 2,
+        "members_ids": [current_user(), payload.employee_id],
+        "unread": 0,
+        "is_dm": True,
+        "is_group": False,
+        "archived": False,
+        "avatar": other.get("avatar"),
+        "created_at": _now(),
+    }
+    await db.channels.insert_one(ch.copy())
+    return await _strip(ch)
 
 
 class GroupCreate(BaseModel):
