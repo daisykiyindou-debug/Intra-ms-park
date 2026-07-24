@@ -4687,22 +4687,69 @@ class NewsletterCreate(BaseModel):
 
 @api.get("/newsletters")
 async def list_newsletters(archived: bool = False, category: Optional[str] = None, q: Optional[str] = None):
+    me = await _me()
     query: dict = {"archived": archived}
     if category:
         query["category"] = category
     items = await db.newsletters.find(query, {"_id": 0}).sort("published_at", -1).to_list(200)
+    # Draft visibility: only author (or admin) can see unpublished newsletters
+    def _visible(n):
+        if n.get("published"):
+            return True
+        # Draft — only author or admin
+        return n.get("author_id") == me["id"] or me.get("is_admin")
+    items = [n for n in items if _visible(n)]
     if q:
         needle = q.lower()
         items = [n for n in items if needle in (n.get("title", "") + n.get("subject", "") + n.get("category", "")).lower()]
+    # Attach my read status
+    reads = await db.newsletter_reads.find({"employee_id": me["id"]}, {"newsletter_id": 1, "_id": 0}).to_list(500)
+    read_ids = {r["newsletter_id"] for r in reads}
+    for n in items:
+        n["me_read"] = n["id"] in read_ids
     return items
 
 
 @api.get("/newsletters/{nid}")
 async def get_newsletter(nid: str):
+    me = await _me()
     n = await db.newsletters.find_one({"id": nid}, {"_id": 0})
     if not n:
         raise HTTPException(404, "Newsletter introuvable")
+    # Auto-mark as read on detail fetch
+    if n.get("published"):
+        await db.newsletter_reads.update_one(
+            {"employee_id": me["id"], "newsletter_id": nid},
+            {"$set": {"employee_id": me["id"], "newsletter_id": nid, "read_at": _now()}},
+            upsert=True,
+        )
+    r = await db.newsletter_reads.find_one({"employee_id": me["id"], "newsletter_id": nid})
+    n["me_read"] = bool(r)
     return n
+
+
+@api.post("/newsletters/{nid}/bookmark")
+async def toggle_newsletter_bookmark(nid: str):
+    me = await _me()
+    existing = await db.newsletter_bookmarks.find_one({"employee_id": me["id"], "newsletter_id": nid})
+    if existing:
+        await db.newsletter_bookmarks.delete_one({"_id": existing["_id"]})
+        return {"bookmarked": False}
+    await db.newsletter_bookmarks.insert_one({
+        "employee_id": me["id"], "newsletter_id": nid, "created_at": _now(),
+    })
+    return {"bookmarked": True}
+
+
+@api.get("/newsletters/bookmarks/mine")
+async def list_my_newsletter_bookmarks():
+    me = await _me()
+    bks = await db.newsletter_bookmarks.find({"employee_id": me["id"]}, {"_id": 0}).sort("created_at", -1).to_list(300)
+    ids = [b["newsletter_id"] for b in bks]
+    items = await db.newsletters.find({"id": {"$in": ids}}, {"_id": 0}).to_list(300)
+    for it in items:
+        it["bookmarked"] = True
+    return items
 
 
 @api.post("/admin/newsletters")

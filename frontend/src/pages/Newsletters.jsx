@@ -13,6 +13,7 @@ import {
 import { toast } from "sonner";
 import { api, formatDateFr, absoluteUrl } from "@/lib/api";
 import { useApp } from "@/contexts/AppContext";
+import PortalModal from "@/components/PortalModal";
 
 const CATEGORIES = ["Général", "RH", "Événement", "Projet", "Procédure", "Ouverture"];
 const uid = () => Math.random().toString(36).slice(2, 10);
@@ -103,21 +104,11 @@ export default function NewslettersList() {
         )}
       </div>
 
-      <div className="rounded-3xl bg-gradient-to-br from-[#EBF4FF] to-[#DBE7FF] p-8 flex items-center justify-between gap-6 flex-wrap">
-        <div className="flex-1 min-w-[240px]">
-          <h2 className="text-2xl md:text-3xl font-bold text-[#071B34]">Restez informé, restez connecté !</h2>
-          <p className="text-sm text-[#475569] mt-2 max-w-md">
-            {"Nos newsletters vous informent sur l'actualité de l'entreprise, les projets en cours et les événements à venir."}
-          </p>
-        </div>
-        <div className="rounded-2xl bg-white p-4 max-w-xs">
-          <div className="flex items-center gap-2 text-[#071B34]">
-            <Bell className="h-4 w-4" />
-            <span className="text-sm font-bold">Ne manquez aucune newsletter</span>
-          </div>
-          <p className="text-xs text-[#475569] mt-1">{"Activez les notifications pour être prévenu dès qu'une nouvelle newsletter est publiée."}</p>
-          <button className="mt-3 w-full rounded-xl bg-[#071B34] text-white text-sm font-semibold px-4 py-2">Activer les notifications</button>
-        </div>
+      <div className="rounded-3xl bg-gradient-to-br from-[#EBF4FF] to-[#DBE7FF] p-8">
+        <h2 className="text-2xl md:text-3xl font-bold text-[#071B34]">Restez informé, restez connecté !</h2>
+        <p className="text-sm text-[#475569] mt-2 max-w-2xl">
+          Nos newsletters vous informent sur l&apos;actualité de l&apos;entreprise, les projets en cours et les événements à venir.
+        </p>
       </div>
 
       <div className="ms-card p-3 flex flex-wrap items-center gap-3">
@@ -154,7 +145,35 @@ function NewsletterCard({ nl, isEditor, onChange }) {
   const navigate = useNavigate();
   const isNew = nl.published_at && (Date.now() - new Date(nl.published_at).getTime()) < 7 * 24 * 3600 * 1000;
   const [menu, setMenu] = useState(false);
+  const [menuPos, setMenuPos] = useState({ top: 0, right: 0 });
+  const menuBtnRef = useRef(null);
+  const [bookmarked, setBookmarked] = useState(!!nl.bookmarked);
   const cover = absoluteUrl(nl.cover_image);
+  const isRead = !!nl.me_read;
+
+  const openMenu = (e) => {
+    e.stopPropagation();
+    const rect = menuBtnRef.current?.getBoundingClientRect();
+    if (rect) setMenuPos({ top: rect.bottom + 4, right: window.innerWidth - rect.right });
+    setMenu((v) => !v);
+  };
+
+  useEffect(() => {
+    if (!menu) return;
+    const close = () => setMenu(false);
+    document.addEventListener("click", close);
+    return () => document.removeEventListener("click", close);
+  }, [menu]);
+
+  const toggleBookmark = async (e) => {
+    e.stopPropagation();
+    try {
+      const { data } = await api.post(`/newsletters/${nl.id}/bookmark`);
+      setBookmarked(data.bookmarked);
+      toast.success(data.bookmarked ? "Ajouté aux signets" : "Retiré des signets");
+    } catch { toast.error("Erreur"); }
+  };
+
   return (
     <div className="ms-card overflow-hidden hover:shadow-md transition-shadow flex flex-col md:flex-row" data-testid={`nl-${nl.id}`}>
       <div
@@ -172,7 +191,8 @@ function NewsletterCard({ nl, isEditor, onChange }) {
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <h3 className="text-lg font-bold text-[#071B34] truncate">{nl.title}</h3>
-            {isNew && <span className="ms-chip bg-[#10B981]/15 text-[#047857] !text-[10px]">Nouveau</span>}
+            {isNew && !isRead && <span className="ms-chip bg-[#10B981]/15 text-[#047857] !text-[10px]">Nouveau</span>}
+            {isRead && <span className="ms-chip bg-[#94A3B8]/15 text-[#475569] !text-[10px]">Lue</span>}
             {nl.archived && <span className="ms-chip bg-[#94A3B8]/15 text-[#475569] !text-[10px]">Archivée</span>}
             {!nl.published && <span className="ms-chip bg-[#F59E0B]/15 text-[#B45309] !text-[10px]">Brouillon</span>}
           </div>
@@ -182,30 +202,49 @@ function NewsletterCard({ nl, isEditor, onChange }) {
           <p className="text-sm text-[#475569] mt-2 line-clamp-2">{nl.preheader || nl.subject}</p>
         </div>
         <div className="flex items-center gap-2 shrink-0">
-          <button onClick={() => navigate(`/newsletters/${nl.id}`)} data-testid={`nl-read-${nl.id}`} className="rounded-xl bg-[#071B34] text-white text-sm font-semibold px-4 py-2 hover:bg-[#0B2545]">
-            Lire la newsletter
+          <button
+            onClick={() => navigate(`/newsletters/${nl.id}`)}
+            data-testid={`nl-read-${nl.id}`}
+            className={`rounded-xl text-sm font-semibold px-4 py-2 transition-colors ${
+              isRead
+                ? "bg-[#F4F7FA] text-[#334155] border border-[#071B34]/10 hover:bg-[#071B34]/5"
+                : "bg-[#071B34] text-white hover:bg-[#0B2545]"
+            }`}
+          >
+            {isRead ? "Newsletter déjà lue" : "Lire la newsletter"}
           </button>
-          <button className="flex h-9 w-9 items-center justify-center rounded-xl hover:bg-[#071B34]/5"><Bookmark className="h-4 w-4" /></button>
+          <button
+            onClick={toggleBookmark}
+            data-testid={`nl-bookmark-${nl.id}`}
+            title={bookmarked ? "Retirer des signets" : "Ajouter aux signets"}
+            className={`flex h-9 w-9 items-center justify-center rounded-xl transition-colors ${bookmarked ? "text-[#3BA4FF] bg-[#3BA4FF]/10" : "text-[#475569] hover:bg-[#071B34]/5"}`}
+          >
+            <Bookmark className={`h-4 w-4 ${bookmarked ? "fill-[#3BA4FF]" : ""}`} />
+          </button>
           {isEditor && (
-            <div className="relative">
-              <button onClick={() => setMenu((v) => !v)} data-testid={`nl-menu-${nl.id}`} className="flex h-9 w-9 items-center justify-center rounded-xl hover:bg-[#071B34]/5">
-                <MoreVertical className="h-4 w-4" />
-              </button>
-              {menu && (
-                <div className="absolute right-0 top-full mt-1 z-30 w-44 rounded-xl bg-white shadow-xl border border-[#071B34]/5 py-1 text-sm">
-                  <button onClick={() => { setMenu(false); navigate(`/newsletters/${nl.id}/edit`); }} className="w-full text-left px-3 py-2 hover:bg-[#F4F7FA] flex items-center gap-2"><Edit3 className="h-3.5 w-3.5" /> Modifier</button>
-                  {!nl.archived && (
-                    <button onClick={async () => { setMenu(false); await api.post(`/admin/newsletters/${nl.id}/archive`); toast.success("Archivée"); onChange(); }} className="w-full text-left px-3 py-2 hover:bg-[#F4F7FA] flex items-center gap-2"><Archive className="h-3.5 w-3.5" /> Archiver</button>
-                  )}
-                  <button onClick={async () => {
-                    if (!window.confirm("Supprimer cette newsletter ?")) return;
-                    setMenu(false);
-                    await api.delete(`/admin/newsletters/${nl.id}`);
-                    toast.success("Supprimée"); onChange();
-                  }} className="w-full text-left px-3 py-2 hover:bg-[#FEE2E2] text-[#B91C1C] flex items-center gap-2"><Trash2 className="h-3.5 w-3.5" /> Supprimer</button>
-                </div>
-              )}
-            </div>
+            <button ref={menuBtnRef} onClick={openMenu} data-testid={`nl-menu-${nl.id}`} className="flex h-9 w-9 items-center justify-center rounded-xl hover:bg-[#071B34]/5">
+              <MoreVertical className="h-4 w-4" />
+            </button>
+          )}
+          {menu && isEditor && (
+            <PortalModal>
+              <div
+                onClick={(e) => e.stopPropagation()}
+                style={{ top: `${menuPos.top}px`, right: `${menuPos.right}px` }}
+                className="fixed z-[60] w-48 rounded-xl bg-white shadow-2xl border border-[#071B34]/8 py-1 text-sm"
+              >
+                <button onClick={() => { setMenu(false); navigate(`/newsletters/${nl.id}/edit`); }} className="w-full text-left px-3 py-2 hover:bg-[#F4F7FA] flex items-center gap-2"><Edit3 className="h-3.5 w-3.5" /> Modifier</button>
+                {!nl.archived && (
+                  <button onClick={async () => { setMenu(false); await api.post(`/admin/newsletters/${nl.id}/archive`); toast.success("Archivée"); onChange(); }} className="w-full text-left px-3 py-2 hover:bg-[#F4F7FA] flex items-center gap-2"><Archive className="h-3.5 w-3.5" /> Archiver</button>
+                )}
+                <button onClick={async () => {
+                  if (!window.confirm("Supprimer cette newsletter ?")) return;
+                  setMenu(false);
+                  await api.delete(`/admin/newsletters/${nl.id}`);
+                  toast.success("Supprimée"); onChange();
+                }} className="w-full text-left px-3 py-2 hover:bg-[#FEE2E2] text-[#B91C1C] flex items-center gap-2"><Trash2 className="h-3.5 w-3.5" /> Supprimer</button>
+              </div>
+            </PortalModal>
           )}
         </div>
       </div>
