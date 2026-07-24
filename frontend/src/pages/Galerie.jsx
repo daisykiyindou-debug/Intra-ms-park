@@ -1,8 +1,9 @@
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useCallback } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   Camera, Search, Plus, ArrowLeft, Star, Download, Upload, Trash2, X,
   Users, Calendar, ImagePlus, Heart, MoreVertical, Edit3,
+  ChevronLeft, ChevronRight,
 } from "lucide-react";
 import { toast } from "sonner";
 import { api, absoluteUrl, formatDateFr } from "@/lib/api";
@@ -118,7 +119,7 @@ export function GalerieAlbum() {
   const [g, setG] = useState(null);
   const [q, setQ] = useState("");
   const [showFav, setShowFav] = useState(false);
-  const [lightbox, setLightbox] = useState(null);
+  const [lightbox, setLightbox] = useState(null); // { index: number }
   const [editing, setEditing] = useState(false);
   const isEditor = me?.is_admin || me?.can_manage_communication;
   const canContribute = isEditor || g?.allow_contributions;
@@ -137,6 +138,33 @@ export function GalerieAlbum() {
       return true;
     });
   }, [g, q, showFav]);
+
+  // Lightbox navigation
+  const closeLightbox = useCallback(() => setLightbox(null), []);
+  const nextPhoto = useCallback(() => {
+    setLightbox((lb) => {
+      if (!lb || filtered.length === 0) return lb;
+      return { index: (lb.index + 1) % filtered.length };
+    });
+  }, [filtered.length]);
+  const prevPhoto = useCallback(() => {
+    setLightbox((lb) => {
+      if (!lb || filtered.length === 0) return lb;
+      return { index: (lb.index - 1 + filtered.length) % filtered.length };
+    });
+  }, [filtered.length]);
+
+  // Keyboard navigation while lightbox is open
+  useEffect(() => {
+    if (!lightbox) return;
+    const onKey = (e) => {
+      if (e.key === "Escape") closeLightbox();
+      else if (e.key === "ArrowRight") nextPhoto();
+      else if (e.key === "ArrowLeft") prevPhoto();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [lightbox, closeLightbox, nextPhoto, prevPhoto]);
 
   const uploadPhoto = async (e) => {
     const files = Array.from(e.target.files || []);
@@ -218,12 +246,12 @@ export function GalerieAlbum() {
         <div className="ms-card p-12 text-center text-sm text-[#475569]">Aucune photo à afficher.</div>
       ) : (
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-          {filtered.map((p) => (
+          {filtered.map((p, i) => (
             <div key={p.id} className="relative group rounded-2xl overflow-hidden aspect-square bg-[#F4F7FA]" data-testid={`photo-${p.id}`}>
               <img
                 src={absoluteUrl(p.url)}
                 alt={p.caption}
-                onClick={() => setLightbox(p)}
+                onClick={() => setLightbox({ index: i })}
                 className="w-full h-full object-cover cursor-zoom-in transition-transform group-hover:scale-105"
               />
               <div className="absolute top-2 right-2 flex items-center gap-1">
@@ -253,12 +281,71 @@ export function GalerieAlbum() {
         </div>
       )}
 
-      {lightbox && (
+      {lightbox && filtered[lightbox.index] && (
         <PortalModal>
-        <div onClick={() => setLightbox(null)} className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4">
-          <button className="absolute top-4 right-4 text-white h-10 w-10 flex items-center justify-center bg-white/10 rounded-full"><X className="h-5 w-5" /></button>
-          <img src={absoluteUrl(lightbox.url)} alt="" className="max-w-full max-h-full rounded-2xl" />
-        </div>
+          <div
+            onClick={closeLightbox}
+            className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4 select-none"
+            data-testid="album-lightbox"
+          >
+            {/* Close */}
+            <button
+              onClick={(e) => { e.stopPropagation(); closeLightbox(); }}
+              className="absolute top-4 right-4 text-white h-10 w-10 flex items-center justify-center bg-white/10 hover:bg-white/20 rounded-full transition-colors z-10"
+              aria-label="Fermer"
+              data-testid="lightbox-close"
+            >
+              <X className="h-5 w-5" />
+            </button>
+
+            {/* Counter */}
+            {filtered.length > 1 && (
+              <div className="absolute top-4 left-1/2 -translate-x-1/2 text-white/90 text-sm font-semibold bg-white/10 px-3 py-1 rounded-full backdrop-blur">
+                {lightbox.index + 1} / {filtered.length}
+              </div>
+            )}
+
+            {/* Prev arrow */}
+            {filtered.length > 1 && (
+              <button
+                onClick={(e) => { e.stopPropagation(); prevPhoto(); }}
+                className="absolute left-4 top-1/2 -translate-y-1/2 text-white h-12 w-12 flex items-center justify-center bg-white/10 hover:bg-white/25 rounded-full transition-colors z-10"
+                aria-label="Photo précédente"
+                data-testid="lightbox-prev"
+              >
+                <ChevronLeft className="h-7 w-7" />
+              </button>
+            )}
+
+            {/* Image + caption (stopPropagation so clicking image doesn't close) */}
+            <div
+              className="flex flex-col items-center max-w-full max-h-full"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <img
+                src={absoluteUrl(filtered[lightbox.index].url)}
+                alt=""
+                className="max-w-[90vw] max-h-[85vh] rounded-2xl object-contain"
+              />
+              {filtered[lightbox.index].caption && (
+                <p className="mt-3 text-sm text-white/90 max-w-[80vw] text-center">
+                  {filtered[lightbox.index].caption}
+                </p>
+              )}
+            </div>
+
+            {/* Next arrow */}
+            {filtered.length > 1 && (
+              <button
+                onClick={(e) => { e.stopPropagation(); nextPhoto(); }}
+                className="absolute right-4 top-1/2 -translate-y-1/2 text-white h-12 w-12 flex items-center justify-center bg-white/10 hover:bg-white/25 rounded-full transition-colors z-10"
+                aria-label="Photo suivante"
+                data-testid="lightbox-next"
+              >
+                <ChevronRight className="h-7 w-7" />
+              </button>
+            )}
+          </div>
         </PortalModal>
       )}
 

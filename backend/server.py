@@ -2198,7 +2198,9 @@ def _birthday_meta(bd_str: Optional[str], today: date) -> Optional[dict]:
 
 @api.get("/birthdays")
 async def list_birthdays(view: str = "upcoming", limit: int = 60):
-    """List employees sorted by their upcoming birthday (or past this year)."""
+    """List employees sorted by their upcoming birthday (or past this year).
+    Each row includes `already_wished` — True if the current user has already
+    sent a birthday wish to that employee this year."""
     today = date.today()
     employees = await db.employees.find(
         {"birth_date": {"$ne": None}, "account_status": {"$ne": "deactivated"}},
@@ -2217,7 +2219,112 @@ async def list_birthdays(view: str = "upcoming", limit: int = 60):
         results.sort(key=lambda r: r["days_until"], reverse=True)
     else:
         results.sort(key=lambda r: r["days_until"])
-    return results[:limit]
+    results = results[:limit]
+    # Enrich with `already_wished` for the caller
+    uid = current_user()
+    wishes = await db.birthday_wishes.find(
+        {"from_id": uid, "year": today.year}, {"_id": 0, "to_id": 1}
+    ).to_list(500)
+    wished_ids = {w["to_id"] for w in wishes}
+    for r in results:
+        r["already_wished"] = r["id"] in wished_ids
+    return results
+
+
+class BirthdayWish(BaseModel):
+    employee_id: str
+    message: Optional[str] = ""
+
+
+@api.post("/birthdays/wish")
+async def send_birthday_wish(payload: BirthdayWish):
+    """Send a birthday DM to an employee whose birthday is today.
+    Idempotent per (from_id, to_id, year) — a second call returns the existing
+    wish without posting a duplicate message."""
+    uid = current_user()
+    if payload.employee_id == uid:
+        raise HTTPException(400, "Vous ne pouvez pas vous souhaiter à vous-même")
+    target = await db.employees.find_one({"id": payload.employee_id}, {"_id": 0})
+    if not target:
+        raise HTTPException(404, "Employé introuvable")
+    today = date.today()
+    meta = _birthday_meta(target.get("birth_date"), today)
+    if not (meta and meta.get("is_today")):
+        raise HTTPException(400, "Ce n'est pas l'anniversaire de cette personne aujourd'hui")
+    # Idempotent guard: has this user already wished this year ?
+    already = await db.birthday_wishes.find_one(
+        {"from_id": uid, "to_id": payload.employee_id, "year": today.year}, {"_id": 0}
+    )
+    if already:
+        return {"ok": True, "already": True, "channel_id": already.get("channel_id")}
+
+    # 1) Ensure a DM channel exists between the two users
+    a, b = sorted([uid, payload.employee_id])
+    cid = f"dm-{a}--{b}"
+    legacy_cid = f"dm-{payload.employee_id}"
+    existing = await db.channels.find_one({"id": cid}, {"_id": 0})
+    if not existing:
+        existing = await db.channels.find_one({"id": legacy_cid}, {"_id": 0})
+    if existing:
+        cid = existing["id"]
+        if not existing.get("members_ids"):
+            await db.channels.update_one(
+                {"id": cid}, {"$set": {"members_ids": [uid, payload.employee_id]}}
+            )
+    else:
+        ch = {
+            "id": cid,
+            "name": f"{target['first_name']} {target['last_name']}",
+            "icon": "user",
+            "members": 2,
+            "members_ids": [uid, payload.employee_id],
+            "unread": 0,
+            "is_dm": True,
+            "is_group": False,
+            "archived": False,
+            "avatar": target.get("avatar"),
+            "created_at": _now(),
+        }
+        await db.channels.insert_one(ch.copy())
+
+    # 2) Post the message
+    content = (payload.message or "").strip() or (
+        f"🎂 Joyeux anniversaire {target['first_name']} ! Passe une excellente journée."
+    )
+    msg = {
+        "id": _id(),
+        "channel_id": cid,
+        "author_id": uid,
+        "content": content,
+        "attachments": [],
+        "ts": _now(),
+    }
+    await db.messages.insert_one(msg.copy())
+
+    # 3) Notify the recipient (personal notification)
+    sender = await db.employees.find_one({"id": uid}, {"_id": 0})
+    sender_name = f"{sender.get('first_name', '')} {sender.get('last_name', '')}".strip() if sender else "Un collègue"
+    await _push_notification(
+        employee_id=payload.employee_id,
+        type="message",
+        title=f"🎂 {sender_name} vous souhaite un joyeux anniversaire",
+        content=content[:140],
+        icon="cake",
+        link=f"/messagerie?ch={cid}",
+    )
+
+    # 4) Record the wish (idempotency)
+    await db.birthday_wishes.insert_one({
+        "id": _id(),
+        "from_id": uid,
+        "to_id": payload.employee_id,
+        "year": today.year,
+        "channel_id": cid,
+        "message": content,
+        "ts": _now(),
+    })
+
+    return {"ok": True, "already": False, "channel_id": cid}
 
 
 @api.get("/me/birthday")

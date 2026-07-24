@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import { Cake, Gift, Calendar, MoreHorizontal, Sparkles, Send } from "lucide-react";
+import { Cake, Gift, Calendar, MoreHorizontal, Sparkles, Send, X, Check } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { useApp } from "@/contexts/AppContext";
+import PortalModal from "@/components/PortalModal";
 
 const FR_MONTHS = [
   "janv.", "févr.", "mars", "avr.", "mai", "juin",
@@ -28,6 +29,9 @@ export default function Birthdays() {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
   const [page, setPage] = useState(1);
+  const [wishTarget, setWishTarget] = useState(null);
+  const [wishMessage, setWishMessage] = useState("");
+  const [wishSending, setWishSending] = useState(false);
   const perPage = 8;
 
   const load = async () => {
@@ -45,20 +49,36 @@ export default function Birthdays() {
   const pageCount = Math.max(1, Math.ceil(items.length / perPage));
   const paged = items.slice((page - 1) * perPage, page * perPage);
 
-  const wish = async (emp) => {
+  const openWish = (emp) => {
+    setWishTarget(emp);
+    setWishMessage(
+      `🎂 Joyeux anniversaire ${emp.first_name} ! Toute l'équipe MS Park te souhaite une magnifique journée pleine de bonheur. 🎉`
+    );
+  };
+  const closeWish = () => {
+    if (wishSending) return;
+    setWishTarget(null);
+    setWishMessage("");
+  };
+  const sendWish = async () => {
+    if (!wishTarget || !wishMessage.trim()) return;
+    setWishSending(true);
     try {
-      // Post a public greeting on the fil (only admins can post normally,
-      // so fall back to a toast if the endpoint refuses).
-      await api.post("/posts", {
-        title: `Joyeux anniversaire ${emp.first_name} !`,
-        content: `<p>Toute l'équipe MS Park te souhaite un excellent anniversaire ${emp.first_name} ! 🎂</p>`,
-        category: "annonce",
-        posted_as: "personal",
+      await api.post("/birthdays/wish", {
+        employee_id: wishTarget.id,
+        message: wishMessage.trim(),
       });
-      toast.success(`Vœux envoyés à ${emp.first_name}`);
-    } catch {
-      // If not admin, just show a personal toast — the wish is symbolic
-      toast.success(`Un petit mot chaleureux pour ${emp.first_name} 🎂`);
+      toast.success(`Vœux envoyés à ${wishTarget.first_name} 🎂`);
+      // Optimistically mark the row as wished
+      setItems((list) =>
+        list.map((r) => (r.id === wishTarget.id ? { ...r, already_wished: true } : r))
+      );
+      setWishTarget(null);
+      setWishMessage("");
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Impossible d'envoyer les vœux");
+    } finally {
+      setWishSending(false);
     }
   };
 
@@ -155,13 +175,35 @@ export default function Birthdays() {
                   </td>
                   <td className="px-4 py-3 text-right pr-6">
                     <div className="inline-flex items-center gap-1">
-                      <button
-                        onClick={() => wish(r)}
-                        data-testid={`bd-wish-${r.id}`}
-                        className="inline-flex items-center gap-1.5 rounded-xl border border-[#071B34]/10 hover:border-[#4338CA]/30 hover:bg-[#4338CA]/5 px-3 py-1.5 text-xs font-semibold text-[#334155]"
-                      >
-                        <Gift className="h-3.5 w-3.5" /> Souhaiter
-                      </button>
+                      {(() => {
+                        const isToday = r.days_until === 0;
+                        const isSelf = r.id === me?.id;
+                        const wished = !!r.already_wished;
+                        const disabled = !isToday || wished || isSelf;
+                        let title = "Souhaiter un joyeux anniversaire";
+                        if (isSelf) title = "C'est votre anniversaire 🎂";
+                        else if (wished) title = "Vœux déjà envoyés cette année";
+                        else if (!isToday && r.days_until > 275) title = "Anniversaire déjà passé";
+                        else if (!isToday) title = "L'anniversaire n'est pas encore arrivé";
+                        return (
+                          <button
+                            onClick={() => !disabled && openWish(r)}
+                            disabled={disabled}
+                            data-testid={`bd-wish-${r.id}`}
+                            title={title}
+                            className={`inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-semibold transition-all ${
+                              wished
+                                ? "bg-[#DCFCE7] text-[#15803D] cursor-not-allowed"
+                                : disabled
+                                  ? "bg-[#F1F5F9] text-[#94A3B8] cursor-not-allowed"
+                                  : "border border-[#4338CA]/30 bg-white hover:border-[#4338CA] hover:bg-[#4338CA]/5 text-[#4338CA]"
+                            }`}
+                          >
+                            {wished ? <Check className="h-3.5 w-3.5" /> : <Gift className="h-3.5 w-3.5" />}
+                            {wished ? "Souhaité" : "Souhaiter"}
+                          </button>
+                        );
+                      })()}
                       <button className="h-8 w-8 rounded-lg hover:bg-[#071B34]/5 inline-flex items-center justify-center text-[#475569]">
                         <MoreHorizontal className="h-4 w-4" />
                       </button>
@@ -202,6 +244,80 @@ export default function Birthdays() {
           </div>
         )}
       </div>
+
+      {/* ─── Wish modal ─── */}
+      {wishTarget && (
+        <PortalModal>
+          <div
+            onClick={closeWish}
+            className="fixed inset-0 z-[80] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4"
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              data-testid="bd-wish-modal"
+              className="bg-white rounded-3xl w-full max-w-md overflow-hidden shadow-2xl"
+            >
+              {/* Header illustration */}
+              <div className="relative bg-gradient-to-br from-[#F0ABFC] via-[#C4B5FD] to-[#A78BFA] px-6 pt-6 pb-8 text-white text-center">
+                <button
+                  onClick={closeWish}
+                  data-testid="bd-wish-close"
+                  className="absolute top-3 right-3 h-8 w-8 rounded-full bg-white/20 hover:bg-white/30 inline-flex items-center justify-center"
+                  aria-label="Fermer"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+                <div className="inline-flex h-16 w-16 rounded-full bg-white/25 items-center justify-center backdrop-blur-sm">
+                  <Cake className="h-8 w-8" />
+                </div>
+                <h3 className="mt-3 text-lg font-bold">
+                  Souhaiter un joyeux anniversaire à<br />
+                  <span className="text-2xl font-black tracking-tight">{wishTarget.first_name} {wishTarget.last_name}</span>
+                </h3>
+                <p className="mt-1 text-xs text-white/80">
+                  Votre message sera envoyé directement dans sa messagerie.
+                </p>
+              </div>
+              <div className="p-5 space-y-4">
+                <div>
+                  <label className="text-[10px] uppercase tracking-widest font-semibold text-[#475569]">
+                    Votre message
+                  </label>
+                  <textarea
+                    value={wishMessage}
+                    onChange={(e) => setWishMessage(e.target.value)}
+                    rows={4}
+                    data-testid="bd-wish-textarea"
+                    className="mt-1 w-full rounded-2xl bg-[#F4F7FA] focus:bg-white focus:ring-2 focus:ring-[#A78BFA]/30 outline-none p-3 text-sm resize-none"
+                    placeholder="Écrivez un mot chaleureux…"
+                  />
+                  <div className="mt-1 text-[10px] text-[#94A3B8] text-right">
+                    {wishMessage.length} caractères
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={closeWish}
+                    disabled={wishSending}
+                    className="flex-1 h-11 rounded-xl bg-[#F4F7FA] hover:bg-[#071B34]/5 text-sm font-semibold text-[#334155] disabled:opacity-40"
+                  >
+                    Annuler
+                  </button>
+                  <button
+                    onClick={sendWish}
+                    disabled={wishSending || !wishMessage.trim()}
+                    data-testid="bd-wish-send"
+                    className="flex-1 h-11 rounded-xl bg-gradient-to-r from-[#A78BFA] to-[#F0ABFC] hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-bold inline-flex items-center justify-center gap-2"
+                  >
+                    <Send className="h-4 w-4" />
+                    {wishSending ? "Envoi…" : "Envoyer"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </PortalModal>
+      )}
     </div>
   );
 }

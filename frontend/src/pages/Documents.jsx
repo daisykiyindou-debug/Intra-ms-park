@@ -1,9 +1,11 @@
-import { useMemo, useState, useEffect } from "react";
-import { FileText, Download, Eye, Search, X, Receipt, Star } from "lucide-react";
+import { useMemo, useState, useEffect, useRef } from "react";
+import { FileText, Download, Eye, Search, X, Receipt, Star, Upload, Plus } from "lucide-react";
 import { Link } from "react-router-dom";
+import { toast } from "sonner";
 import { api, formatDateFr } from "@/lib/api";
 import useLiveData from "@/hooks/useLiveData";
 import PortalModal from "@/components/PortalModal";
+import { useApp } from "@/contexts/AppContext";
 
 const CATEGORIES = [
   { k: "all", l: "Toutes les catégories" },
@@ -23,6 +25,8 @@ const TABS = [
 ];
 
 export default function Documents() {
+  const { me, adminMode, employees } = useApp();
+  const isAdmin = !!me?.is_admin && adminMode !== false;
   const [docs, setDocs] = useState([]);
   const [hrDocs, setHrDocs] = useState([]);
   const [favIds, setFavIds] = useState(() => new Set(JSON.parse(localStorage.getItem("docFavs") || "[]")));
@@ -30,9 +34,12 @@ export default function Documents() {
   const [q, setQ] = useState("");
   const [tab, setTab] = useState("all");
   const [preview, setPreview] = useState(null);
+  const [uploadOpen, setUploadOpen] = useState(false);
 
   useLiveData(() => api.get("/documents").then((r) => setDocs(r.data)), ["documents"]);
   useEffect(() => { api.get("/hr-documents").then((r) => setHrDocs(r.data)); }, []);
+
+  const reloadDocs = () => api.get("/documents").then((r) => setDocs(r.data));
 
   const toggleFav = (id) => {
     const next = new Set(favIds);
@@ -72,10 +79,21 @@ export default function Documents() {
   return (
     <div className="grid grid-cols-1 lg:grid-cols-[1fr_280px] gap-6 ms-fade-up">
       <div className="space-y-5">
-        <div>
-          <div className="ms-overline">Accueil › Documents</div>
-          <h1 className="text-3xl md:text-4xl font-bold tracking-tight text-[#071B34] mt-1">Documents</h1>
-          <p className="text-sm text-[#475569] mt-1">Retrouvez et téléchargez tous les documents disponibles.</p>
+        <div className="flex items-start justify-between gap-3 flex-wrap">
+          <div>
+            <div className="ms-overline">Accueil › Documents</div>
+            <h1 className="text-3xl md:text-4xl font-bold tracking-tight text-[#071B34] mt-1">Documents</h1>
+            <p className="text-sm text-[#475569] mt-1">Retrouvez et téléchargez tous les documents disponibles.</p>
+          </div>
+          {isAdmin && (
+            <button
+              onClick={() => setUploadOpen(true)}
+              data-testid="doc-admin-upload"
+              className="ms-btn-primary inline-flex items-center gap-2"
+            >
+              <Upload className="h-4 w-4" /> Uploader un PDF
+            </button>
+          )}
         </div>
 
         <div className="ms-card p-3 flex flex-wrap items-center gap-2">
@@ -149,6 +167,16 @@ export default function Documents() {
         </div>
         </PortalModal>
       )}
+
+      {uploadOpen && (
+        <PortalModal>
+          <UploadPdfModal
+            employees={employees || []}
+            onClose={() => setUploadOpen(false)}
+            onDone={() => { setUploadOpen(false); reloadDocs(); }}
+          />
+        </PortalModal>
+      )}
     </div>
   );
 }
@@ -190,5 +218,205 @@ function DocCard({ d, isFav, onFav, onPreview }) {
     </div>
   );
 }
+
+function UploadPdfModal({ employees, onClose, onDone }) {
+  const fileRef = useRef(null);
+  const [file, setFile] = useState(null);
+  const [name, setName] = useState("");
+  const [category, setCategory] = useState("Ressources Humaines");
+  const [description, setDescription] = useState("");
+  const [target, setTarget] = useState("all"); // all | <employee_id>
+  const [empSearch, setEmpSearch] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const onPickFile = (e) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    if (f.type && f.type !== "application/pdf" && !f.name.toLowerCase().endsWith(".pdf")) {
+      toast.error("Seuls les fichiers PDF sont acceptés");
+      e.target.value = "";
+      return;
+    }
+    setFile(f);
+    // Pre-fill the name with the file name minus extension
+    if (!name.trim()) setName(f.name.replace(/\.pdf$/i, ""));
+  };
+
+  const submit = async () => {
+    if (!file) { toast.error("Sélectionnez un fichier PDF"); return; }
+    if (!name.trim()) { toast.error("Nom du document requis"); return; }
+    setBusy(true);
+    try {
+      // 1) Upload the PDF
+      const form = new FormData();
+      form.append("file", file);
+      const { data: up } = await api.post("/uploads", form, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+      // 2) Register the document
+      const size_kb = Math.max(1, Math.round((up.size || file.size || 0) / 1024));
+      await api.post("/admin/documents", {
+        name: name.trim(),
+        category,
+        url: up.url,
+        target_employee_id: target === "all" ? "all" : target,
+        description: description.trim() || null,
+        size_kb,
+      });
+      toast.success("Document publié");
+      onDone?.();
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Impossible de publier le document");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const filteredEmp = (employees || [])
+    .filter((e) => !e.is_super_admin)
+    .filter((e) => {
+      if (!empSearch.trim()) return true;
+      const n = empSearch.toLowerCase();
+      return `${e.first_name} ${e.last_name}`.toLowerCase().includes(n);
+    });
+
+  return (
+    <div
+      onClick={onClose}
+      className="fixed inset-0 z-[70] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4"
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        data-testid="doc-upload-modal"
+        className="bg-white rounded-3xl w-full max-w-lg max-h-[90vh] overflow-hidden shadow-2xl flex flex-col"
+      >
+        <div className="flex items-center justify-between px-5 py-4 border-b border-[#071B34]/5">
+          <div>
+            <h3 className="text-base font-bold text-[#071B34]">Uploader un PDF</h3>
+            <p className="text-xs text-[#475569] mt-0.5">Publier un document depuis vos fichiers.</p>
+          </div>
+          <button onClick={onClose} className="h-9 w-9 rounded-lg hover:bg-[#F4F7FA] inline-flex items-center justify-center">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="p-5 space-y-4 overflow-y-auto">
+          {/* Drop / pick zone */}
+          <div>
+            <label className="text-[10px] uppercase tracking-widest font-semibold text-[#475569]">
+              Fichier PDF
+            </label>
+            <input
+              ref={fileRef}
+              type="file"
+              accept="application/pdf,.pdf"
+              onChange={onPickFile}
+              className="hidden"
+              data-testid="doc-upload-input"
+            />
+            <button
+              onClick={() => fileRef.current?.click()}
+              className={`mt-1 w-full rounded-2xl border-2 border-dashed p-6 text-center transition-colors ${
+                file
+                  ? "border-[#10B981]/40 bg-[#10B981]/5"
+                  : "border-[#3BA4FF]/40 bg-[#3BA4FF]/5 hover:bg-[#3BA4FF]/10"
+              }`}
+            >
+              {file ? (
+                <div className="flex items-center justify-center gap-3 text-[#065F46]">
+                  <FileText className="h-6 w-6" />
+                  <div className="text-left">
+                    <div className="text-sm font-semibold truncate max-w-[280px]">{file.name}</div>
+                    <div className="text-[10px]">{Math.max(1, Math.round(file.size / 1024))} Ko · Cliquez pour changer</div>
+                  </div>
+                </div>
+              ) : (
+                <div className="text-[#1D70B8] flex flex-col items-center gap-2">
+                  <Upload className="h-6 w-6" />
+                  <div className="text-sm font-semibold">Choisir un PDF sur votre appareil</div>
+                  <div className="text-[11px] text-[#475569]">Format .pdf uniquement · 8 Mo max</div>
+                </div>
+              )}
+            </button>
+          </div>
+
+          <div>
+            <label className="text-[10px] uppercase tracking-widest font-semibold text-[#475569]">Nom du document</label>
+            <input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Ex : Note de service — juillet 2026"
+              data-testid="doc-upload-name"
+              className="ms-input mt-1"
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-[10px] uppercase tracking-widest font-semibold text-[#475569]">Catégorie</label>
+              <select
+                value={category}
+                onChange={(e) => setCategory(e.target.value)}
+                data-testid="doc-upload-category"
+                className="ms-input mt-1"
+              >
+                {CATEGORIES.filter((c) => c.k !== "all").map((c) => (
+                  <option key={c.k} value={c.k}>{c.l}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="text-[10px] uppercase tracking-widest font-semibold text-[#475569]">Destinataire</label>
+              <select
+                value={target}
+                onChange={(e) => setTarget(e.target.value)}
+                data-testid="doc-upload-target"
+                className="ms-input mt-1"
+              >
+                <option value="all">Tous les employés</option>
+                <option value="__specific__" disabled>─── Un employé spécifique ───</option>
+                {filteredEmp.map((e) => (
+                  <option key={e.id} value={e.id}>{e.first_name} {e.last_name}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <label className="text-[10px] uppercase tracking-widest font-semibold text-[#475569]">Description (optionnel)</label>
+            <textarea
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              rows={2}
+              placeholder="Courte description qui apparaîtra sous le titre…"
+              data-testid="doc-upload-description"
+              className="ms-input mt-1 resize-none"
+            />
+          </div>
+        </div>
+
+        <div className="border-t border-[#071B34]/5 p-4 flex items-center gap-2 bg-[#F4F7FA]/50">
+          <button
+            onClick={onClose}
+            disabled={busy}
+            className="flex-1 h-11 rounded-xl bg-white hover:bg-[#F4F7FA] border border-[#071B34]/10 text-sm font-semibold text-[#334155] disabled:opacity-40"
+          >
+            Annuler
+          </button>
+          <button
+            onClick={submit}
+            disabled={busy || !file || !name.trim()}
+            data-testid="doc-upload-submit"
+            className="flex-1 h-11 rounded-xl bg-[#3BA4FF] hover:bg-[#2A8DE0] disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-bold inline-flex items-center justify-center gap-2"
+          >
+            <Plus className="h-4 w-4" />
+            {busy ? "Publication…" : "Publier"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 
 

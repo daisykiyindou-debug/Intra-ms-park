@@ -68,7 +68,8 @@ const OFFICIAL_AVATAR =
 
 export default function Actualites() {
   const { me, findEmployee, adminMode } = useApp();
-  const canPublishAsMSPark = (me?.is_admin || me?.can_manage_communication) && adminMode !== false;
+  const isPoster = !!me?.is_admin || !!me?.can_manage_communication;
+  const canPublishAsMSPark = isPoster && adminMode !== false;
   const [posts, setPosts] = useState([]);
   const [filter, setFilter] = useState("all");
   const [editingPost, setEditingPost] = useState(null);
@@ -94,15 +95,17 @@ export default function Actualites() {
           Le fil de MS Park
         </h1>
         <p className="text-sm text-[#475569] mt-2">
-          {me?.is_admin
+          {me?.is_admin && adminMode !== false
             ? "Publiez des annonces, photos, documents pour toute l'équipe. Vous choisissez de poster en votre nom ou au nom de MS Park."
+            : me?.is_admin
+            ? "Publiez à votre nom sur le fil MS Park. Activez le mode Admin pour publier au nom de MS Park."
             : me?.can_manage_communication
             ? "Publiez, modifiez et supprimez les actualités officielles au nom de MS Park."
             : "Annonces, événements et communication officielle."}
         </p>
       </div>
 
-      {canPublishAsMSPark && <AdminComposer me={me} onPublished={refresh} />}
+      {isPoster && <AdminComposer me={me} onPublished={refresh} canUseOfficial={canPublishAsMSPark} />}
 
       <div className="ms-card p-3 flex flex-wrap items-center gap-1.5">
         <Filter className="h-4 w-4 text-[#475569] mx-1" />
@@ -163,8 +166,9 @@ export default function Actualites() {
 
 // ────────────────────── Composer
 
-function AdminComposer({ me, onPublished }) {
+function AdminComposer({ me, onPublished, canUseOfficial = true }) {
   const isCommOnly = !me?.is_admin && !!me?.can_manage_communication;
+  const showOfficialToggle = !isCommOnly && canUseOfficial;
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
@@ -173,7 +177,13 @@ function AdminComposer({ me, onPublished }) {
   const [attachments, setAttachments] = useState([]);
   const [links, setLinks] = useState([]);
   const [linkDraft, setLinkDraft] = useState("");
-  const [postedAs, setPostedAs] = useState(isCommOnly ? "official" : "personal");
+  const [postedAs, setPostedAs] = useState(
+    isCommOnly ? "official" : "personal"
+  );
+  // If the admin is in user mode, they can only post as themselves.
+  useEffect(() => {
+    if (!canUseOfficial && postedAs === "official") setPostedAs("personal");
+  }, [canUseOfficial, postedAs]);
   const [publishing, setPublishing] = useState(false);
   const [showGallery, setShowGallery] = useState(false);
   const [showAttachments, setShowAttachments] = useState(false);
@@ -278,8 +288,8 @@ function AdminComposer({ me, onPublished }) {
         <span className="text-sm text-[#475569] flex-1">
           Quoi de neuf, <strong className="text-[#071B34]">{me.first_name}</strong> ? Publiez sur le fil MS Park…
         </span>
-        <span className={`ms-chip ${isCommOnly ? "bg-[#F59E0B]/15 text-[#B45309]" : "bg-[#A78BFA]/15 text-[#7C3AED]"}`}>
-          <Sparkles className="h-3 w-3" /> {isCommOnly ? "Communication" : "Admin"}
+        <span className={`ms-chip ${isCommOnly ? "bg-[#F59E0B]/15 text-[#B45309]" : !canUseOfficial ? "bg-[#3BA4FF]/15 text-[#1D70B8]" : "bg-[#A78BFA]/15 text-[#7C3AED]"}`}>
+          <Sparkles className="h-3 w-3" /> {isCommOnly ? "Communication" : !canUseOfficial ? "Personnel" : "Admin"}
         </span>
       </button>
     );
@@ -315,7 +325,7 @@ function AdminComposer({ me, onPublished }) {
       </div>
 
       {/* Publier en tant que — masqué pour les comm editors (toujours au nom MS Park) */}
-      {!isCommOnly && (
+      {showOfficialToggle && (
         <div>
           <div className="text-[10px] uppercase tracking-wider text-[#475569] font-semibold mb-1.5">
             Publier en tant que
@@ -346,6 +356,12 @@ function AdminComposer({ me, onPublished }) {
               MS Park (officiel)
             </button>
           </div>
+        </div>
+      )}
+      {!isCommOnly && !canUseOfficial && (
+        <div className="rounded-xl bg-[#3BA4FF]/10 border border-[#3BA4FF]/20 px-3 py-2 text-xs text-[#334155] flex items-center gap-2">
+          <UserIcon className="h-3.5 w-3.5 text-[#1D70B8]" />
+          Publication à votre nom personnel. Activez le mode <strong>Admin</strong> pour publier au nom de MS Park.
         </div>
       )}
       {isCommOnly && (
