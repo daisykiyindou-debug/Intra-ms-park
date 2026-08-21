@@ -71,14 +71,61 @@ async def require_admin() -> dict:
 
 
 async def require_communication_editor() -> dict:
-    """Allow admins OR employees flagged can_manage_communication=True.
-    Used for news, carousel slides, events (agenda) and MS Park broadcasts."""
+    """Legacy communication editor — accepts is_admin, full_admin, or the
+    catch-all can_manage_communication role flag. Granular perms are checked
+    per-endpoint via require_permission() to avoid privilege bleed."""
     emp = await db.employees.find_one({"id": current_user()}, {"_id": 0})
     if not emp:
         raise HTTPException(403, "Accès refusé")
     if emp.get("is_admin") or emp.get("can_manage_communication"):
         return emp
+    if "full_admin" in set(emp.get("permissions") or []):
+        return emp
     raise HTTPException(403, "Accès communication requis")
+
+
+# Communication-scoped granular perms — a user holding can_manage_communication
+# is treated as if they had these too (single role flag).
+_COMM_PERMS = {
+    "publish_news", "edit_news", "manage_carousel", "manage_newsletter",
+    "create_events", "edit_events", "create_forms",
+}
+
+
+async def require_permission(*perm_keys: str) -> dict:
+    """Raise 403 unless the current user is is_admin OR has full_admin OR
+    at least one of the listed granular permission keys. Users with the
+    can_manage_communication legacy role flag additionally pass any
+    communication-scoped perm check."""
+    emp = await db.employees.find_one({"id": current_user()}, {"_id": 0})
+    if not emp:
+        raise HTTPException(403, "Accès refusé")
+    if emp.get("is_admin"):
+        return emp
+    perms = set(emp.get("permissions") or [])
+    if "full_admin" in perms:
+        return emp
+    if any(k in perms for k in perm_keys):
+        return emp
+    if emp.get("can_manage_communication") and any(k in _COMM_PERMS for k in perm_keys):
+        return emp
+    raise HTTPException(403, "Permission requise")
+
+
+def _has_permission(emp: dict, *perm_keys: str) -> bool:
+    """Non-raising helper mirroring require_permission()."""
+    if not emp:
+        return False
+    if emp.get("is_admin"):
+        return True
+    perms = set(emp.get("permissions") or [])
+    if "full_admin" in perms:
+        return True
+    if any(k in perms for k in perm_keys):
+        return True
+    if emp.get("can_manage_communication") and any(k in _COMM_PERMS for k in perm_keys):
+        return True
+    return False
 
 
 @api.post("/uploads")
@@ -2921,7 +2968,7 @@ async def list_posts():
 @api.post("/posts")
 async def create_post(payload: PostCreate):
     me = await db.employees.find_one({"id": current_user()}, {"_id": 0})
-    if not me or not (me.get("is_admin") or me.get("can_manage_communication")):
+    if not _has_permission(me, "publish_news", "edit_news") and not (me and me.get("can_manage_communication")):
         raise HTTPException(403, "Seuls les administrateurs et responsables communication peuvent publier sur le fil")
     # Communication editors always post under the official MS Park identity
     posted_as = payload.posted_as or "personal"
@@ -3106,9 +3153,13 @@ async def cancel_request(rid: str):
 
     # Refund logic: if approved, delete the schedule entries created and credit back balance
     was_approved = r["status"] == "approved"
-    if was_approved and r["type"] in ("conge", "rtt"):
+    req_type = r.get("type")
+    # Approval accepts both aliases 'conge' and 'cp' for paid leave
+    is_paid_leave = req_type in ("conge", "cp")
+    is_rtt = req_type == "rtt"
+    if was_approved and (is_paid_leave or is_rtt):
         # Approval writes CP entries as type 'leave' and RTT as 'rtt'
-        sched_type = "leave" if r["type"] == "conge" else "rtt"
+        sched_type = "leave" if is_paid_leave else "rtt"
         deleted = await db.schedules.delete_many({
             "employee_id": r["employee_id"],
             "type": sched_type,
@@ -3119,7 +3170,7 @@ async def cancel_request(rid: str):
         emp = await db.employees.find_one({"id": r["employee_id"]}, {"_id": 0})
         if emp and days_back > 0:
             bal = dict(emp.get("leave_balance") or {})
-            if r["type"] == "conge":
+            if is_paid_leave:
                 # Credit to CP N (current year) — simplest
                 bal["cp_n"] = round(float(bal.get("cp_n", 0)) + days_back, 1)
             else:
@@ -3158,17 +3209,27 @@ _FR_MONTHS = ["Janvier", "Février", "Mars", "Avril", "Mai", "Juin",
 
 
 def _generate_payslip(emp: dict, year: int, month: int) -> dict:
-    """Build a realistic French payslip payload."""
+    """Build a realistic French payslip payload.
+    Priorities user-defined salary/hourly rate fields over hard-coded defaults."""
     contract_h = emp.get("contract_hours_weekly") or 35
     monthly_h = round(contract_h * 4.33, 2)
-    # Base gross salary — CDI level dependent
-    if emp.get("role_category") == "encadrement":
-        hourly = 21.50
-    elif emp.get("role_category") == "restauration":
-        hourly = 13.20
-    else:
-        hourly = 12.85  # SMIC + prime
-    gross = round(monthly_h * hourly, 2)
+    # Use the user's declared hourly rate if defined; otherwise derive from
+    # gross_salary or fall back to a category-based estimate.
+    hourly = emp.get("hourly_rate")
+    if not hourly and emp.get("gross_salary"):
+        try:
+            hourly = round(float(emp["gross_salary"]) / max(monthly_h, 1), 2)
+        except (TypeError, ValueError):
+            hourly = None
+    if not hourly:
+        if emp.get("role_category") == "encadrement":
+            hourly = 21.50
+        elif emp.get("role_category") == "restauration":
+            hourly = 13.20
+        else:
+            hourly = 12.85  # SMIC + prime
+    gross = emp.get("gross_salary") or round(monthly_h * hourly, 2)
+    gross = round(float(gross), 2)
     # Cotisations approximatives salariales ~22%
     csg_crds = round(gross * 0.0975, 2)
     retraite = round(gross * 0.0765, 2)
@@ -3234,10 +3295,10 @@ def _generate_payslip(emp: dict, year: int, month: int) -> dict:
 
 @api.get("/payslip/{employee_id}/{year}/{month}")
 async def get_payslip(employee_id: str, year: int, month: int):
-    """Employee can access own payslip; admin can access any."""
+    """Employee can access own payslip; admins and users with view_payslips can access any."""
     if employee_id != current_user():
         me_doc = await db.employees.find_one({"id": current_user()}, {"_id": 0})
-        if not me_doc or not me_doc.get("is_admin"):
+        if not _has_permission(me_doc, "view_payslips", "manage_documents"):
             raise HTTPException(403, "Accès refusé")
     emp = await db.employees.find_one({"id": employee_id}, {"_id": 0})
     if not emp:
@@ -3258,7 +3319,7 @@ class DocumentCreate(BaseModel):
 
 @api.post("/admin/documents")
 async def admin_create_document(payload: DocumentCreate):
-    await require_admin()
+    await require_permission("manage_documents", "publish_documents")
     doc = {
         "id": _id(),
         "name": payload.name,
@@ -3354,7 +3415,7 @@ def _compute_payslip_totals(p: dict) -> dict:
 @api.get("/admin/payslips")
 async def admin_list_payslips(month: Optional[str] = None, status: Optional[str] = None):
     """List all payslips. `month` = YYYY-MM filter."""
-    await require_admin()
+    await require_permission("view_payslips", "manage_documents")
     q: dict = {}
     if month:
         try:
@@ -3384,7 +3445,7 @@ async def admin_list_payslips(month: Optional[str] = None, status: Optional[str]
 @api.get("/admin/payslips/stats")
 async def admin_payslip_stats(month: Optional[str] = None):
     """Aggregate counters for the KPI cards."""
-    await require_admin()
+    await require_permission("view_payslips", "manage_documents")
     q: dict = {}
     if month:
         try:
@@ -3403,7 +3464,7 @@ async def admin_payslip_stats(month: Optional[str] = None):
 
 @api.get("/admin/payslips/{pid}")
 async def admin_get_payslip(pid: str):
-    await require_admin()
+    await require_permission("view_payslips", "manage_documents")
     p = await db.payslips.find_one({"id": pid}, {"_id": 0})
     if not p:
         raise HTTPException(404, "Fiche introuvable")
@@ -3416,6 +3477,25 @@ async def admin_get_payslip(pid: str):
         "hire_date": emp.get("hire_date"),
     }
     return p
+
+
+def _resolve_pay_basis(emp: dict, override_hours: Optional[float] = None,
+                      override_hourly: Optional[float] = None) -> tuple[float, float]:
+    """Return (contract_hours_weekly, hourly_rate) preferring the user's
+    declared HR fields (contract_hours_weekly, hourly_rate, gross_salary)
+    over category-based defaults. Overrides win when provided."""
+    contract_h = override_hours or emp.get("contract_hours_weekly") or 35
+    monthly_h = round(contract_h * 4.33, 2)
+    hourly = override_hourly or emp.get("hourly_rate")
+    if not hourly and emp.get("gross_salary"):
+        try:
+            hourly = round(float(emp["gross_salary"]) / max(monthly_h, 1), 2)
+        except (TypeError, ValueError):
+            hourly = None
+    if not hourly:
+        role_cat = emp.get("role_category")
+        hourly = 21.50 if role_cat == "encadrement" else 13.20 if role_cat == "restauration" else 12.85
+    return float(contract_h), float(hourly)
 
 
 def _default_lines_for(emp: dict, contract_h: float, hourly: float) -> list[dict]:
@@ -3432,20 +3512,20 @@ def _default_lines_for(emp: dict, contract_h: float, hourly: float) -> list[dict
 @api.post("/admin/payslips/preview")
 async def admin_preview_payslip(payload: PayslipPayload):
     """Compute totals without persisting — used by the live preview panel."""
-    await require_admin()
+    await require_permission("view_payslips", "manage_documents")
     doc = payload.model_dump()
     if not doc.get("lines"):
         emp = await db.employees.find_one({"id": payload.employee_id}, {"_id": 0}) or {}
-        contract_h = payload.base_hours or emp.get("contract_hours_weekly") or 35
-        role_cat = emp.get("role_category")
-        hourly = payload.hourly_rate or (21.50 if role_cat == "encadrement" else 13.20 if role_cat == "restauration" else 12.85)
+        contract_h, hourly = _resolve_pay_basis(emp, payload.base_hours, payload.hourly_rate)
+        doc["base_hours"] = contract_h
+        doc["hourly_rate"] = hourly
         doc["lines"] = _default_lines_for(emp, contract_h, hourly)
     return {**doc, "totals": _compute_payslip_totals(doc)}
 
 
 @api.post("/admin/payslips")
 async def admin_create_payslip(payload: PayslipPayload):
-    await require_admin()
+    await require_permission("view_payslips", "manage_documents")
     emp = await db.employees.find_one({"id": payload.employee_id}, {"_id": 0})
     if not emp:
         raise HTTPException(404, "Employé introuvable")
@@ -3456,9 +3536,7 @@ async def admin_create_payslip(payload: PayslipPayload):
     })
     if existing:
         raise HTTPException(400, f"Une fiche de paie a déjà été envoyée à {emp.get('first_name','')} pour cette période.")
-    contract_h = payload.base_hours or emp.get("contract_hours_weekly") or 35
-    role_cat = emp.get("role_category")
-    hourly = payload.hourly_rate or (21.50 if role_cat == "encadrement" else 13.20 if role_cat == "restauration" else 12.85)
+    contract_h, hourly = _resolve_pay_basis(emp, payload.base_hours, payload.hourly_rate)
     doc = payload.model_dump()
     if not doc["lines"]:
         doc["lines"] = _default_lines_for(emp, contract_h, hourly)
@@ -3487,7 +3565,7 @@ async def admin_create_payslip(payload: PayslipPayload):
 
 @api.put("/admin/payslips/{pid}")
 async def admin_update_payslip(pid: str, payload: PayslipPayload):
-    await require_admin()
+    await require_permission("view_payslips", "manage_documents")
     p = await db.payslips.find_one({"id": pid}, {"_id": 0})
     if not p:
         raise HTTPException(404, "Fiche introuvable")
@@ -3504,7 +3582,7 @@ async def admin_update_payslip(pid: str, payload: PayslipPayload):
 
 @api.delete("/admin/payslips/{pid}")
 async def admin_delete_payslip(pid: str):
-    await require_admin()
+    await require_permission("view_payslips", "manage_documents")
     p = await db.payslips.find_one({"id": pid}, {"_id": 0})
     if not p:
         raise HTTPException(404, "Fiche introuvable")
@@ -3518,7 +3596,7 @@ async def admin_delete_payslip(pid: str):
 @api.post("/admin/payslips/{pid}/send")
 async def admin_send_payslip(pid: str):
     """Mark payslip as sent and publish it as a Document to the employee."""
-    await require_admin()
+    await require_permission("view_payslips", "manage_documents")
     p = await db.payslips.find_one({"id": pid}, {"_id": 0})
     if not p:
         raise HTTPException(404, "Fiche introuvable")
@@ -3571,7 +3649,7 @@ async def list_my_payslips():
 @api.post("/admin/documents/payslip")
 async def admin_generate_payslip_document(payload: PayslipGenerate):
     """Register a payslip document linked to the generator endpoint."""
-    await require_admin()
+    await require_permission("view_payslips", "manage_documents")
     emp = await db.employees.find_one({"id": payload.employee_id}, {"_id": 0})
     if not emp:
         raise HTTPException(404, "Employé introuvable")
@@ -3609,7 +3687,7 @@ async def admin_generate_payslip_document(payload: PayslipGenerate):
 
 @api.delete("/admin/documents/{did}")
 async def admin_delete_document(did: str):
-    await require_admin()
+    await require_permission("manage_documents")
     await db.documents.delete_one({"id": did})
     return {"ok": True}
 
@@ -3625,7 +3703,7 @@ class DocumentUpdate(BaseModel):
 
 @api.put("/admin/documents/{did}")
 async def admin_update_document(did: str, payload: DocumentUpdate):
-    await require_admin()
+    await require_permission("manage_documents", "publish_documents")
     existing = await db.documents.find_one({"id": did}, {"_id": 0})
     if not existing:
         raise HTTPException(404, "Document introuvable")
@@ -3645,7 +3723,7 @@ class ChannelBroadcast(BaseModel):
 
 @api.post("/admin/broadcast")
 async def admin_broadcast(payload: ChannelBroadcast):
-    me = await require_communication_editor()
+    me = await require_permission("publish_news")
     ch = await db.channels.find_one({"id": payload.channel_id}, {"_id": 0})
     if not ch:
         raise HTTPException(404, "Canal introuvable")
@@ -4261,7 +4339,7 @@ def _normalize_event(ev: dict) -> dict:
 
 @api.post("/admin/events")
 async def admin_create_event(payload: EventPayload):
-    me = await require_communication_editor()
+    me = await require_permission("create_events", "edit_events")
     ev = payload.model_dump()
     ev["id"] = _id()
     if not ev.get("group_targets"):
@@ -4305,7 +4383,7 @@ async def admin_create_event(payload: EventPayload):
 
 @api.put("/admin/events/{eid}")
 async def admin_update_event(eid: str, payload: EventPayload):
-    await require_communication_editor()
+    await require_permission("edit_events", "create_events")
     updates = {k: v for k, v in payload.model_dump().items() if v is not None}
     updates.pop("id", None)
     updates = _normalize_event(updates)
@@ -4318,14 +4396,14 @@ async def admin_update_event(eid: str, payload: EventPayload):
 
 @api.delete("/admin/events/{eid}")
 async def admin_delete_event(eid: str):
-    await require_communication_editor()
+    await require_permission("edit_events")
     await db.events.delete_one({"id": eid})
     return {"ok": True}
 
 
 @api.get("/admin/events")
 async def admin_list_events():
-    await require_communication_editor()
+    await require_permission("create_events", "edit_events")
     return await db.events.find({}, {"_id": 0}).sort("date", 1).to_list(500)
 
 
@@ -4358,7 +4436,7 @@ def _prepare_fields(raw_fields):
 
 @api.get("/admin/forms")
 async def admin_list_forms():
-    await require_communication_editor()
+    await require_permission("create_forms")
     forms = await db.forms.find({}, {"_id": 0}).sort("created_at", -1).to_list(200)
     # Attach the number of responses per form
     for f in forms:
@@ -4377,7 +4455,7 @@ async def get_form(fid: str):
 
 @api.post("/admin/forms")
 async def admin_create_form(payload: FormPayload):
-    me = await require_communication_editor()
+    me = await require_permission("create_forms")
     doc = {
         "id": _id(),
         "title": payload.title.strip(),
@@ -4396,7 +4474,7 @@ async def admin_create_form(payload: FormPayload):
 
 @api.put("/admin/forms/{fid}")
 async def admin_update_form(fid: str, payload: FormPayload):
-    await require_communication_editor()
+    await require_permission("create_forms")
     updates = payload.model_dump()
     updates["fields"] = _prepare_fields(payload.fields)
     await db.forms.update_one({"id": fid}, {"$set": updates})
@@ -4408,7 +4486,7 @@ async def admin_update_form(fid: str, payload: FormPayload):
 
 @api.delete("/admin/forms/{fid}")
 async def admin_delete_form(fid: str):
-    await require_communication_editor()
+    await require_permission("create_forms")
     await db.forms.delete_one({"id": fid})
     await db.form_responses.delete_many({"form_id": fid})
     return {"ok": True}
@@ -4450,7 +4528,7 @@ async def submit_form(fid: str, payload: FormSubmitPayload):
 
 @api.get("/admin/forms/{fid}/responses")
 async def admin_form_responses(fid: str):
-    await require_communication_editor()
+    await require_permission("create_forms")
     return await db.form_responses.find({"form_id": fid}, {"_id": 0}).sort("submitted_at", -1).to_list(1000)
 
 
@@ -4911,11 +4989,58 @@ class UserCreate(BaseModel):
     role_category: str = "employe"
 
 
-class UserUpdate(UserCreate):
+class UserUpdate(BaseModel):
+    """Truly-partial update model. Every field is Optional so a PUT can only
+    touch what the caller explicitly sends."""
+    # Section 1 — Account info
     first_name: Optional[str] = None
     last_name: Optional[str] = None
+    birth_date: Optional[str] = None
+    email: Optional[str] = None
     personal_email: Optional[str] = None
+    phone: Optional[str] = None
     personal_phone: Optional[str] = None
+    address: Optional[str] = None
+    postal_code: Optional[str] = None
+    city: Optional[str] = None
+    country: Optional[str] = None
+    avatar: Optional[str] = None
+    temp_password: Optional[str] = None
+    force_password_change: Optional[bool] = None
+    account_status: Optional[str] = None
+    # Section 2 — HR
+    statuses: Optional[List[str]] = None
+    department: Optional[str] = None
+    role: Optional[str] = None
+    manager_id: Optional[str] = None
+    contract_type: Optional[str] = None
+    weekly_hours: Optional[str] = None
+    hire_date: Optional[str] = None
+    contract_end_date: Optional[str] = None
+    category: Optional[str] = None
+    badge_rfid: Optional[str] = None
+    badge_expiry: Optional[str] = None
+    badge_active: Optional[bool] = None
+    locker: Optional[str] = None
+    # Section 3 — Planning
+    work_days: Optional[List[str]] = None
+    off_days: Optional[List[str]] = None
+    usual_hours: Optional[str] = None
+    break_time: Optional[str] = None
+    # Section 4 — Payroll
+    gross_salary: Optional[float] = None
+    net_salary: Optional[float] = None
+    hourly_rate: Optional[float] = None
+    iban: Optional[str] = None
+    bic: Optional[str] = None
+    account_holder: Optional[str] = None
+    meal_points: Optional[int] = None
+    contract_url: Optional[str] = None
+    # Section 7 — Access
+    admin_role: Optional[str] = None
+    permissions: Optional[List[str]] = None
+    groups: Optional[List[str]] = None
+    role_category: Optional[str] = None
 
 
 class StatusPayload(BaseModel):
@@ -4923,10 +5048,17 @@ class StatusPayload(BaseModel):
 
 
 async def _require_admin_full():
+    """Admin-only user management. Allows either is_admin, full_admin permission,
+    or manage_users permission."""
     me = await db.employees.find_one({"id": current_user()}, {"_id": 0})
-    if not me or not me.get("is_admin"):
+    if not me:
         raise HTTPException(403, "Accès administrateur requis")
-    return me
+    if me.get("is_admin"):
+        return me
+    perms = set(me.get("permissions") or [])
+    if "full_admin" in perms or "manage_users" in perms:
+        return me
+    raise HTTPException(403, "Accès administrateur requis")
 
 
 @api.get("/admin/users")
@@ -4973,6 +5105,35 @@ async def admin_create_user(payload: UserCreate):
     data.setdefault("created_at", _now())
     _apply_user_derivations(data)
     await db.employees.insert_one(data.copy())
+
+    # Generate an initial 7-day sample planning based on the weekly pattern.
+    # Starts on the next Monday so the admin sees a complete week.
+    try:
+        pattern = data.get("weekly_pattern") or {}
+        if pattern:
+            today = date.today()
+            days_until_monday = (7 - today.weekday()) % 7 or 7  # next Monday
+            start = today + timedelta(days=days_until_monday)
+            for i in range(7):
+                d = start + timedelta(days=i)
+                p = (pattern.get(str(d.weekday())) or {})
+                is_off = not p or p.get("type") == "off"
+                sched_doc = {
+                    "id": _id(),
+                    "employee_id": data["id"],
+                    "day": d.isoformat(),
+                    "shift_type": "off" if is_off else "work",
+                    "start_time": None if is_off else p.get("start"),
+                    "end_time": None if is_off else p.get("end"),
+                    "role": data.get("role"),
+                    "service": data.get("department"),
+                    "manager": data.get("manager"),
+                    "source": "auto-seed-7d",
+                    "created_at": _now(),
+                }
+                await db.schedules.insert_one(sched_doc)
+    except Exception as _e:
+        pass
     # Register a Documents RH entry if a contract was uploaded during creation
     if data.get("contract_url"):
         await db.documents.insert_one({
@@ -4995,9 +5156,13 @@ async def admin_update_user(uid: str, payload: UserUpdate):
     u = await db.employees.find_one({"id": uid}, {"_id": 0})
     if not u:
         raise HTTPException(404, "Utilisateur introuvable")
-    data = {k: v for k, v in payload.model_dump().items() if v is not None}
+    # Only touch fields the caller explicitly sent (partial update).
+    # exclude_unset ensures a missing field doesn't overwrite existing values
+    # (including permissions, statuses, work_days, is_admin flags, etc.).
+    data = payload.model_dump(exclude_unset=True)
     # Never touch the password via this endpoint (dedicated reset endpoint exists)
     data.pop("password", None)
+    # Only recompute admin flags when admin_role was explicitly provided.
     if "admin_role" in data:
         data["is_admin"] = data["admin_role"] in ("superadmin", "direction")
         data["can_manage_communication"] = data["admin_role"] in (
@@ -5006,9 +5171,16 @@ async def admin_update_user(uid: str, payload: UserUpdate):
     # Merge current employee data with updates for derivation
     merged = {**u, **data}
     _apply_user_derivations(merged)
-    # Persist derived fields alongside explicit updates
-    for k in ("meal_points", "daily_quota", "weekly_pattern", "badge_active"):
-        data[k] = merged[k]
+    # Persist derived fields when their inputs were part of the update payload.
+    if "weekly_hours" in data:
+        data["contract_hours_weekly"] = merged["contract_hours_weekly"]
+    if "work_days" in data or "off_days" in data or "usual_hours" in data:
+        data["weekly_pattern"] = merged["weekly_pattern"]
+    if "statuses" in data or "meal_points" in data:
+        data["meal_points"] = merged["meal_points"]
+        data["daily_quota"] = merged["daily_quota"]
+    if "badge_active" not in data and merged.get("badge_active") is not None:
+        pass  # don't overwrite when caller didn't send it
     await db.employees.update_one({"id": uid}, {"$set": data})
     # If a new contract was attached and not already in Documents RH, register it
     if data.get("contract_url") and data.get("contract_url") != u.get("contract_url"):
@@ -5175,23 +5347,26 @@ def _build_weekly_pattern(work_days: list[str], off_days: list[str], usual_hours
 
 
 def _apply_user_derivations(data: dict) -> None:
-    """Mutate `data` in place: derive meal_points, weekly_pattern, daily_quota."""
+    """Mutate `data` in place: derive meal_points, weekly_pattern, daily_quota, contract_hours_weekly."""
+    # Convert `weekly_hours` (free-input string, may be "24h" or "35" or "20.5") to a real number
+    wh = data.get("weekly_hours")
+    if wh not in (None, ""):
+        try:
+            data["contract_hours_weekly"] = float(str(wh).replace("h", "").replace(",", ".").strip())
+        except ValueError:
+            pass
     statuses = data.get("statuses") or []
-    # meal_points auto if not explicitly overridden or if defaulted to None
     if data.get("meal_points") in (None, "", 0):
         data["meal_points"] = _derive_meal_points(statuses)
     data["daily_quota"] = data["meal_points"]
-    # Weekly pattern
     work_days = data.get("work_days") or []
     off_days = data.get("off_days") or []
     if work_days or off_days:
-        # Auto-complete: any weekday not listed as work is off
         listed = set(work_days) | set(off_days)
         for k in WEEKDAY_MAP:
             if k not in listed:
                 off_days = list(off_days) + [k]
         data["weekly_pattern"] = _build_weekly_pattern(work_days, off_days, data.get("usual_hours"))
-    # Badge defaults
     if data.get("badge_active") is None:
         data["badge_active"] = True
 
@@ -5271,7 +5446,7 @@ async def _ensure_range(employee_id: str, start: date, end: date) -> None:
 
 @api.get("/admin/employees")
 async def admin_list_employees():
-    await require_admin()
+    await require_permission("view_stats", "manage_users", "approve_leaves")
     items = await db.employees.find({}, {"_id": 0}).to_list(500)
     # add total scheduled hours for current week
     today_d = date.today()
@@ -5513,7 +5688,7 @@ async def admin_contract_status(employee_id: str, week_start: Optional[str] = No
 # ─── Admin requests management
 @api.get("/admin/requests")
 async def admin_list_requests(status: Optional[str] = None):
-    await require_admin()
+    await require_permission("approve_leaves", "approve_recovery", "view_stats")
     q: dict = {}
     if status:
         q["status"] = status
@@ -5534,10 +5709,16 @@ class RequestDecision(BaseModel):
 
 @api.post("/admin/requests/{rid}/approve")
 async def admin_approve_request(rid: str, payload: RequestDecision):
-    await require_admin()
+    me_doc = await db.employees.find_one({"id": current_user()}, {"_id": 0})
+    if not me_doc:
+        raise HTTPException(403, "Accès refusé")
     req = await db.requests.find_one({"id": rid}, {"_id": 0})
     if not req:
         raise HTTPException(404, "Demande introuvable")
+    # Permission check varies with the request type
+    req_type_perm = "approve_recovery" if req.get("type") == "recuperation" else "approve_leaves"
+    if not _has_permission(me_doc, req_type_perm):
+        raise HTTPException(403, "Permission requise")
     if req.get("status") == "approved":
         raise HTTPException(400, "Demande déjà approuvée")
     await db.requests.update_one(
@@ -5655,10 +5836,13 @@ async def admin_approve_request(rid: str, payload: RequestDecision):
 
 @api.post("/admin/requests/{rid}/reject")
 async def admin_reject_request(rid: str, payload: RequestDecision):
-    await require_admin()
+    me_doc = await db.employees.find_one({"id": current_user()}, {"_id": 0})
     req = await db.requests.find_one({"id": rid}, {"_id": 0})
     if not req:
         raise HTTPException(404, "Demande introuvable")
+    req_type_perm = "approve_recovery" if req.get("type") == "recuperation" else "approve_leaves"
+    if not _has_permission(me_doc, req_type_perm):
+        raise HTTPException(403, "Permission requise")
     await db.requests.update_one(
         {"id": rid},
         {"$set": {"status": "rejected", "decided_at": _now(), "decision_note": payload.note}},
@@ -5684,10 +5868,13 @@ async def admin_reject_request(rid: str, payload: RequestDecision):
 @api.post("/admin/requests/{rid}/info")
 async def admin_request_info(rid: str, payload: RequestDecision):
     """Ask the employee for more info."""
-    await require_admin()
+    me_doc = await db.employees.find_one({"id": current_user()}, {"_id": 0})
     req = await db.requests.find_one({"id": rid}, {"_id": 0})
     if not req:
         raise HTTPException(404, "Demande introuvable")
+    req_type_perm = "approve_recovery" if req.get("type") == "recuperation" else "approve_leaves"
+    if not _has_permission(me_doc, req_type_perm):
+        raise HTTPException(403, "Permission requise")
     await db.requests.update_one(
         {"id": rid},
         {"$set": {"status": "info_requested", "decided_at": _now(), "decision_note": payload.note}},
@@ -5800,7 +5987,7 @@ class NewsCreate(BaseModel):
 
 @api.post("/admin/news")
 async def admin_publish_news(payload: NewsCreate):
-    me = await require_communication_editor()
+    me = await require_permission("publish_news", "edit_news", "manage_carousel")
     # Comm editors publish under the official "MS Park" identity by default.
     is_official = not me.get("is_admin") and me.get("can_manage_communication")
     author_name = "MS Park" if is_official else f"{me['first_name']} {me['last_name']}"
@@ -5860,7 +6047,7 @@ class NewsUpdate(BaseModel):
 
 @api.put("/admin/news/{nid}")
 async def admin_update_news(nid: str, payload: NewsUpdate):
-    await require_communication_editor()
+    await require_permission("edit_news", "publish_news", "manage_carousel")
     updates = {k: v for k, v in payload.model_dump().items() if v is not None}
     if updates:
         await db.news.update_one({"id": nid}, {"$set": updates})
@@ -5872,7 +6059,7 @@ async def admin_update_news(nid: str, payload: NewsUpdate):
 
 @api.delete("/admin/news/{nid}")
 async def admin_delete_news(nid: str):
-    await require_communication_editor()
+    await require_permission("edit_news", "manage_carousel")
     await db.news.delete_one({"id": nid})
     return {"ok": True}
 
@@ -5884,7 +6071,7 @@ class ReorderPayload(BaseModel):
 @api.post("/admin/news/reorder")
 async def admin_reorder_news(payload: ReorderPayload):
     """Persist a full ordered list of news IDs — assigns order 10, 20, 30 …"""
-    await require_communication_editor()
+    await require_permission("manage_carousel", "edit_news")
     for i, nid in enumerate(payload.ids):
         await db.news.update_one({"id": nid}, {"$set": {"order": (i + 1) * 10}})
     return {"ok": True, "count": len(payload.ids)}
@@ -6019,7 +6206,7 @@ async def admin_regenerate_badging(employee_id: str):
 # ─── Admin stats
 @api.get("/admin/stats")
 async def admin_stats():
-    await require_admin()
+    await require_permission("view_stats")
     today_d = date.today()
     monday = today_d - timedelta(days=today_d.weekday())
     sunday = monday + timedelta(days=6)
@@ -6341,7 +6528,7 @@ async def list_my_newsletter_bookmarks():
 
 @api.post("/admin/newsletters")
 async def create_newsletter(payload: NewsletterCreate):
-    me = await require_communication_editor()
+    me = await require_permission("manage_newsletter")
     n = payload.model_dump()
     n["id"] = _id()
     n["author_id"] = n.get("author_id") or me["id"]
@@ -6365,7 +6552,7 @@ async def create_newsletter(payload: NewsletterCreate):
 
 @api.put("/admin/newsletters/{nid}")
 async def update_newsletter(nid: str, payload: NewsletterCreate):
-    await require_communication_editor()
+    await require_permission("manage_newsletter")
     old = await db.newsletters.find_one({"id": nid}, {"_id": 0})
     if not old:
         raise HTTPException(404, "Newsletter introuvable")
@@ -6389,14 +6576,14 @@ async def update_newsletter(nid: str, payload: NewsletterCreate):
 
 @api.delete("/admin/newsletters/{nid}")
 async def delete_newsletter(nid: str):
-    await require_communication_editor()
+    await require_permission("manage_newsletter")
     await db.newsletters.delete_one({"id": nid})
     return {"ok": True}
 
 
 @api.post("/admin/newsletters/{nid}/archive")
 async def archive_newsletter(nid: str):
-    await require_communication_editor()
+    await require_permission("manage_newsletter")
     await db.newsletters.update_one({"id": nid}, {"$set": {"archived": True}})
     return {"ok": True}
 
@@ -6469,7 +6656,7 @@ async def submit_expense(payload: ExpenseCreate):
 
 @api.get("/admin/expenses")
 async def admin_list_expenses(status: Optional[str] = None, period: Optional[str] = None):
-    await require_admin()
+    await require_permission("view_expenses", "approve_expenses")
     query: dict = {}
     if status:
         query["status"] = status
@@ -6496,7 +6683,7 @@ async def admin_list_expenses(status: Optional[str] = None, period: Optional[str
 
 @api.get("/admin/expenses/{eid}")
 async def admin_get_expense(eid: str):
-    await require_admin()
+    await require_permission("view_expenses", "approve_expenses")
     e = await db.expenses.find_one({"id": eid}, {"_id": 0})
     if not e:
         raise HTTPException(404, "Note de frais introuvable")
@@ -6510,7 +6697,7 @@ class ExpenseDecision(BaseModel):
 
 @api.put("/admin/expenses/{eid}/decide")
 async def admin_decide_expense(eid: str, payload: ExpenseDecision):
-    me = await require_admin()
+    me = await require_permission("approve_expenses")
     if payload.status not in ("approved", "rejected"):
         raise HTTPException(400, "Statut invalide")
     upd = {"status": payload.status, "decision_comment": payload.comment or "",
@@ -6531,7 +6718,7 @@ async def admin_decide_expense(eid: str, payload: ExpenseDecision):
 
 @api.post("/admin/expenses/{eid}/refund")
 async def admin_refund_expense(eid: str):
-    await require_admin()
+    await require_permission("approve_expenses")
     await db.expenses.update_one({"id": eid}, {"$set": {"status": "refunded", "refunded_at": _now()}})
     e = await db.expenses.find_one({"id": eid}, {"_id": 0})
     if e:
@@ -6597,7 +6784,7 @@ async def get_gallery(gid: str):
 
 @api.post("/admin/galleries")
 async def create_gallery(payload: AlbumCreate):
-    me = await require_communication_editor()
+    me = await require_permission("add_gallery")
     g = payload.model_dump()
     g["id"] = _id()
     g["author_id"] = me["id"]
@@ -6608,7 +6795,7 @@ async def create_gallery(payload: AlbumCreate):
 
 @api.put("/admin/galleries/{gid}")
 async def update_gallery(gid: str, payload: AlbumCreate):
-    await require_communication_editor()
+    await require_permission("add_gallery")
     upd = payload.model_dump()
     await db.galleries.update_one({"id": gid}, {"$set": upd})
     return await db.galleries.find_one({"id": gid}, {"_id": 0})
@@ -6616,7 +6803,7 @@ async def update_gallery(gid: str, payload: AlbumCreate):
 
 @api.delete("/admin/galleries/{gid}")
 async def delete_gallery(gid: str):
-    await require_communication_editor()
+    await require_permission("add_gallery")
     await db.galleries.delete_one({"id": gid})
     await db.photos.delete_many({"album_id": gid})
     return {"ok": True}
@@ -6737,7 +6924,7 @@ async def get_hr_doc(did: str):
 
 @api.post("/admin/hr-documents")
 async def create_hr_doc(payload: HRDocCreate):
-    me = await require_communication_editor()
+    me = await require_permission("manage_documents", "publish_documents")
     d = payload.model_dump()
     d["id"] = _id()
     d["author_id"] = me["id"]
@@ -6759,7 +6946,7 @@ async def create_hr_doc(payload: HRDocCreate):
 
 @api.put("/admin/hr-documents/{did}")
 async def update_hr_doc(did: str, payload: HRDocCreate):
-    await require_communication_editor()
+    await require_permission("manage_documents", "publish_documents")
     old = await db.hr_documents.find_one({"id": did}, {"_id": 0})
     if not old:
         raise HTTPException(404, "Document introuvable")
@@ -6772,7 +6959,7 @@ async def update_hr_doc(did: str, payload: HRDocCreate):
 
 @api.delete("/admin/hr-documents/{did}")
 async def delete_hr_doc(did: str):
-    await require_communication_editor()
+    await require_permission("manage_documents")
     await db.hr_documents.delete_one({"id": did})
     return {"ok": True}
 

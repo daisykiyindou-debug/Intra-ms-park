@@ -1,12 +1,24 @@
 import { useEffect, useRef, useState } from "react";
 import { Bell, Menu, Search, LogOut, User, ShieldCheck, Cake, Mail, MessageSquare } from "lucide-react";
 import { useNavigate, Link } from "react-router-dom";
-import { useApp } from "@/contexts/AppContext";
+import { useApp, hasPermission } from "@/contexts/AppContext";
 import { api, setAuthId } from "@/lib/api";
 
 export default function Header({ onMenuClick, onNotifClick }) {
   const { me, notifications, refreshNotifications, adminMode, toggleAdminMode } = useApp();
-  const canToggleAdmin = !!me && (me.is_admin || me.can_manage_communication);
+  // Anyone with any management-scoped permission can toggle admin mode too.
+  const canToggleAdmin = !!me && (
+    me.is_admin ||
+    me.can_manage_communication ||
+    hasPermission(me,
+      "publish_news", "edit_news", "manage_carousel", "manage_newsletter",
+      "create_events", "edit_events", "manage_documents", "publish_documents",
+      "view_payslips", "create_forms", "view_tickets", "reply_tickets",
+      "manage_users", "approve_leaves", "approve_recovery",
+      "view_expenses", "approve_expenses", "export_data", "view_stats",
+      "full_admin", "add_gallery",
+    )
+  );
 
   const messageNotifs = notifications.filter((n) => n.type === "message");
   const otherNotifs = notifications.filter((n) => n.type !== "message");

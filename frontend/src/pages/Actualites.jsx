@@ -8,7 +8,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { api, formatDateFr, absoluteUrl } from "@/lib/api";
-import { useApp } from "@/contexts/AppContext";
+import { useApp, hasPermission } from "@/contexts/AppContext";
 import useLiveData, { notifyLiveRefresh } from "@/hooks/useLiveData";
 import RichTextEditor from "@/components/RichTextEditor";
 import ImageUpload from "@/components/ImageUpload";
@@ -68,7 +68,7 @@ const OFFICIAL_AVATAR =
 
 export default function Actualites() {
   const { me, findEmployee, adminMode } = useApp();
-  const isPoster = !!me?.is_admin || !!me?.can_manage_communication;
+  const isPoster = !!me?.is_admin || !!me?.can_manage_communication || hasPermission(me, "publish_news", "edit_news");
   const canPublishAsMSPark = isPoster && adminMode !== false;
   const [posts, setPosts] = useState([]);
   const [filter, setFilter] = useState("all");

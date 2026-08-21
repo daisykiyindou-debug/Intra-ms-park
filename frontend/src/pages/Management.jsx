@@ -78,11 +78,18 @@ export default function ManagementShell() {
 
   const isAdmin = !!me?.is_admin;
   const isComm = !!me?.can_manage_communication;
+  // A regular user with any management-scoped permission also gets access.
+  const hasAnyMgmtPerm = !!me?.permissions?.some?.((p) =>
+    ["publish_news", "edit_news", "manage_carousel", "manage_newsletter", "create_events",
+      "edit_events", "manage_documents", "publish_documents", "view_payslips", "create_forms",
+      "view_tickets", "reply_tickets", "manage_users", "approve_leaves", "approve_recovery",
+      "view_expenses", "approve_expenses", "export_data", "view_stats", "full_admin", "add_gallery"].includes(p)
+  );
 
-  // Block users with neither admin nor communication rights
-  if (me && !isAdmin && !isComm) {
+  // Block users with neither admin nor communication rights nor granular perms
+  if (me && !isAdmin && !isComm && !hasAnyMgmtPerm) {
     return (
-      <div className="ms-card p-12 text-center">
+      <div className="ms-card p-12 text-center" data-testid="mgmt-access-denied">
         <ShieldCheck className="mx-auto h-12 w-12 text-[#EF4444]" />
         <h2 className="mt-4 text-xl font-bold text-[#071B34]">Accès réservé aux administrateurs</h2>
         <p className="mt-2 text-sm text-[#475569]">
@@ -99,11 +106,43 @@ export default function ManagementShell() {
     { to: "/management/agenda", label: "Agenda", icon: CalendarDays },
     { to: "/management/formulaires", label: "Formulaires", icon: FileText },
   ];
-  const tabs = isAdmin ? subNav : commSubNav;
-  const headerAccent = isAdmin ? "#7C3AED" : "#F59E0B";
-  const headerBg = isAdmin ? "bg-[#A78BFA]/15 text-[#7C3AED]" : "bg-[#F59E0B]/15 text-[#B45309]";
-  const headerOverline = isAdmin ? "Espace Management" : "Espace Communication";
-  const headerTitle = isAdmin ? "Pilotage opérationnel" : "Gestion de la communication interne";
+  const has = (...k) => isAdmin || (me?.permissions || []).includes("full_admin") || k.some((p) => (me?.permissions || []).includes(p));
+  // Build a permission-aware sub-nav: admins see everything; comm editors see
+  // the communication tabs; users with granular perms see just the ones they can use.
+  const permAwareSubNav = isAdmin
+    ? subNav
+    : subNav.filter((s) => {
+        const path = s.to.split("/").pop();
+        if (path === "management" || s.end) return has("view_stats");
+        if (path === "planning") return has("manage_users", "approve_leaves");
+        if (path === "demandes") return has("approve_leaves", "approve_recovery");
+        if (path === "attributions") return has("approve_leaves");
+        if (path === "notes-de-frais") return has("view_expenses", "approve_expenses");
+        if (path === "heures-supp") return has("approve_recovery", "approve_leaves");
+        if (path === "restauration") return has("manage_documents");
+        if (path === "carrousel") return has("manage_carousel");
+        if (path === "agenda") return has("create_events", "edit_events");
+        if (path === "formulaires") return has("create_forms");
+        if (path === "utilisateurs") return has("manage_users");
+        if (path === "fiches-de-paie") return has("view_payslips");
+        if (path === "documents-editor") return has("manage_documents", "publish_documents");
+        if (path === "idees") return false;
+        if (path === "avantages") return false;
+        return false;
+      });
+  const tabs = isAdmin ? subNav : (isComm ? [...commSubNav, ...permAwareSubNav.filter((t) => !commSubNav.find((c) => c.to === t.to))] : permAwareSubNav);
+  const headerAccent = isAdmin ? "#7C3AED" : isComm ? "#F59E0B" : "#0EA5E9";
+  const headerBg = isAdmin
+    ? "bg-[#A78BFA]/15 text-[#7C3AED]"
+    : isComm
+    ? "bg-[#F59E0B]/15 text-[#B45309]"
+    : "bg-[#0EA5E9]/15 text-[#0369A1]";
+  const headerOverline = isAdmin ? "Espace Management" : isComm ? "Espace Communication" : "Espace Management";
+  const headerTitle = isAdmin
+    ? "Pilotage opérationnel"
+    : isComm
+    ? "Gestion de la communication interne"
+    : "Vos outils de gestion";
 
   return (
     <div className="space-y-5 ms-fade-up">
@@ -139,30 +178,30 @@ export default function ManagementShell() {
       </div>
 
       <Routes>
-        {isAdmin && <Route index element={<Overview />} />}
-        {isAdmin && <Route path="planning" element={<PlanningManager />} />}
-        {isAdmin && <Route path="demandes" element={<RequestsManager />} />}
-        {isAdmin && <Route path="attributions" element={<LeaveGrantManager />} />}
-        <Route path="carrousel" element={<NewsManager />} />
-        <Route path="agenda" element={<AgendaManager />} />
-        <Route path="formulaires" element={<FormBuilder />} />
-        {isAdmin && <Route path="utilisateurs" element={<UserManager />} />}
+        {(isAdmin || has("view_stats")) && <Route index element={<Overview />} />}
+        {(isAdmin || has("manage_users", "approve_leaves")) && <Route path="planning" element={<PlanningManager />} />}
+        {(isAdmin || has("approve_leaves", "approve_recovery")) && <Route path="demandes" element={<RequestsManager />} />}
+        {(isAdmin || has("approve_leaves")) && <Route path="attributions" element={<LeaveGrantManager />} />}
+        {(isAdmin || isComm || has("manage_carousel")) && <Route path="carrousel" element={<NewsManager />} />}
+        {(isAdmin || isComm || has("create_events", "edit_events")) && <Route path="agenda" element={<AgendaManager />} />}
+        {(isAdmin || isComm || has("create_forms")) && <Route path="formulaires" element={<FormBuilder />} />}
+        {(isAdmin || has("manage_users")) && <Route path="utilisateurs" element={<UserManager />} />}
         <Route path="actualites" element={<Navigate to="/management/carrousel" replace />} />
-        {isAdmin && <Route path="documents" element={<DocumentsManager />} />}
-        {isAdmin && <Route path="notes-de-frais" element={<ExpensesManager />} />}
-        {isAdmin && <Route path="heures-supp" element={<OvertimeManager />} />}
-        {isAdmin && <Route path="formations" element={<FormationsManager />} />}
-        {isAdmin && <Route path="restauration" element={<RestaurationManager />} />}
-        {isAdmin && <Route path="fiches-de-paie" element={<PayslipsManager />} />}
+        {(isAdmin || has("manage_documents")) && <Route path="documents" element={<DocumentsManager />} />}
+        {(isAdmin || has("view_expenses", "approve_expenses")) && <Route path="notes-de-frais" element={<ExpensesManager />} />}
+        {(isAdmin || has("approve_recovery", "approve_leaves")) && <Route path="heures-supp" element={<OvertimeManager />} />}
+        {(isAdmin || has("manage_documents")) && <Route path="formations" element={<FormationsManager />} />}
+        {(isAdmin || has("manage_documents")) && <Route path="restauration" element={<RestaurationManager />} />}
+        {(isAdmin || has("view_payslips", "manage_documents")) && <Route path="fiches-de-paie" element={<PayslipsManager />} />}
         {isAdmin && <Route path="idees" element={<IdeasAdmin />} />}
         {isAdmin && <Route path="avantages" element={<PartnersManager />} />}
-        {isAdmin && <Route path="support" element={<SupportITList />} />}
-        {isAdmin && <Route path="documents-editor" element={<HRDocsManager />} />}
-        {isAdmin && <Route path="documents-editor/:id" element={<HRDocEditor />} />}
+        {(isAdmin || has("view_tickets", "reply_tickets")) && <Route path="support" element={<SupportITList />} />}
+        {(isAdmin || has("manage_documents", "publish_documents")) && <Route path="documents-editor" element={<HRDocsManager />} />}
+        {(isAdmin || has("manage_documents", "publish_documents")) && <Route path="documents-editor/:id" element={<HRDocEditor />} />}
         <Route path="fil" element={<Navigate to="/actualites" replace />} />
-        {/* Comm editor without admin lands on carrousel by default */}
-        {!isAdmin && <Route index element={<Navigate to="/management/carrousel" replace />} />}
-        <Route path="*" element={<Navigate to={isAdmin ? "/management" : "/management/carrousel"} replace />} />
+        {/* Non-admin fallback: land on the first tab the user is actually allowed to see */}
+        {!isAdmin && permAwareSubNav[0] && <Route index element={<Navigate to={permAwareSubNav[0].to} replace />} />}
+        <Route path="*" element={<Navigate to={isAdmin ? "/management" : (permAwareSubNav[0]?.to || "/dashboard")} replace />} />
       </Routes>
     </div>
   );
@@ -174,13 +213,25 @@ function Overview() {
   const [stats, setStats] = useState(null);
   const [employees, setEmployees] = useState([]);
   const [pendingReqs, setPendingReqs] = useState([]);
+  const [error, setError] = useState(false);
 
   useEffect(() => {
-    api.get("/admin/stats").then((r) => setStats(r.data));
-    api.get("/admin/employees").then((r) => setEmployees(r.data));
-    api.get("/admin/requests?status=pending").then((r) => setPendingReqs(r.data));
+    api.get("/admin/stats").then((r) => setStats(r.data)).catch(() => setError(true));
+    api.get("/admin/employees").then((r) => setEmployees(r.data)).catch(() => {});
+    api.get("/admin/requests?status=pending").then((r) => setPendingReqs(r.data)).catch(() => {});
   }, []);
 
+  if (error) {
+    return (
+      <div className="ms-card p-8 text-center">
+        <ShieldCheck className="mx-auto h-10 w-10 text-[#F59E0B]" />
+        <h3 className="mt-3 text-lg font-bold text-[#071B34]">Statistiques indisponibles</h3>
+        <p className="mt-1 text-sm text-[#475569]">
+          Vous n&apos;avez pas la permission d&apos;accéder aux statistiques globales.
+        </p>
+      </div>
+    );
+  }
   if (!stats) return <div className="ms-card p-8 animate-pulse h-64" />;
 
   return (

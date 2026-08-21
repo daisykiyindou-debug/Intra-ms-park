@@ -31,7 +31,7 @@ import {
   LifeBuoy,
   HelpCircle,
 } from "lucide-react";
-import { useApp } from "@/contexts/AppContext";
+import { useApp, hasPermission } from "@/contexts/AppContext";
 
 // ─── Employee nav: grouped by section
 const employeeNav = [
@@ -67,26 +67,27 @@ const employeeNav = [
   { to: "/aide", label: "Centre d'aide", icon: HelpCircle, key: "help" },
 ];
 
+// Each admin nav item can carry a `perm` array. Full admins bypass filtering.
 const adminNav = [
   { divider: "Management", adminBadge: true },
-  { to: "/management", label: "Vue d'ensemble", icon: BarChart3, key: "mgmt-overview" },
-  { to: "/management/planning", label: "Plannings employés", icon: ClipboardList, key: "mgmt-planning" },
-  { to: "/management/demandes", label: "Validation demandes", icon: Inbox, key: "mgmt-demandes" },
-  { to: "/management/attributions", label: "RTT / CP", icon: Gift, key: "mgmt-rtt" },
-  { to: "/management/notes-de-frais", label: "Notes de frais", icon: Receipt, key: "mgmt-expenses" },
-  { to: "/management/heures-supp", label: "Heures supp. & récup.", icon: Clock, key: "mgmt-overtime" },
-  { to: "/management/restauration", label: "Restauration (menu)", icon: UtensilsCrossed, key: "mgmt-restauration" },
-  { to: "/management/formations", label: "Formations", icon: GraduationCap, key: "mgmt-formations" },
-  { to: "/management/support", label: "Support IT (tickets)", icon: LifeBuoy, key: "mgmt-support" },
-  { to: "/management/carrousel", label: "Carrousel accueil", icon: Newspaper, key: "mgmt-carrousel" },
-  { to: "/management/agenda", label: "Agenda", icon: Calendar, key: "mgmt-agenda" },
-  { to: "/management/formulaires", label: "Formulaires", icon: ListChecks, key: "mgmt-forms" },
-  { to: "/management/utilisateurs", label: "Utilisateurs", icon: Users, key: "mgmt-users" },
-  { to: "/management/fiches-de-paie", label: "Fiches de paie", icon: FileText, key: "mgmt-payslips" },
+  { to: "/management", label: "Vue d'ensemble", icon: BarChart3, key: "mgmt-overview", perm: ["view_stats"] },
+  { to: "/management/planning", label: "Plannings employés", icon: ClipboardList, key: "mgmt-planning", perm: ["manage_users", "approve_leaves"] },
+  { to: "/management/demandes", label: "Validation demandes", icon: Inbox, key: "mgmt-demandes", perm: ["approve_leaves", "approve_recovery"] },
+  { to: "/management/attributions", label: "RTT / CP", icon: Gift, key: "mgmt-rtt", perm: ["approve_leaves"] },
+  { to: "/management/notes-de-frais", label: "Notes de frais", icon: Receipt, key: "mgmt-expenses", perm: ["view_expenses", "approve_expenses"] },
+  { to: "/management/heures-supp", label: "Heures supp. & récup.", icon: Clock, key: "mgmt-overtime", perm: ["approve_recovery", "approve_leaves"] },
+  { to: "/management/restauration", label: "Restauration (menu)", icon: UtensilsCrossed, key: "mgmt-restauration", perm: ["manage_documents"] },
+  { to: "/management/formations", label: "Formations", icon: GraduationCap, key: "mgmt-formations", perm: ["manage_documents"] },
+  { to: "/management/support", label: "Support IT (tickets)", icon: LifeBuoy, key: "mgmt-support", perm: ["view_tickets", "reply_tickets"] },
+  { to: "/management/carrousel", label: "Carrousel accueil", icon: Newspaper, key: "mgmt-carrousel", perm: ["manage_carousel"] },
+  { to: "/management/agenda", label: "Agenda", icon: Calendar, key: "mgmt-agenda", perm: ["create_events", "edit_events"] },
+  { to: "/management/formulaires", label: "Formulaires", icon: ListChecks, key: "mgmt-forms", perm: ["create_forms"] },
+  { to: "/management/utilisateurs", label: "Utilisateurs", icon: Users, key: "mgmt-users", perm: ["manage_users"] },
+  { to: "/management/fiches-de-paie", label: "Fiches de paie", icon: FileText, key: "mgmt-payslips", perm: ["view_payslips"] },
   { to: "/management/idees", label: "Boîte à idées", icon: Lightbulb, key: "mgmt-ideas" },
-  { to: "/management/documents-editor", label: "Rédiger documents", icon: Edit3, key: "mgmt-hrdocs" },
-  { to: "/newsletters", label: "Newsletters", icon: Mail, key: "mgmt-newsletters" },
-  { to: "/actualites", label: "Actualités (rédaction)", icon: Newspaper, key: "mgmt-news" },
+  { to: "/management/documents-editor", label: "Rédiger documents", icon: Edit3, key: "mgmt-hrdocs", perm: ["manage_documents", "publish_documents"] },
+  { to: "/newsletters", label: "Newsletters", icon: Mail, key: "mgmt-newsletters", perm: ["manage_newsletter"] },
+  { to: "/actualites", label: "Actualités (rédaction)", icon: Newspaper, key: "mgmt-news", perm: ["publish_news", "edit_news"] },
 ];
 
 const commNav = [
@@ -111,12 +112,41 @@ export default function Sidebar({ open, onClose }) {
   const isComm = !!me?.can_manage_communication && !isAdmin;
   const showAdmin = adminMode !== false; // default true; when toggled off, hide admin nav
 
+  // Filter admin nav items by permission. Admins (and full_admin) get everything;
+  // other users only get items whose `perm` matches one of their permissions.
+  const filterByPerm = (nav) => {
+    if (isAdmin) return nav;
+    // Remove leading/trailing dividers left orphaned after filtering
+    const filtered = nav.filter((it) => {
+      if (it.divider) return true;
+      if (!it.perm) return false; // items without explicit perm are admin-only
+      return hasPermission(me, ...it.perm);
+    });
+    // Drop dividers not followed by at least one item
+    const cleaned = filtered.filter((it, i) => {
+      if (!it.divider) return true;
+      const next = filtered[i + 1];
+      return next && !next.divider;
+    });
+    return cleaned;
+  };
+
+  // Non-admin users with granular permissions also see the filtered admin section
+  const hasAnyMgmtPerm = !isAdmin && !isSuperAdmin && me?.permissions?.some?.((p) =>
+    ["publish_news", "edit_news", "manage_carousel", "manage_newsletter", "create_events",
+      "edit_events", "manage_documents", "publish_documents", "view_payslips", "create_forms",
+      "view_tickets", "reply_tickets", "manage_users", "approve_leaves", "approve_recovery",
+      "view_expenses", "approve_expenses", "export_data", "view_stats", "full_admin", "add_gallery"].includes(p)
+  );
+
   const items = isSuperAdmin
     ? [...superAdminBase, ...(showAdmin ? adminNav : [])]
     : isAdmin
     ? [...employeeNav, ...(showAdmin ? adminNav : [])]
     : isComm
-    ? [...employeeNav, ...(showAdmin ? commNav : [])]
+    ? [...employeeNav, ...(showAdmin ? [...commNav, ...filterByPerm(adminNav).filter((i) => !i.divider)] : [])]
+    : hasAnyMgmtPerm && showAdmin
+    ? [...employeeNav, ...filterByPerm(adminNav)]
     : employeeNav;
 
   return (

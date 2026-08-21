@@ -7,7 +7,7 @@ import {
 import { toast } from "sonner";
 import { Link } from "react-router-dom";
 import { api } from "@/lib/api";
-import { useApp } from "@/contexts/AppContext";
+import { useApp, hasPermission } from "@/contexts/AppContext";
 import PortalModal from "@/components/PortalModal";
 
 const FR_MONTHS = [
@@ -25,7 +25,7 @@ const eur = (n) => `${Number(n || 0).toFixed(2).replace(".", ",")} €`;
 
 export default function PayslipsManager() {
   const { me, adminMode, employees } = useApp();
-  const canManage = !!me?.is_admin && adminMode !== false;
+  const canManage = adminMode !== false && (!!me?.is_admin || hasPermission(me, "view_payslips", "manage_documents"));
 
   const [monthKey, setMonthKey] = useState(() => {
     const d = new Date();

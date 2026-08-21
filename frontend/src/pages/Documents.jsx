@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import { api, formatDateFr } from "@/lib/api";
 import useLiveData from "@/hooks/useLiveData";
 import PortalModal from "@/components/PortalModal";
-import { useApp } from "@/contexts/AppContext";
+import { useApp, hasPermission } from "@/contexts/AppContext";
 
 const CATEGORIES = [
   { k: "all", l: "Toutes les catégories" },
@@ -26,7 +26,7 @@ const TABS = [
 
 export default function Documents() {
   const { me, adminMode, employees } = useApp();
-  const isAdmin = !!me?.is_admin && adminMode !== false;
+  const isAdmin = adminMode !== false && (!!me?.is_admin || hasPermission(me, "manage_documents", "publish_documents"));
   const [docs, setDocs] = useState([]);
   const [hrDocs, setHrDocs] = useState([]);
   const [favIds, setFavIds] = useState(() => new Set(JSON.parse(localStorage.getItem("docFavs") || "[]")));

@@ -1,0 +1,80 @@
+{
+  "summary": "Iter 29 re-test of Lot 2 permission-enforcement fixes. BACKEND: 21/21 pytest PASS (new /app/backend/tests/test_iter29_permission_fixes.py 10 tests + iter28 regression suite 11 tests). Verified: (1) permission bleed FIXED — Idriss with only publish_news gets 403 on POST /admin/events and POST /admin/newsletters while POST /admin/news stays 200; manage_newsletter alone gets 403 on /admin/news and /admin/events; create_events alone gets 200 on /admin/events but 403 on /admin/news. (2) view_stats FIXED — 200 on GET /admin/stats, /admin/employees, /admin/requests?status=pending, while /admin/news, /admin/payslips, /admin/users remain 403. (3) Partial PUT FIXED — full save (permissions=[view_stats,publish_news], statuses, work_days, admin_role=superadmin -> is_admin true) followed by PUT {personal_phone:'0611223344'} preserves permissions/statuses/work_days/is_admin (verified via response AND follow-up GET). (4) cancel of an approved 'cp' request FIXED — days_consumed refunded to leave_balance.cp_n (exact match) and the injected type='leave' planning entries are removed (verified via GET /schedule). (5) Unchanged behaviour holds: permissions=[] -> 403 on 8 admin endpoints; full_admin and is_admin unlock everything. FRONTEND (real UI login on public URL): Idriss/publish_news sidebar shows ONLY 'Actualités (rédaction)'; Idriss/view_stats loads /management Overview with real KPI data (18 employés, 172h30, 1 demande, 405h00 écart) and NO CRA runtime overlay and no console errors; Idriss/view_payslips header reads 'ESPACE MANAGEMENT — Vos outils de gestion' and /management auto-redirects to the first allowed tab (/management/fiches-de-paie); Idriss with permissions=[] sees the mgmt-access-denied block and no Management sidebar section; Marcus sees 18 admin sidebar entries + 15 Management tabs, tab navigation works, admin toggle hides (0) and restores (18) admin nav. ONE requested fix did NOT hold: /management/carrousel is still fully accessible (carousel slide editor renders) for a publish_news-only user.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "ALL /api/* (auth model)",
+        "issue": "Identity is taken verbatim from the client-supplied X-Employee-Id header (attach_current_user middleware) with no token/session validation, so every permission check verified in this iteration can be bypassed by any caller simply sending X-Employee-Id: emp-marcus-simeo. Additionally /api/auth/login compares plaintext passwords (no bcrypt), issues no session token/httpOnly cookie, has no brute-force lockout, and CORS is allow_origins=['*'] together with allow_credentials=True (invalid combination, browsers reject credentialed wildcard). Acceptable only as an explicit MVP shortcut — must be flagged to the product owner before any real deployment.",
+        "priority": "CRITICAL"
+      }
+    ],
+    "minor": [
+      {
+        "endpoint": "POST/PUT /api/admin/news, POST /api/admin/news/reorder",
+        "issue": "manage_carousel is not separated from news: publish_news/edit_news are accepted on the endpoints that create/update carousel-featured items and reorder the carousel, so a publish_news-only user can manage the homepage carousel. If manage_carousel is meant to be a distinct grant, carousel-specific writes (featured flag, order/reorder, slide CRUD) must require manage_carousel."
+      },
+      {
+        "endpoint": "POST /api/admin/requests/{rid}/approve",
+        "issue": "Leave approval does not validate the remaining balance — approving a 3-day cp with only 2.5 days of cp_n left drives leave_balance.cp_n negative (observed 2.5 -> -0.5 during exploration). Also, if a day was already materialized as 'off' before the employee's weekly_pattern was updated, approval silently skips it (days_consumed=0, no planning entry), so a stale-materialized planning yields an approved leave with zero effect."
+      },
+      {
+        "endpoint": "POST /api/requests/{rid}/cancel",
+        "issue": "Cancel deletes the leave/rtt schedule rows outright instead of restoring the original shift entry; the day falls back to the weekly pattern on the next _ensure_range. Works for the seeded patterns but any manually edited shift for those days is lost."
+      },
+      {
+        "endpoint": "PUT /api/admin/users/{uid}",
+        "issue": "work_days/off_days only accept the English keys in WEEKDAY_MAP (monday..sunday); any other value is silently ignored and weekly_pattern stays all-off with no validation error (Idriss' seed doc currently has work_days=[] -> a 24h/week employee with an all-off pattern)."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {
+        "flow": "Idriss with permissions=['publish_news'] navigating directly to /management/carrousel",
+        "issue": "Requested fix NOT applied: the route is still rendered (Management.jsx line 185 allows manage_carousel OR publish_news OR edit_news), so the full 'Ajouter une slide au carrousel' editor + carousel reorder list is reachable even though the tab/sidebar entry is correctly hidden. Expected: redirect to the first allowed tab. Either gate the route on manage_carousel only, or intentionally document that publish_news includes carousel management (and then re-add the tab so the UI is consistent).",
+        "affected_selectors": ["[data-testid=\"mgmt-tab-carrousel\"]", "/management/carrousel"]
+      }
+    ],
+    "design_issues": [
+      {
+        "screen": "Management tab bar (Marcus, 1920px)",
+        "issues": ["15 tabs overflow horizontally and the last tab ('Rédiger documents') is visually clipped at the right edge with no scroll affordance/gradient hint", "Sidebar exposes 'Support IT (tickets)' but there is no matching Management tab, so the tab set and sidebar disagree"]
+      },
+      {
+        "screen": "Management (non-admin with granular perms)",
+        "issues": ["Fiches de paie route also opens for manage_documents (route line 195) while the tab requires view_payslips — route/tab permission sets are inconsistent"]
+      }
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter29_permission_fixes.py",
+    "/app/backend/tests/test_iter28_permissions.py",
+    "/app/test_reports/pytest/iter29_results.xml",
+    "/app/test_reports/cleanup_iter29.py"
+  ],
+  "action_items": [
+    "Decide and implement the carrousel rule: block /management/carrousel for publish_news-only users (Management.jsx line 185) AND require manage_carousel on carousel writes/reorder in server.py, or document carousel as part of publish_news and restore the tab.",
+    "Add balance validation on leave approval so cp/rtt approvals cannot push leave_balance negative.",
+    "Align route guards and tab guards in Management.jsx (fiches-de-paie: manage_documents vs view_payslips; add a Support IT tab or drop the sidebar entry).",
+    "Flag/plan the auth hardening: server-side session or JWT instead of trusting X-Employee-Id, bcrypt password hashing, explicit CORS origins with credentials, login lockout."
+  ],
+  "critical_code_review_comments": [
+    "server.py is 8005 lines and Management.jsx 3049 lines — both far over the 700-line guideline; split routers (permissions/users/requests/news) and Management sub-managers into modules to keep permission logic reviewable.",
+    "require_communication_editor() still exists alongside require_permission(); only the legacy comm role flag path remains useful — remove or rename it to avoid future bleed regressions.",
+    "_apply_user_derivations()/_build_weekly_pattern() silently ignore unknown weekday keys — validate work_days against WEEKDAY_MAP and return 400 instead.",
+    "Overview() catches the /admin/employees and /admin/requests failures with empty handlers (no state), so partial permission users see silently empty panels with no message."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter29_permission_fixes.py",
+    "/app/test_reports/cleanup_iter29.py",
+    "/app/test_reports/iteration_29.json"
+  ],
+  "success_rate": {"backend": "100% (21/21 pytest)", "frontend": "89% (8/9 scenarios; carrousel route guard failed)"},
+  "seed_data_creation": "No permanent seed data. Temporary TEST_/DBG_ news, events, requests and one TEST_Perm user were created and removed. Cleanup script /app/test_reports/cleanup_iter29.py restored Idriss to permissions=[], is_admin=false, admin_role=employe, statuses=[], work_days=[], all-off weekly_pattern, leave_balance {cp_n:2.5, cp_n_1:0, rtt:0}; also deleted 9 leftover TEST_/DBG_ requests, 2 stale 'Test'/'Test perm' carousel news items left by iteration 28 and 2 injected leave schedule rows.",
+  "should_call_test_agent_after_fix": true,
+  "should_main_agent_self_test": false,
+  "test_credentials": "marcus.simeo@mspark.fr / MSPark@Admin2026! (superadmin), idriss.malonga@gmail.com / Idriss2026! (employee, permissions reset to [])",
+  "context_for_next_testing_agent": "Use PUT /api/admin/users/{uid} with header X-Employee-Id: emp-marcus-simeo and a body of ONLY {\"permissions\": [...]} — the partial-update fix makes this safe (no more field wiping). Idriss is left with permissions=[] and an all-off weekly_pattern; if you need approval/planning tests, first PUT {\"work_days\": [\"monday\",...], \"usual_hours\": \"09:00-17:00\"} (English weekday keys only) and pick a date range never fetched via GET /schedule before (already-materialized 'off' days are skipped by approval). Re-run: pytest /app/backend/tests/test_iter29_permission_fixes.py /app/backend/tests/test_iter28_permissions.py -p no:randomly. Remaining open item: /management/carrousel is still reachable with publish_news only.",
+  "rca_of_the_issue": "Carrousel access: Management.jsx line 185 guards the route with has(\"manage_carousel\", \"publish_news\", \"edit_news\") while the tab filter (line 123) requires manage_carousel — the route guard was not narrowed when the tab guard was, so direct URL access still renders NewsManager. The backend mirrors this (POST/PUT /admin/news accept publish_news for featured/carousel items), so the granular manage_carousel key currently has no exclusive effect."
+}

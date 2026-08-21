@@ -1,0 +1,60 @@
+{
+  "summary": "Iter 28 — Granular permission enforcement (Lot 2). BACKEND: 11/11 pytest PASS (/app/backend/tests/test_iter28_permissions.py): (a) Idriss with permissions=[] gets 403 on GET /admin/payslips, POST /admin/news, POST /admin/documents, GET /admin/requests, GET /admin/expenses, GET /admin/users; (b) grant view_payslips -> GET /admin/payslips 200 while POST /admin/news and GET /admin/users stay 403; (c) grant publish_news -> POST /admin/news 200 (payslips back to 403); (d) grant manage_users -> GET /admin/users 200 + POST /admin/users creates an employee (verified via GET); (e) grant approve_leaves -> GET /admin/requests 200 + approve a 'cp' request 200; approve_recovery alone approves 'recuperation' (200) but NOT 'cp' (403); (f) full_admin unlocks payslips/requests/expenses/users; (g) reset to [] -> all 403 again; (h) payslip sync: PUT gross_salary=2400, hourly_rate=15.5, weekly_hours='28h' -> user.contract_hours_weekly=28 and GET /api/payslip/{id}/2026/1 returns totals.gross=2400, worked.hourly_rate=15.5, worked.contract_hours_weekly=28; (i) employee cannot read another employee's payslip (403) but view_payslips allows it (200). FRONTEND (real login, public URL): Idriss without perms -> NO MANAGEMENT section in sidebar, no admin-mode toggle, /management shows the 'Accès réservé aux administrateurs' block, no doc upload button, no news composer. Marcus -> full Management sidebar, admin toggle flips localStorage adminMode true/false and hides/shows the admin nav, doc-admin-upload + composer visible, no denied block. Idriss with [view_payslips, publish_news] -> sidebar shows only 'Fiches de paie' + 'Actualités (rédaction)' (no Utilisateurs/Plannings/Demandes), toggle appears, /management/fiches-de-paie renders PayslipsManager, composer visible on /actualites, doc upload still hidden. HOWEVER 3 HIGH issues were found (unguarded carousel route + view_stats overview 403 crash overlay + backend communication permission bleed). Seed cleaned: Idriss permissions=[], salary overrides unset, all TEST_ data deleted.",
+  "backend_issues": {
+    "critical": [
+      {"endpoint": "POST /api/admin/events, POST /api/admin/newsletters, POST /api/admin/broadcast, carousel news", "issue": "require_communication_editor() grants blanket communication rights: a user holding ONLY publish_news can create agenda events (200) and newsletters (200); a user holding ONLY manage_documents can publish news (200). Granular keys create_events/edit_events/manage_newsletter/manage_carousel are never checked individually — permission bleed / privilege escalation. Replace require_communication_editor() with require_permission('create_events','edit_events') on /admin/events, require_permission('manage_newsletter') on /admin/newsletters, require_permission('manage_carousel') on carousel writes, and require_permission('publish_news','edit_news') on /admin/news.", "priority": "HIGH"},
+      {"endpoint": "GET /api/admin/stats, GET /api/admin/employees", "issue": "Still gated by require_admin() while the frontend grants the Management 'Vue d'ensemble' tab/route to the view_stats permission. A view_stats user lands on Overview and every call returns 403 (page stuck on skeleton + CRA runtime-error overlay). Switch both to require_permission('view_stats') (and /admin/requests?status=pending on that page to approve_leaves/view_stats).", "priority": "HIGH"},
+      {"endpoint": "PUT /api/admin/users/{uid}", "issue": "Destructive pseudo-partial update: UserUpdate inherits non-Optional defaults from UserCreate (admin_role='employe', permissions=[], groups=[], statuses=[], work_days=[], off_days=[], account_status='active', force_password_change=True, badge_active=True, role_category='employe'). Any PUT that omits these silently wipes permissions/statuses/work_days AND recomputes is_admin=False / can_manage_communication=False — an admin can be demoted by a partial save. Also there is no way to clear gross_salary/hourly_rate (None values are filtered out). Make all UserUpdate fields Optional and only recompute is_admin when admin_role is explicitly provided.", "priority": "HIGH"}
+    ],
+    "minor": [
+      {"endpoint": "GET /api/admin/payslips + POST /api/admin/documents", "issue": "manage_documents also unlocks all payslip endpoints (require_permission('view_payslips','manage_documents')). Confirm this coupling is intended — payroll data is sensitive and 'manage_documents' reads as a communication/HR-docs right."},
+      {"endpoint": "POST /api/requests/{rid}/cancel", "issue": "Refund/planning-cleanup branch only handles type 'conge'/'rtt' while approval accepts the 'cp' alias, so cancelling an approved 'cp' request returns refunded_days=0 and leaves the injected planning entries behind (had to be cleaned manually in DB during this run)."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "Management.jsx <Routes>", "issue": "Routes 'carrousel' (NewsManager), 'agenda' (AgendaManager) and 'formulaires' (FormBuilder) have NO permission guard, and the non-admin index + catch-all redirect to /management/carrousel. Result: a user with only view_payslips (or any single mgmt perm) who hits /management or a forbidden sub-route (/management/utilisateurs) is silently redirected into the fully functional carousel/news editor even though manage_carousel was never granted (verified in browser). Guard those 3 routes with has('manage_carousel') / has('create_events','edit_events') / has('create_forms') and make the fallback point to the first tab the user is actually allowed to see (or the denied block).", "selector": "/management/utilisateurs -> redirected to /management/carrousel", "priority": "HIGH"},
+      {"component": "Management Overview (view_stats)", "issue": "With permissions=['view_stats'] the Overview tab renders but /admin/stats, /admin/employees, /admin/requests?status=pending all return 403; the axios rejections are unhandled so CRA shows a full-screen 'Uncaught runtime errors: Request failed with status code 403' overlay and the KPI cards stay as skeletons. Needs backend perm fix + try/catch with an error state.", "selector": "[data-testid=\"mgmt-tab-overview\"]", "priority": "HIGH"},
+      {"component": "Management header / sub-nav", "issue": "For a non-admin with only HR-ish perms (e.g. view_payslips) the header still reads 'ESPACE COMMUNICATION — Gestion de la communication interne' (isAdmin ? ... : communication wording), which is misleading on the Fiches de paie screen.", "selector": "h1 in /management/fiches-de-paie", "priority": "MEDIUM"}
+    ],
+    "integration_issues": [
+      {"flow": "Granular-perm user entering /management", "issue": "Frontend sub-nav filter and the route table disagree: sub-nav filters on path 'fiches-de-paie'/'utilisateurs' correctly, but unguarded carousel/agenda/formulaires routes plus the catch-all redirect expose admin surfaces not present in the tab bar.", "affected_selectors": ["[data-testid^=\"mgmt-tab-\"]", "[data-testid=\"mgmt-access-denied\"]"]}
+    ],
+    "design_issues": [
+      {"screen": "Management (non-admin with perms)", "issues": ["Only allowed tab shown but content area can render a non-permitted module (carousel) — inconsistent state", "Amber 'Espace Communication' accent used for payroll-only users"]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter28_permissions.py",
+    "/app/test_reports/pytest/iter28_results.xml",
+    "/app/test_reports/iter28_set_perms.py"
+  ],
+  "action_items": [
+    "Guard /management/carrousel, /management/agenda, /management/formulaires with the matching permissions and fix the non-admin index/catch-all fallback (currently exposes the carousel editor).",
+    "Move /api/admin/events, /api/admin/newsletters, /api/admin/broadcast, carousel writes off require_communication_editor() onto per-key require_permission() checks (publish_news currently unlocks events + newsletters; manage_documents unlocks news).",
+    "Gate /api/admin/stats and /api/admin/employees with require_permission('view_stats') and add error handling to Overview (403 currently triggers a CRA runtime-error overlay).",
+    "Make all UserUpdate fields Optional so PUT /api/admin/users/{uid} stops wiping permissions/statuses/work_days and demoting is_admin on partial saves.",
+    "Decide whether manage_documents should keep unlocking payslip endpoints.",
+    "Fix cancel() refund/planning cleanup for the 'cp' request-type alias.",
+    "Credentials note: Idriss password is Idriss2026! (the review request said 'demo' — that would fail)."
+  ],
+  "critical_code_review_comments": [
+    "require_communication_editor() is an any-of whitelist of 10 permission keys; it defeats the granularity introduced in this lot — every comm endpoint should declare its own required key.",
+    "Management.jsx is ~2900 lines with ~20 admin modules inline; split per module (PayslipsManager, UserManager, RequestsManager…) into separate files.",
+    "Permission whitelists are duplicated verbatim in Sidebar.jsx and Management.jsx (hasAnyMgmtPerm) — extract one shared constant to avoid drift.",
+    "The Overview data fetches (api.get('/admin/stats') etc.) have no .catch()/error state; any 403 surfaces as an unhandled rejection overlay.",
+    "PUT /admin/users recomputes is_admin from a defaulted admin_role — a security-sensitive derivation driven by an implicit default."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter28_permissions.py",
+    "/app/test_reports/iter28_set_perms.py",
+    "/app/frontend/src/pages/Management.jsx (added missing data-testid=\"mgmt-access-denied\" on the access-denied block only)"
+  ],
+  "success_rate": {"backend": "100% (11/11 pytest for the requested scenarios; 3 additional permission-model defects found outside the requested list)", "frontend": "80% (all requested UI checks pass; 2 HIGH defects for users holding granular perms)"},
+  "seed_data_creation": "Temporary only: Idriss permissions were toggled and reset to []; salary overrides unset; TEST_ news/documents/events/newsletters/requests/employee and the two 2026-11 schedule rows created by an approval were deleted. Seed verified clean at the end (permissions=[], weekly_hours=24h, contract_hours_weekly=24).",
+  "should_call_test_agent_after_fix": true,
+  "should_main_agent_self_test": false,
+  "test_credentials": "marcus.simeo@mspark.fr / MSPark@Admin2026! ; idriss.malonga@gmail.com / Idriss2026! (NOT 'demo')",
+  "context_for_next_testing_agent": "Use /app/test_reports/iter28_set_perms.py to grant/reset Idriss permissions safely (it resends the full user doc because PUT /admin/users is a full replace). Re-run /app/backend/tests/test_iter28_permissions.py as regression. Retest after fixes: (1) /management/carrousel|agenda|formulaires must 403/deny for users without manage_carousel/create_events/create_forms, (2) Overview with view_stats must load without 403, (3) publish_news must NOT allow POST /admin/events or /admin/newsletters. Remember to reset Idriss permissions to [] and delete TEST_ data (MongoDB is real, not in-memory — data persists across restarts).",
+  "rca_of_the_issue": "The lot added require_permission()/_has_permission() correctly for payslips, documents, requests, expenses and users, but (a) communication endpoints were left on the legacy any-comm-permission gate require_communication_editor(), (b) three Management child routes (carrousel/agenda/formulaires) plus the non-admin index/catch-all redirect were never permission-filtered, so the router funnels any perm-holder into the carousel editor, and (c) the Overview tab was opened to view_stats on the frontend while /admin/stats and /admin/employees still call require_admin(), producing unhandled 403s."
+}

@@ -6,7 +6,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { api, absoluteUrl, formatDateFr } from "@/lib/api";
-import { useApp } from "@/contexts/AppContext";
+import { useApp, hasPermission } from "@/contexts/AppContext";
 import PortalModal from "@/components/PortalModal";
 
 const CATEGORIES = [
@@ -102,7 +102,7 @@ export default function SupportITList() {
                   <span className={`ms-chip !text-[10px] ${prio?.cls}`}>{prio?.l}</span>
                 </div>
                 <div className="font-bold text-[#071B34] mt-0.5 truncate">{t.subject}</div>
-                {me?.is_admin && t.employee_name && (
+                {(me?.is_admin || hasPermission(me, "view_tickets", "reply_tickets")) && t.employee_name && (
                   <div className="text-xs text-[#94A3B8]">Par {t.employee_name}</div>
                 )}
                 <div className="text-xs text-[#94A3B8]">Créé le {formatDateFr(t.created_at?.slice(0, 10))} · {(t.messages || []).length} message(s)</div>
@@ -216,7 +216,7 @@ export function TicketDetail() {
               <span className="ms-chip !text-[10px] bg-[#3BA4FF]/12 text-[#1D70B8]">{cat?.l}</span>
             </div>
           </div>
-          {me?.is_admin && (
+          {(me?.is_admin || hasPermission(me, "reply_tickets")) && (
             <div>
               <label className="ms-overline">Changer le statut</label>
               <select value={t.status} onChange={(e) => setStatus(e.target.value)} className="ms-input mt-1 max-w-[200px]">

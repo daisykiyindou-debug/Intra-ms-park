@@ -398,3 +398,35 @@ Dépendance ajoutée : `canvas-confetti` (yarn add).
 - **Frontend `/app/frontend/src/pages/Badgeage.jsx`** : bannière `PunchStatusBanner` avec heure temps réel + prochain badge ; `PunchChoiceModal` (Départ en pause / Fin de journée) ; `PunchHistorySection` avec onglets Jour/Semaine/Mois + 4 KPI + table Date/Entrée/Début pause/Fin pause/Sortie/Heures/Retard/Statut
 - **Fix crash 502** : `_compute_today_badging` renvoyait `None` sur certaines conditions, corrigé avec fallback structuré
 
+
+
+### 2026-02 — Refonte Création Utilisateur Lot 2 (permissions & synchronisation)
+- **Backend** (`server.py`) :
+  - Nouveau helper `require_permission(*perm_keys)` + `_has_permission(emp, *keys)` non-raise.
+  - `require_communication_editor()` durci : n'accepte que `is_admin`, `full_admin` ou le rôle `can_manage_communication` (plus de bleed via granular perms).
+  - `_COMM_PERMS` = `{publish_news, edit_news, manage_carousel, manage_newsletter, create_events, edit_events, create_forms}` — un utilisateur avec `can_manage_communication=true` passe automatiquement ces contrôles.
+  - Endpoints par perm dédiée :
+    - `/admin/news` → `publish_news`, `edit_news`, `manage_carousel`
+    - `/admin/events` → `create_events`, `edit_events`
+    - `/admin/newsletters` → `manage_newsletter`
+    - `/admin/forms` → `create_forms`
+    - `/admin/galleries` → `add_gallery`
+    - `/admin/hr-documents` et `/admin/documents` → `manage_documents`, `publish_documents`
+    - `/admin/payslips*` → `view_payslips`, `manage_documents`
+    - `/admin/requests` (list/approve/reject/info) → `approve_leaves` ou `approve_recovery` selon `req.type`
+    - `/admin/expenses*` → `view_expenses`, `approve_expenses`
+    - `/admin/broadcast` → `publish_news`
+    - `/admin/stats`, `/admin/employees` → `view_stats`
+    - `/admin/users` (CRUD) via `_require_admin_full()` → `is_admin`, `full_admin` ou `manage_users`
+  - `UserUpdate` réécrit en modèle standalone avec **tous les champs Optional** ; `admin_update_user` utilise `exclude_unset=True` pour n'écrire que les champs explicitement envoyés (fin des saves destructifs qui écrasaient `permissions`/`statuses`/`work_days`/`is_admin`).
+  - `_generate_payslip()` et nouveau `_resolve_pay_basis()` : prennent `gross_salary`, `hourly_rate`, `contract_hours_weekly` depuis l'objet User avant fallback catégorie.
+  - `admin_update_user` propage `contract_hours_weekly` (dérivé de `weekly_hours`) vers la DB pour synchronisation Paie/Planning/Badgeage.
+  - `cancel_request()` gère désormais les deux alias `conge` et `cp` — le refund et le nettoyage du planning fonctionnent pour les demandes créées par le formulaire "cp".
+- **Frontend** :
+  - `contexts/AppContext.js` : nouveau helper `hasPermission(me, ...keys)` (bypass `is_admin` et `full_admin`).
+  - `Sidebar.jsx` : chaque item admin porte un tableau `perm` — filtrage par utilisateur non-admin. Les utilisateurs avec ≥1 permission voient un menu Management restreint.
+  - `Header.jsx` : le toggle "Passer en vue employé" est disponible pour tout utilisateur ayant une permission de management.
+  - `Management.jsx` : routes gardées par permission, sub-nav filtrée, fallback intelligent vers le premier onglet accessible, wording de l'en-tête adapté (Espace Management vs Communication), `<Overview>` capture les 403 pour éviter le crash CRA.
+  - `Actualites.jsx`, `Documents.jsx`, `Newsletters.jsx`, `PayslipsManager.jsx`, `Support.jsx`, `Galerie.jsx` : composers/boutons admin cachés si la permission correspondante manque.
+- **Tests** : `/app/backend/tests/test_iter28_permissions.py` (11 tests) + `test_iter29_permission_fixes.py` (10 tests) → 21/21 pytest PASS. Frontend 8/9 scénarios validés via Playwright réel.
+- **Iter reports** : `/app/test_reports/iteration_28.json`, `iteration_29.json`

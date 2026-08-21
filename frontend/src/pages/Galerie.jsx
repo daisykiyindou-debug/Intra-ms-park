@@ -7,7 +7,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { api, absoluteUrl, formatDateFr } from "@/lib/api";
-import { useApp } from "@/contexts/AppContext";
+import { useApp, hasPermission } from "@/contexts/AppContext";
 import PortalModal from "@/components/PortalModal";
 
 const CATEGORIES = ["Événement", "Team Building", "Formation", "Restaurant", "Vie du parc", "Autres"];
@@ -22,7 +22,7 @@ export default function GalerieList() {
   const [cat, setCat] = useState("all");
   const [showCreate, setShowCreate] = useState(false);
   const navigate = useNavigate();
-  const isEditor = me?.is_admin || me?.can_manage_communication;
+  const isEditor = me?.is_admin || me?.can_manage_communication || hasPermission(me, "add_gallery");
 
   const load = async () => {
     const params = new URLSearchParams();
@@ -123,7 +123,7 @@ export function GalerieAlbum() {
   const [editing, setEditing] = useState(false);
   const [selectMode, setSelectMode] = useState(false);
   const [selected, setSelected] = useState(() => new Set());
-  const isEditor = me?.is_admin || me?.can_manage_communication;
+  const isEditor = me?.is_admin || me?.can_manage_communication || hasPermission(me, "add_gallery");
   const canContribute = isEditor || g?.allow_contributions;
 
   const toggleSelected = (pid) => {

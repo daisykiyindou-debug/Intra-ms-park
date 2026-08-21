@@ -26,12 +26,17 @@ const STATUSES_OPT = [
   { k: "direction", l: "Direction" },
   { k: "alternant", l: "Alternant" },
   { k: "stage", l: "Stage" },
+  { k: "restauration", l: "Restauration" },
+  { k: "securite", l: "Sécurité" },
+  { k: "nettoyage", l: "Nettoyage" },
+  { k: "maintenance", l: "Maintenance" },
 ];
 
 const DEPARTMENTS = [
   "Communication et Marketing", "RH", "Événementiel", "OPS",
   "Web & IT", "Relation clientèle", "Commercial",
   "Directions et opérations", "Managers",
+  "Hygiène", "Sécurité", "Maintenance",
 ];
 
 const CONTRACT_TYPES = ["CDI", "CDD", "Alternance", "Stage", "Intérim"];
@@ -459,7 +464,7 @@ function UserEditor({ user, employees, onClose, onSaved }) {
     role: "",
     manager_id: "",
     contract_type: "CDI",
-    weekly_hours: "35h",
+    weekly_hours: "35",
     hire_date: "",
     contract_end_date: "",
     category: "Employé",
@@ -664,7 +669,22 @@ function UserEditor({ user, employees, onClose, onSaved }) {
               <Field label="Poste" testid="role" value={f.role} onChange={(v) => setF({ ...f, role: v })} />
               <SelectField label="Manager" testid="manager_id" value={f.manager_id} onChange={(v) => setF({ ...f, manager_id: v })} options={[["", "— Aucun —"], ...employees.filter((e) => e.id !== user?.id).map((e) => [e.id, `${e.first_name} ${e.last_name}`])]} />
               <SelectField label="Type de contrat" testid="contract_type" value={f.contract_type} onChange={(v) => setF({ ...f, contract_type: v })} options={CONTRACT_TYPES.map((c) => [c, c])} />
-              <SelectField label="Temps de travail" testid="weekly_hours" value={f.weekly_hours} onChange={(v) => setF({ ...f, weekly_hours: v })} options={HOURS.map((h) => [h, h])} />
+              <div>
+                <label className="ms-overline block mb-1">Temps de travail (h/semaine) *</label>
+                <input
+                  type="number"
+                  min="0"
+                  max="80"
+                  step="0.5"
+                  value={f.weekly_hours}
+                  onChange={(e) => setF({ ...f, weekly_hours: e.target.value })}
+                  data-testid="weekly_hours"
+                  placeholder="Ex. 24, 28, 35, 39"
+                  className="ms-input"
+                  required
+                />
+                <div className="text-[10px] text-[#94A3B8] mt-1">Saisie libre. Ex : 24, 28, 35, 39, 20.5</div>
+              </div>
               <SelectField label="Catégorie" testid="category" value={f.category} onChange={(v) => setF({ ...f, category: v })} options={CATEGORIES.map((c) => [c, c])} />
               <Field label="Date d'embauche" type="date" testid="hire_date" value={f.hire_date} onChange={(v) => setF({ ...f, hire_date: v })} />
               <Field label="Date fin contrat" type="date" testid="contract_end_date" value={f.contract_end_date} onChange={(v) => setF({ ...f, contract_end_date: v })} />
@@ -763,19 +783,76 @@ function UserEditor({ user, employees, onClose, onSaved }) {
           )}
         </div>
 
-        {/* Footer */}
-        <div className="shrink-0 px-5 py-3 border-t border-[#071B34]/5 flex justify-between items-center bg-white">
-          <div className="text-xs text-[#475569] flex items-center gap-1">
-            {isNew && <><Mail className="h-3 w-3" /> Un mot de passe temporaire sera généré si laissé vide</>}
-          </div>
-          <div className="flex gap-2">
-            <button type="button" onClick={onClose} className="ms-btn-outline">Annuler</button>
-            <button type="submit" disabled={saving} data-testid="user-save" className="ms-btn-primary disabled:opacity-50">
-              <Save className="h-4 w-4" />
-              {saving ? "Enregistrement…" : isNew ? "Créer l'utilisateur" : "Enregistrer"}
-            </button>
-          </div>
-        </div>
+        {/* Footer — wizard navigation */}
+        {(() => {
+          const STEPS = ["account", "hr", "planning", "payroll", "access"];
+          const currentIdx = STEPS.indexOf(tab);
+          const isLast = currentIdx === STEPS.length - 1;
+          const isFirst = currentIdx === 0;
+
+          const validateStep = () => {
+            if (tab === "account") {
+              if (!f.first_name?.trim() || !f.last_name?.trim()) {
+                toast.error("Prénom et nom obligatoires");
+                return false;
+              }
+              if (!f.email?.trim() || !/^\S+@\S+\.\S+$/.test(f.email.trim())) {
+                toast.error("Adresse e-mail valide requise");
+                return false;
+              }
+            }
+            if (tab === "hr") {
+              if (!f.role?.trim()) {
+                toast.error("Poste obligatoire");
+                return false;
+              }
+              const wh = parseFloat(f.weekly_hours);
+              if (isNaN(wh) || wh <= 0 || wh > 80) {
+                toast.error("Temps de travail hebdomadaire requis (entre 0 et 80h)");
+                return false;
+              }
+            }
+            return true;
+          };
+
+          const goNext = () => {
+            if (!validateStep()) return;
+            setTab(STEPS[Math.min(currentIdx + 1, STEPS.length - 1)]);
+          };
+          const goPrev = () => setTab(STEPS[Math.max(currentIdx - 1, 0)]);
+
+          return (
+            <div className="shrink-0 px-5 py-3 border-t border-[#071B34]/5 flex justify-between items-center bg-white">
+              <div className="text-xs text-[#475569] flex items-center gap-1">
+                {isNew && <><Mail className="h-3 w-3" /> Mot de passe temporaire généré si laissé vide</>}
+                <span className="ml-2 text-[10px] text-[#94A3B8]">Étape {currentIdx + 1}/{STEPS.length}</span>
+              </div>
+              <div className="flex gap-2">
+                <button type="button" onClick={onClose} className="ms-btn-outline">Annuler</button>
+                {!isFirst && (
+                  <button type="button" onClick={goPrev} data-testid="user-prev" className="ms-btn-outline">
+                    Précédent
+                  </button>
+                )}
+                {isNew && !isLast && (
+                  <button type="submit" formNoValidate data-testid="user-draft" onClick={(e) => { e.preventDefault(); toast.info("Brouillon enregistré localement"); }} className="ms-btn-outline">
+                    Enregistrer brouillon
+                  </button>
+                )}
+                {!isLast ? (
+                  <button type="button" onClick={goNext} data-testid="user-next" className="ms-btn-primary">
+                    Suivant →
+                  </button>
+                ) : (
+                  <button type="submit" disabled={saving} data-testid="user-save" className="ms-btn-primary disabled:opacity-50">
+                    <Save className="h-4 w-4" />
+                    {saving ? "Enregistrement…" : isNew ? "Créer l'utilisateur" : "Enregistrer"}
+                  </button>
+                )}
+              </div>
+            </div>
+          );
+        })()}
       </form>
       {cropperSrc && (
         <AvatarCropper

@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { api, formatDateFr, absoluteUrl } from "@/lib/api";
-import { useApp } from "@/contexts/AppContext";
+import { useApp, hasPermission } from "@/contexts/AppContext";
 import PortalModal from "@/components/PortalModal";
 
 const CATEGORIES = ["Général", "RH", "Événement", "Projet", "Procédure", "Ouverture"];
@@ -71,7 +71,7 @@ export default function NewslettersList() {
   const [category, setCategory] = useState("all");
   const [tab, setTab] = useState("published");
   const navigate = useNavigate();
-  const isEditor = (me?.is_admin || me?.can_manage_communication) && adminMode !== false;
+  const isEditor = (me?.is_admin || me?.can_manage_communication || hasPermission(me, "manage_newsletter")) && adminMode !== false;
 
   const load = async () => {
     const params = new URLSearchParams({ archived: tab === "archived" });
@@ -550,7 +550,7 @@ export function NewsletterEditor() {
   const navigate = useNavigate();
   const { me, adminMode } = useApp();
   const isNew = !id || id === "new";
-  const canEdit = (me?.is_admin || me?.can_manage_communication) && adminMode !== false;
+  const canEdit = (me?.is_admin || me?.can_manage_communication || hasPermission(me, "manage_newsletter")) && adminMode !== false;
 
   useEffect(() => {
     // Guard: if user disabled admin mode, kick back to list
