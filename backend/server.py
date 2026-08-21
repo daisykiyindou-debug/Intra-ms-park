@@ -5487,7 +5487,7 @@ async def admin_list_employees():
 @api.get("/admin/schedule/{employee_id}")
 async def admin_get_schedule(employee_id: str, week_start: Optional[str] = None):
     """Return schedule entries for an employee. Optionally for a given week (Monday ISO)."""
-    await require_admin()
+    await require_permission("manage_users", "approve_leaves")
     q: dict = {"employee_id": employee_id}
     if week_start:
         ws = date.fromisoformat(week_start)
@@ -5502,7 +5502,7 @@ async def admin_get_schedule(employee_id: str, week_start: Optional[str] = None)
 @api.post("/admin/schedule")
 async def admin_upsert_schedule(payload: AdminScheduleEntry):
     """Create or update a schedule entry for a given (employee_id, day)."""
-    await require_admin()
+    await require_permission("manage_users", "approve_leaves")
     # Validate day format
     try:
         date.fromisoformat(payload.day)
@@ -5543,7 +5543,7 @@ async def admin_upsert_schedule(payload: AdminScheduleEntry):
 
 @api.delete("/admin/schedule/{schedule_id}")
 async def admin_delete_schedule(schedule_id: str):
-    await require_admin()
+    await require_permission("manage_users", "approve_leaves")
     sch = await db.schedules.find_one({"id": schedule_id}, {"_id": 0})
     if not sch:
         raise HTTPException(404, "Entrée introuvable")
@@ -5589,7 +5589,7 @@ async def admin_save_week(payload: BulkWeekPayload):
     """Upsert a whole week — and optionally duplicate it to N following weeks.
     Off-days (`type=off`) do not create horaires but are stored so the display
     is consistent. Existing rows for those days are replaced."""
-    await require_admin()
+    await require_permission("manage_users", "approve_leaves")
     try:
         base = date.fromisoformat(payload.week_start)
     except Exception:
@@ -5653,7 +5653,7 @@ async def admin_save_week(payload: BulkWeekPayload):
 @api.get("/admin/contract-status/{employee_id}")
 async def admin_contract_status(employee_id: str, week_start: Optional[str] = None):
     """Return contract vs planned hours (shift + leave + rtt count as covered)."""
-    await require_admin()
+    await require_permission("manage_users", "approve_leaves")
     emp = await db.employees.find_one({"id": employee_id}, {"_id": 0})
     if not emp:
         raise HTTPException(404, "Employé introuvable")
@@ -6114,7 +6114,7 @@ class LeaveGrant(BaseModel):
 
 @api.post("/admin/leave/grant")
 async def admin_grant_leave(payload: LeaveGrant):
-    await require_admin()
+    await require_permission("approve_leaves")
     if payload.type not in ("rtt", "cp"):
         raise HTTPException(400, "type doit être 'rtt' ou 'cp'")
     updated = []

@@ -118,7 +118,7 @@ export default function ManagementShell() {
         if (path === "demandes") return has("approve_leaves", "approve_recovery");
         if (path === "attributions") return has("approve_leaves");
         if (path === "notes-de-frais") return has("view_expenses", "approve_expenses");
-        if (path === "heures-supp") return has("approve_recovery", "approve_leaves");
+        if (path === "heures-supp") return has("approve_recovery");
         if (path === "restauration") return false;
         if (path === "carrousel") return has("manage_carousel");
         if (path === "agenda") return has("create_events", "edit_events");
@@ -191,7 +191,7 @@ export default function ManagementShell() {
         <Route path="actualites" element={<Navigate to="/management/carrousel" replace />} />
         {(isAdmin || has("manage_documents")) && <Route path="documents" element={<DocumentsManager />} />}
         {(isAdmin || has("view_expenses", "approve_expenses")) && <Route path="notes-de-frais" element={<ExpensesManager />} />}
-        {(isAdmin || has("approve_recovery", "approve_leaves")) && <Route path="heures-supp" element={<OvertimeManager />} />}
+        {(isAdmin || has("approve_recovery")) && <Route path="heures-supp" element={<OvertimeManager />} />}
         {isAdmin && <Route path="formations" element={<FormationsManager />} />}
         {isAdmin && <Route path="restauration" element={<RestaurationManager />} />}
         {(isAdmin || has("view_payslips", "manage_documents")) && <Route path="fiches-de-paie" element={<PayslipsManager />} />}

@@ -75,7 +75,7 @@ const adminNav = [
   { to: "/management/demandes", label: "Validation demandes", icon: Inbox, key: "mgmt-demandes", perm: ["approve_leaves", "approve_recovery"] },
   { to: "/management/attributions", label: "RTT / CP", icon: Gift, key: "mgmt-rtt", perm: ["approve_leaves"] },
   { to: "/management/notes-de-frais", label: "Notes de frais", icon: Receipt, key: "mgmt-expenses", perm: ["view_expenses", "approve_expenses"] },
-  { to: "/management/heures-supp", label: "Heures supp. & récup.", icon: Clock, key: "mgmt-overtime", perm: ["approve_recovery", "approve_leaves"] },
+  { to: "/management/heures-supp", label: "Heures supp. & récup.", icon: Clock, key: "mgmt-overtime", perm: ["approve_recovery"] },
   { to: "/management/restauration", label: "Restauration (menu)", icon: UtensilsCrossed, key: "mgmt-restauration" },
   { to: "/management/formations", label: "Formations", icon: GraduationCap, key: "mgmt-formations" },
   { to: "/management/support", label: "Support IT (tickets)", icon: LifeBuoy, key: "mgmt-support", perm: ["view_tickets", "reply_tickets"] },
