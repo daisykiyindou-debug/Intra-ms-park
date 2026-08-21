@@ -85,8 +85,12 @@ export default function NewslettersList() {
     if (category !== "all") params.set("category", category);
     if (q) params.set("q", q);
     const { data } = await api.get(`/newsletters?${params}`);
-    // Hide drafts when not in admin/editor mode (even if backend returned them for own author)
-    setItems(isEditor ? data : data.filter((n) => n.published));
+    // Client-side filter per tab. Only editors see drafts / scheduled.
+    let filtered = isEditor ? data : data.filter((n) => n.published);
+    if (tab === "drafts") filtered = filtered.filter((n) => n.send_status === "draft");
+    else if (tab === "scheduled") filtered = filtered.filter((n) => n.send_status === "scheduled");
+    else if (tab === "sent") filtered = filtered.filter((n) => n.send_status === "sent" || (n.published && !n.publish_at) || n.send_status === "published");
+    setItems(filtered);
   };
   useEffect(() => { load(); }, [tab, category, q, isEditor]); // eslint-disable-line
 
@@ -121,8 +125,8 @@ export default function NewslettersList() {
           <option value="all">Toutes catégories</option>
           {CATEGORIES.map((c) => <option key={c}>{c}</option>)}
         </select>
-        <div className="flex rounded-xl bg-[#F4F7FA] p-1">
-          {[["published", "Publiées"], ["archived", "Archivées"]].map(([k, l]) => (
+        <div className="flex rounded-xl bg-[#F4F7FA] p-1 flex-wrap">
+          {[["published", "Toutes"], ...(isEditor ? [["drafts", "Brouillons"], ["scheduled", "Programmées"], ["sent", "Envoyées"]] : []), ["archived", "Archivées"]].map(([k, l]) => (
             <button key={k} onClick={() => setTab(k)} data-testid={`nl-tab-${k}`} className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors ${tab === k ? "bg-white shadow" : "text-[#475569]"}`}>{l}</button>
           ))}
         </div>
@@ -195,10 +199,17 @@ function NewsletterCard({ nl, isEditor, onChange }) {
             {isNew && !isRead && <span className="ms-chip bg-[#10B981]/15 text-[#047857] !text-[10px]">Nouveau</span>}
             {isRead && <span className="ms-chip bg-[#94A3B8]/15 text-[#475569] !text-[10px]">Lue</span>}
             {nl.archived && <span className="ms-chip bg-[#94A3B8]/15 text-[#475569] !text-[10px]">Archivée</span>}
-            {!nl.published && <span className="ms-chip bg-[#F59E0B]/15 text-[#B45309] !text-[10px]">Brouillon</span>}
+            {nl.send_status === "draft" && <span className="ms-chip bg-[#F59E0B]/15 text-[#B45309] !text-[10px]">Brouillon</span>}
+            {nl.send_status === "scheduled" && <span className="ms-chip bg-[#7C3AED]/15 text-[#6D28D9] !text-[10px]">📅 Programmée</span>}
+            {nl.send_status === "sent" && <span className="ms-chip bg-[#3BA4FF]/15 text-[#1D70B8] !text-[10px]">✓ Envoyée</span>}
           </div>
           <div className="text-xs text-[#475569] mt-1">
-            📅 {nl.published_at ? formatDateFr(nl.published_at.slice(0, 10)) : "Non publié"} · {nl.reading_time || 3} min de lecture
+            {nl.send_status === "scheduled" && nl.publish_at
+              ? <>📅 Envoi programmé le {formatDateFr(nl.publish_at.slice(0, 10))} à {nl.publish_at.slice(11, 16)}</>
+              : nl.sent_at
+              ? <>✉️ Envoyée le {formatDateFr(nl.sent_at.slice(0, 10))} · {nl.recipient_count || 0} destinataires · {nl.open_count || 0} ouvertures · {nl.click_count || 0} clics</>
+              : <>📅 {nl.published_at ? formatDateFr(nl.published_at.slice(0, 10)) : "Non publié"} · {nl.reading_time || 3} min de lecture</>
+            }
           </div>
           <p className="text-sm text-[#475569] mt-2 line-clamp-2">{nl.preheader || nl.subject}</p>
         </div>
@@ -236,6 +247,13 @@ function NewsletterCard({ nl, isEditor, onChange }) {
               >
                 {!nl.published && (
                   <button onClick={() => { setMenu(false); navigate(`/newsletters/${nl.id}/edit`); }} className="w-full text-left px-3 py-2 hover:bg-[#F4F7FA] flex items-center gap-2"><Edit3 className="h-3.5 w-3.5" /> Modifier</button>
+                )}
+                {nl.send_status === "scheduled" && (
+                  <>
+                    <button onClick={() => { setMenu(false); navigate(`/newsletters/${nl.id}/edit`); }} className="w-full text-left px-3 py-2 hover:bg-[#F4F7FA] flex items-center gap-2"><Edit3 className="h-3.5 w-3.5" /> Modifier date/heure</button>
+                    <button onClick={async () => { setMenu(false); try { await api.post(`/admin/newsletters/${nl.id}/send-now`); toast.success("Envoyée !"); onChange(); } catch { toast.error("Erreur"); } }} className="w-full text-left px-3 py-2 hover:bg-[#F4F7FA] flex items-center gap-2 text-[#1D70B8]"><Send className="h-3.5 w-3.5" /> Envoyer maintenant</button>
+                    <button onClick={async () => { if (!window.confirm("Annuler la programmation ? La newsletter reviendra en brouillon.")) return; setMenu(false); try { await api.post(`/admin/newsletters/${nl.id}/cancel-schedule`); toast.success("Programmation annulée"); onChange(); } catch { toast.error("Erreur"); } }} className="w-full text-left px-3 py-2 hover:bg-[#FEF3C7] text-[#B45309] flex items-center gap-2"><X className="h-3.5 w-3.5" /> Annuler la programmation</button>
+                  </>
                 )}
                 {!nl.archived && (
                   <button onClick={async () => { setMenu(false); await api.post(`/admin/newsletters/${nl.id}/archive`); toast.success("Archivée"); onChange(); }} className="w-full text-left px-3 py-2 hover:bg-[#F4F7FA] flex items-center gap-2"><Archive className="h-3.5 w-3.5" /> Archiver</button>
@@ -569,6 +587,7 @@ export function NewsletterEditor() {
   const [f, setF] = useState({
     title: "", subject: "", preheader: "", cover_image: "", category: "Général",
     reading_time: 3, body_html: "", blocks: [], attachments: [], archived: false, published: false,
+    publish_at: "", recipient_statuses: [],
   });
   const [loading, setLoading] = useState(!isNew);
   const [selectedId, setSelectedId] = useState(null);
@@ -591,9 +610,11 @@ export function NewsletterEditor() {
   }, [id, isNew]);
 
   const selected = useMemo(() => f.blocks.find((b) => b.id === selectedId), [f.blocks, selectedId]);
-  // Once a newsletter is published, its content is frozen. The UI switches to
-  // a read-only preview and the "Publier" button is replaced by an info banner.
-  const isLocked = !!f.published;
+  // Once a newsletter is actually sent (scheduled_broadcast_sent OR sent_at),
+  // its content is frozen. Scheduled newsletters (publish_at in the future,
+  // not yet dispatched) remain editable so admins can adjust the send date.
+  const isSent = !!(f.scheduled_broadcast_sent || f.sent_at) || (f.published && !f.publish_at);
+  const isLocked = isSent;
 
   const addBlock = (type) => {
     if (isLocked) return;
@@ -789,8 +810,19 @@ export function NewsletterEditor() {
           <div className="flex items-start gap-3">
             <Send className="h-5 w-5 text-[#B45309] mt-0.5" />
             <div>
-              <div className="font-bold text-[#071B34]">Cette newsletter est publiée</div>
+              <div className="font-bold text-[#071B34]">Cette newsletter est déjà envoyée</div>
               <p className="text-xs text-[#475569] mt-0.5">Son contenu est verrouillé et ne peut plus être modifié. Vous pouvez uniquement le consulter en aperçu ou l&apos;archiver depuis la liste.</p>
+            </div>
+          </div>
+        </div>
+      )}
+      {!isLocked && f.publish_at && new Date(f.publish_at) > new Date() && f.published && (
+        <div className="ms-card p-4 border-l-4 border-[#7C3AED] bg-[#EDE9FE]" data-testid="nl-scheduled-banner">
+          <div className="flex items-start gap-3">
+            <Send className="h-5 w-5 text-[#6D28D9] mt-0.5" />
+            <div>
+              <div className="font-bold text-[#071B34]">📅 Programmée pour {new Date(f.publish_at).toLocaleString("fr-FR", { dateStyle: "long", timeStyle: "short" })}</div>
+              <p className="text-xs text-[#475569] mt-0.5">Vous pouvez encore modifier la date, annuler la programmation ou envoyer maintenant depuis la liste des newsletters.</p>
             </div>
           </div>
         </div>
@@ -860,6 +892,60 @@ export function NewsletterEditor() {
                   <label className="ms-overline">Préheader (aperçu boîte mail)</label>
                   <input value={f.preheader} onChange={(e) => setF({ ...f, preheader: e.target.value })} data-testid="nl-preheader" placeholder="L'actu du mois, pour avancer ensemble" className="ms-input mt-2" />
                 </div>
+              </div>
+            </div>
+
+            {/* ── Envoi & ciblage ── */}
+            <div className="ms-card p-5 space-y-4" data-testid="nl-delivery-panel">
+              <h2 className="text-lg font-bold text-[#071B34]">Envoi & ciblage</h2>
+              <div>
+                <label className="ms-overline">Destinataires (statuts)</label>
+                <p className="text-xs text-[#475569] mt-1">Cochez les groupes qui doivent recevoir la newsletter. Aucun sélectionné = tous les collaborateurs.</p>
+                <div className="mt-2 grid grid-cols-2 md:grid-cols-3 gap-2">
+                  {[
+                    { k: "bureau", l: "Employés de bureau" },
+                    { k: "management", l: "Managers" },
+                    { k: "direction", l: "Direction" },
+                    { k: "ops", l: "Employés OPS" },
+                    { k: "restauration", l: "Restauration" },
+                    { k: "securite", l: "Sécurité" },
+                    { k: "nettoyage", l: "Nettoyage" },
+                    { k: "maintenance", l: "Maintenance" },
+                    { k: "alternant", l: "Alternants" },
+                    { k: "stage", l: "Stagiaires" },
+                  ].map((s) => {
+                    const active = (f.recipient_statuses || []).includes(s.k);
+                    return (
+                      <label key={s.k} data-testid={`nl-recipient-${s.k}`} className={`flex items-center gap-2 rounded-lg border px-3 py-1.5 cursor-pointer text-xs ${active ? "border-[#3BA4FF] bg-[#3BA4FF]/8 text-[#071B34] font-semibold" : "border-[#071B34]/10 text-[#475569]"}`}>
+                        <input type="checkbox" className="h-3.5 w-3.5 accent-[#3BA4FF]"
+                          checked={active}
+                          onChange={() => setF((s0) => ({
+                            ...s0,
+                            recipient_statuses: active
+                              ? (s0.recipient_statuses || []).filter((x) => x !== s.k)
+                              : [...(s0.recipient_statuses || []), s.k],
+                          }))} />
+                        {s.l}
+                      </label>
+                    );
+                  })}
+                </div>
+                {(f.recipient_statuses || []).length === 0 && (
+                  <div className="mt-2 rounded-lg bg-[#DBEAFE] text-[#1D70B8] text-xs px-3 py-2">
+                    🌐 Aucun statut sélectionné → tous les collaborateurs recevront la newsletter.
+                  </div>
+                )}
+              </div>
+              <div>
+                <label className="ms-overline">Programmer l&apos;envoi (optionnel)</label>
+                <input
+                  type="datetime-local"
+                  data-testid="nl-publish-at"
+                  value={f.publish_at || ""}
+                  onChange={(e) => setF({ ...f, publish_at: e.target.value })}
+                  className="ms-input mt-2 max-w-xs"
+                />
+                <p className="text-xs text-[#475569] mt-1">Laissez vide pour envoyer immédiatement. Sinon, la newsletter sera envoyée automatiquement à cette date et heure.</p>
               </div>
             </div>
 
