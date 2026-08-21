@@ -19,7 +19,7 @@ import Messagerie from "@/pages/Messagerie";
 import Documents from "@/pages/Documents";
 import Agenda from "@/pages/Agenda";
 import Avantages from "@/pages/Avantages";
-import { AvantagesCheckout, AvantagesOrders } from "@/pages/AvantagesShop";
+import { AvantagesCheckout, AvantagesOrders, AvantagesTicket } from "@/pages/AvantagesShop";
 import Contacts from "@/pages/Contacts";
 import Profil from "@/pages/Profil";
 import ManagementShell from "@/pages/Management";
@@ -132,6 +132,7 @@ function App() {
               <Route path="/avantages" element={<Avantages />} />
               <Route path="/avantages/checkout" element={<AvantagesCheckout />} />
               <Route path="/avantages/commandes" element={<AvantagesOrders />} />
+              <Route path="/avantages/commandes/:oid/billet/:tid" element={<AvantagesTicket />} />
               <Route path="/idees" element={<Ideas />} />
               <Route path="/idees/nouveau" element={<IdeaSubmit />} />
               <Route path="/idees/:id" element={<IdeaDetail />} />

@@ -90,6 +90,17 @@ export default function Messagerie() {
 
   useEffect(() => { loadChannels(); }, []);
 
+  // Sync `active` with the URL — when the user clicks a message notification while
+  // already on /messagerie, the ?ch= query changes and we need to open that conversation.
+  useEffect(() => {
+    const ch = searchParams.get("ch");
+    if (ch && ch !== active) {
+      setActive(ch);
+      setMobileShowChat(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
+
   // Auto-select the first conversation if none selected
   useEffect(() => {
     if (!active && channels.length > 0) {

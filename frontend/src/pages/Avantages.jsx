@@ -52,6 +52,15 @@ export default function Avantages() {
     if (p.type !== "product") return;
     const unit = Number(p.discount_price ?? p.original_price ?? 0);
     if (!unit) { toast.error("Ce produit n'a pas de prix"); return; }
+    // Enforce usage limit: qty in cart + already purchased this year ≤ limit
+    if (p.usage_limit) {
+      const inCart = cart.find((x) => x.partner_id === p.id)?.qty || 0;
+      const total = (p.my_usage || 0) + inCart + 1;
+      if (total > p.usage_limit) {
+        toast.error(`Limite atteinte : ${p.usage_limit} par an. Il vous reste ${Math.max(0, p.usage_limit - (p.my_usage || 0) - inCart)}.`);
+        return;
+      }
+    }
     setCart((prev) => {
       const idx = prev.findIndex((x) => x.partner_id === p.id);
       if (idx >= 0) {
@@ -68,6 +77,7 @@ export default function Avantages() {
           unit_price: unit,
           unit_original: p.original_price ? Number(p.original_price) : null,
           qty: 1,
+          usage_limit: p.usage_limit || null,
         },
       ];
     });
@@ -76,15 +86,46 @@ export default function Avantages() {
 
   const updateQty = (pid, delta) => {
     setCart((prev) => prev
-      .map((i) => i.partner_id === pid ? { ...i, qty: Math.max(1, i.qty + delta) } : i)
+      .map((i) => {
+        if (i.partner_id !== pid) return i;
+        const nextQty = Math.max(1, i.qty + delta);
+        // Respect stored per-item limit if present
+        const partner = partners.find((p) => p.id === pid);
+        const cap = i.usage_limit || partner?.usage_limit;
+        if (cap) {
+          const already = partner?.my_usage || 0;
+          const max = Math.max(1, cap - already);
+          if (nextQty > max) {
+            toast.error(`Limite : ${cap} par an. Vous pouvez commander ${max} max.`);
+            return { ...i, qty: max };
+          }
+        }
+        return { ...i, qty: nextQty };
+      })
     );
   };
   const removeItem = (pid) => setCart((prev) => prev.filter((i) => i.partner_id !== pid));
   const clearCart = () => setCart([]);
 
-  const copyCode = (code) => {
+  const copyCode = async (p) => {
+    const code = p.promo_code || p.qr_code;
+    if (!code) return;
+    // Enforce limit BEFORE copying if set
+    if (p.usage_limit && p.is_exhausted) {
+      toast.error(`Vous avez déjà utilisé cet avantage (${p.usage_limit}× par an).`);
+      return;
+    }
     navigator.clipboard.writeText(code);
     setCopied(code);
+    // Register the claim so the button greys out (idempotent for unlimited)
+    if (p.usage_limit) {
+      try {
+        const { data } = await api.post(`/partners/${p.id}/claim`);
+        setPartners((prev) => prev.map((x) => x.id === p.id ? { ...x, ...data } : x));
+      } catch (err) {
+        toast.error(err?.response?.data?.detail || "Impossible d'enregistrer l'utilisation");
+      }
+    }
     toast.success("Code copié !");
     setTimeout(() => setCopied(null), 2000);
   };
@@ -236,7 +277,7 @@ export default function Avantages() {
             key={p.id}
             p={p}
             copied={copied}
-            onCopy={copyCode}
+            onCopy={() => copyCode(p)}
             onOpenDetail={() => setDetail(p)}
             onAddToCart={() => addToCart(p)}
           />
@@ -248,7 +289,7 @@ export default function Avantages() {
           <PartnerDetail
             p={detail}
             copied={copied}
-            onCopy={copyCode}
+            onCopy={() => copyCode(detail)}
             onAddToCart={() => { addToCart(detail); setDetail(null); setShowCart(true); }}
             onClose={() => setDetail(null)}
           />
@@ -279,8 +320,10 @@ export default function Avantages() {
 function PartnerCard({ p, copied, onCopy, onOpenDetail, onAddToCart }) {
   const type = p.type || "code";
   const imgSrc = p.image ? absoluteUrl(p.image) : "";
+  const exhausted = !!p.is_exhausted;
+  const codeStr = p.promo_code || p.qr_code || "";
   return (
-    <div className="ms-card ms-card-hover overflow-hidden flex flex-col" data-testid={`partner-${p.id}`}>
+    <div className={`ms-card ms-card-hover overflow-hidden flex flex-col ${exhausted ? "opacity-70" : ""}`} data-testid={`partner-${p.id}`}>
       <button onClick={onOpenDetail} className="relative aspect-[16/9] overflow-hidden bg-[#071B34] text-left">
         {imgSrc ? (
           <img src={imgSrc} alt={p.name} className="h-full w-full object-cover opacity-80 transition-transform duration-500 hover:scale-110" />
@@ -330,30 +373,58 @@ function PartnerCard({ p, copied, onCopy, onOpenDetail, onAddToCart }) {
               <div className="text-xl font-black text-[#071B34]">
                 {p.discount_price != null ? `${Number(p.discount_price).toFixed(2)} €` : "—"}
               </div>
+              {p.usage_limit && (
+                <div className="text-[10px] text-[#475569] mt-0.5">
+                  {exhausted
+                    ? `Quota atteint (${p.usage_limit}/an)`
+                    : `Reste ${p.my_remaining ?? p.usage_limit} / ${p.usage_limit}`}
+                </div>
+              )}
             </div>
             <button
               onClick={onAddToCart}
+              disabled={exhausted}
               data-testid={`add-to-cart-${p.id}`}
-              className="inline-flex items-center gap-1.5 rounded-xl bg-[#F59E0B] hover:bg-[#D97706] text-white text-sm font-bold px-3 py-2"
+              title={exhausted ? "Quota annuel atteint" : "Ajouter au panier"}
+              className={`inline-flex items-center gap-1.5 rounded-xl text-sm font-bold px-3 py-2 ${
+                exhausted
+                  ? "bg-[#F1F5F9] text-[#94A3B8] cursor-not-allowed"
+                  : "bg-[#F59E0B] hover:bg-[#D97706] text-white"
+              }`}
             >
-              <ShoppingCart className="h-4 w-4" /> Ajouter
+              {exhausted ? <><Check className="h-4 w-4" /> Utilisé</> : <><ShoppingCart className="h-4 w-4" /> Ajouter</>}
             </button>
           </div>
-        ) : (p.promo_code || p.qr_code) ? (
+        ) : codeStr ? (
           <div className="mt-4 flex items-center gap-3 rounded-xl bg-[#F4F7FA] p-3">
             <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-[#071B34] text-white">
               <QrCode className="h-6 w-6" />
             </div>
             <div className="flex-1 min-w-0">
-              <div className="text-[10px] uppercase tracking-wider font-semibold text-[#475569]">Code partenaire</div>
-              <div className="font-mono text-xs text-[#071B34] truncate">{p.promo_code || p.qr_code}</div>
+              <div className="text-[10px] uppercase tracking-wider font-semibold text-[#475569] flex items-center gap-1">
+                Code partenaire
+                {p.usage_limit && (
+                  <span className="ml-1 text-[9px] normal-case tracking-normal text-[#94A3B8]">
+                    {exhausted ? `· Utilisé (${p.usage_limit}/an)` : `· ${p.my_remaining ?? p.usage_limit}/${p.usage_limit} restant`}
+                  </span>
+                )}
+              </div>
+              <div className={`font-mono text-xs truncate ${exhausted ? "text-[#94A3B8]" : "text-[#071B34]"}`}>
+                {exhausted ? "•••••••••" : codeStr}
+              </div>
             </div>
             <button
-              onClick={() => onCopy(p.promo_code || p.qr_code)}
+              onClick={onCopy}
+              disabled={exhausted}
               data-testid={`copy-${p.id}`}
-              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white hover:bg-[#3BA4FF]/10"
+              title={exhausted ? "Vous avez déjà utilisé ce code cette année" : "Copier le code"}
+              className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${
+                exhausted ? "bg-[#F1F5F9] text-[#94A3B8] cursor-not-allowed" : "bg-white hover:bg-[#3BA4FF]/10"
+              }`}
             >
-              {copied === (p.promo_code || p.qr_code) ? (
+              {exhausted ? (
+                <Check className="h-4 w-4" />
+              ) : copied === codeStr ? (
                 <Check className="h-4 w-4 text-[#10B981]" />
               ) : (
                 <Copy className="h-4 w-4 text-[#475569]" />
@@ -378,6 +449,8 @@ function PartnerCard({ p, copied, onCopy, onOpenDetail, onAddToCart }) {
 // ─────────────────────────────────────────
 function PartnerDetail({ p, copied, onCopy, onAddToCart, onClose }) {
   const type = p.type || "code";
+  const exhausted = !!p.is_exhausted;
+  const codeStr = p.promo_code || p.qr_code || "";
   return (
     <div
       onClick={onClose}
@@ -463,23 +536,41 @@ function PartnerDetail({ p, copied, onCopy, onAddToCart, onClose }) {
             </div>
           )}
 
-          {(type === "code" || type === "discount") && (p.promo_code || p.qr_code) && (
-            <div className="rounded-2xl border border-dashed border-[#3BA4FF]/40 bg-[#3BA4FF]/5 p-4 flex items-center gap-3">
-              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-[#071B34] text-white">
+          {(type === "code" || type === "discount") && codeStr && (
+            <div className={`rounded-2xl border border-dashed p-4 flex items-center gap-3 ${
+              exhausted ? "border-[#94A3B8]/30 bg-[#F1F5F9]" : "border-[#3BA4FF]/40 bg-[#3BA4FF]/5"
+            }`}>
+              <div className={`flex h-12 w-12 items-center justify-center rounded-xl text-white ${
+                exhausted ? "bg-[#94A3B8]" : "bg-[#071B34]"
+              }`}>
                 <QrCode className="h-6 w-6" />
               </div>
               <div className="flex-1 min-w-0">
-                <div className="text-[10px] uppercase tracking-widest text-[#475569] font-semibold">Votre code</div>
-                <div className="font-mono text-lg text-[#071B34] font-bold truncate">
-                  {p.promo_code || p.qr_code}
+                <div className="text-[10px] uppercase tracking-widest text-[#475569] font-semibold">
+                  Votre code
+                  {p.usage_limit && (
+                    <span className="ml-1 text-[9px] normal-case tracking-normal text-[#94A3B8]">
+                      {exhausted ? `· utilisé (${p.usage_limit}/an)` : `· ${p.my_remaining ?? p.usage_limit}/${p.usage_limit} restant`}
+                    </span>
+                  )}
+                </div>
+                <div className={`font-mono text-lg font-bold truncate ${exhausted ? "text-[#94A3B8]" : "text-[#071B34]"}`}>
+                  {exhausted ? "•••••••••" : codeStr}
                 </div>
               </div>
               <button
-                onClick={() => onCopy(p.promo_code || p.qr_code)}
+                onClick={onCopy}
+                disabled={exhausted}
                 data-testid={`detail-copy-${p.id}`}
-                className="inline-flex items-center gap-1.5 rounded-xl bg-[#3BA4FF] hover:bg-[#2A8DE0] text-white text-sm font-bold px-3 py-2"
+                className={`inline-flex items-center gap-1.5 rounded-xl text-sm font-bold px-3 py-2 ${
+                  exhausted
+                    ? "bg-[#94A3B8]/20 text-[#94A3B8] cursor-not-allowed"
+                    : "bg-[#3BA4FF] hover:bg-[#2A8DE0] text-white"
+                }`}
               >
-                {copied === (p.promo_code || p.qr_code)
+                {exhausted
+                  ? <><Check className="h-4 w-4" /> Utilisé</>
+                  : copied === codeStr
                   ? <><Check className="h-4 w-4" /> Copié</>
                   : <><Copy className="h-4 w-4" /> Copier</>}
               </button>
@@ -497,10 +588,16 @@ function PartnerDetail({ p, copied, onCopy, onAddToCart, onClose }) {
             </button>
             <button
               onClick={onAddToCart}
+              disabled={exhausted}
               data-testid={`detail-add-to-cart-${p.id}`}
-              className="flex-1 h-11 rounded-xl bg-[#F59E0B] hover:bg-[#D97706] text-white text-sm font-bold inline-flex items-center justify-center gap-2"
+              className={`flex-1 h-11 rounded-xl text-sm font-bold inline-flex items-center justify-center gap-2 ${
+                exhausted
+                  ? "bg-[#F1F5F9] text-[#94A3B8] cursor-not-allowed"
+                  : "bg-[#F59E0B] hover:bg-[#D97706] text-white"
+              }`}
             >
-              <ShoppingCart className="h-4 w-4" /> Ajouter au panier
+              <ShoppingCart className="h-4 w-4" />
+              {exhausted ? `Quota atteint (${p.usage_limit}/an)` : "Ajouter au panier"}
             </button>
           </div>
         )}

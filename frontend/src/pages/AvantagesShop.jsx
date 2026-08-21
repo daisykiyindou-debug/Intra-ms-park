@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
   ArrowLeft, CreditCard, Check, Truck, ShoppingCart, Package, ChevronRight,
-  Calendar, Copy, ClipboardList, Gift, Receipt,
+  Calendar, Copy, ClipboardList, Gift, Receipt, Mail as MailIcon, QrCode, Download, Printer,
 } from "lucide-react";
 import { toast } from "sonner";
 import { api, absoluteUrl } from "@/lib/api";
@@ -20,9 +20,18 @@ export function AvantagesCheckout() {
   const navigate = useNavigate();
   const [cart, setCart] = useState(readCart);
   const [address, setAddress] = useState("");
+  const [email, setEmail] = useState("");
   const [payment, setPayment] = useState("carte");
   const [submitting, setSubmitting] = useState(false);
   const [confirmed, setConfirmed] = useState(null); // order
+
+  // Pre-fill email from /me
+  useEffect(() => {
+    api.get("/me").then((r) => {
+      if (!email && r.data?.email) setEmail(r.data.email);
+    }).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const subtotal = cart.reduce((s, i) => s + i.unit_price * i.qty, 0);
   const discount = cart.reduce(
@@ -32,6 +41,10 @@ export function AvantagesCheckout() {
 
   const pay = async () => {
     if (cart.length === 0) { toast.error("Panier vide"); return; }
+    if (!email.trim() || !/^\S+@\S+\.\S+$/.test(email.trim())) {
+      toast.error("Adresse e-mail valide requise pour recevoir vos e-billets");
+      return;
+    }
     setSubmitting(true);
     try {
       const { data } = await api.post("/cse/orders", {
@@ -45,6 +58,7 @@ export function AvantagesCheckout() {
         })),
         address: address.trim(),
         payment_method: payment,
+        email: email.trim(),
       });
       setConfirmed(data);
       setCart([]);
@@ -65,7 +79,11 @@ export function AvantagesCheckout() {
           </div>
           <h1 className="mt-4 text-2xl font-bold text-[#071B34]">Commande confirmée !</h1>
           <p className="mt-2 text-sm text-[#475569]">
-            Merci pour votre commande. Un e-mail de confirmation vous a été envoyé.
+            Merci pour votre commande.{" "}
+            {confirmed.email && (
+              <>Un e-mail de confirmation avec vos e-billets a été envoyé à{" "}
+              <strong className="text-[#071B34]">{confirmed.email}</strong>.</>
+            )}
           </p>
           <div className="mt-6 rounded-2xl bg-[#F4F7FA] p-4 text-left space-y-1">
             <div className="text-[10px] uppercase tracking-widest text-[#475569] font-semibold">Référence</div>
@@ -73,6 +91,28 @@ export function AvantagesCheckout() {
               {confirmed.reference}
             </div>
           </div>
+          {(confirmed.tickets || []).length > 0 && (
+            <div className="mt-4 rounded-2xl border border-dashed border-[#3BA4FF]/40 bg-[#3BA4FF]/5 p-4 text-left">
+              <div className="text-[10px] uppercase tracking-widest text-[#1D70B8] font-semibold flex items-center gap-1">
+                <QrCode className="h-3 w-3" /> Vos e-billets ({confirmed.tickets.length})
+              </div>
+              <div className="mt-2 space-y-1.5 max-h-40 overflow-y-auto">
+                {confirmed.tickets.map((t) => (
+                  <Link
+                    key={t.id}
+                    to={`/avantages/commandes/${confirmed.id}/billet/${t.id}`}
+                    data-testid={`ticket-link-${t.id}`}
+                    className="flex items-center gap-2 rounded-lg bg-white/70 hover:bg-white p-2 text-xs"
+                  >
+                    <QrCode className="h-4 w-4 text-[#3BA4FF] shrink-0" />
+                    <span className="flex-1 truncate font-semibold text-[#071B34]">{t.name}</span>
+                    <span className="font-mono text-[10px] text-[#475569]">{t.code}</span>
+                    <ChevronRight className="h-3 w-3 text-[#94A3B8]" />
+                  </Link>
+                ))}
+              </div>
+            </div>
+          )}
           <div className="mt-6 flex items-center justify-between rounded-2xl border border-[#071B34]/5 p-4">
             <div>
               <div className="text-xs text-[#475569]">Total réglé</div>
@@ -164,6 +204,24 @@ export function AvantagesCheckout() {
                 placeholder="Ex : 12 rue de la République, 92350 Le Plessis-Robinson"
                 data-testid="checkout-address"
                 className="ms-input mt-3 resize-none"
+              />
+            </div>
+
+            <div className="ms-card p-5">
+              <h2 className="text-base font-bold text-[#071B34] inline-flex items-center gap-2">
+                <MailIcon className="h-4 w-4" /> E-mail de confirmation
+              </h2>
+              <p className="text-xs text-[#475569] mt-1">
+                Vos e-billets seront envoyés à cette adresse. Vous pouvez la modifier.
+              </p>
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="prenom.nom@exemple.com"
+                data-testid="checkout-email"
+                className="ms-input mt-3"
+                required
               />
             </div>
 
@@ -325,17 +383,144 @@ export function AvantagesOrders() {
                   </div>
                 ))}
               </div>
-              {(o.discount_total > 0 || o.address || o.payment_method) && (
+              {(o.discount_total > 0 || o.address || o.payment_method || o.email) && (
                 <div className="mt-3 pt-3 border-t border-[#071B34]/5 text-xs text-[#475569] space-y-1">
                   {o.discount_total > 0 && <div>Réductions appliquées : <span className="font-semibold text-[#10B981]">- {Number(o.discount_total).toFixed(2)} €</span></div>}
                   {o.payment_method && <div>Paiement : <span className="font-semibold text-[#334155]">{o.payment_method === "prelevement" ? "Sur salaire" : "Carte bancaire"}</span></div>}
                   {o.address && <div>Livraison : <span className="font-semibold text-[#334155]">{o.address}</span></div>}
+                  {o.email && <div className="inline-flex items-center gap-1"><MailIcon className="h-3 w-3" /> Envoyé à <span className="font-semibold text-[#334155]">{o.email}</span></div>}
+                </div>
+              )}
+              {(o.tickets || []).length > 0 && (
+                <div className="mt-3 pt-3 border-t border-[#071B34]/5">
+                  <div className="text-[10px] uppercase tracking-widest text-[#1D70B8] font-semibold mb-2 inline-flex items-center gap-1">
+                    <QrCode className="h-3 w-3" /> E-billets ({o.tickets.length})
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {o.tickets.map((t) => (
+                      <Link
+                        key={t.id}
+                        to={`/avantages/commandes/${o.id}/billet/${t.id}`}
+                        data-testid={`order-ticket-${t.id}`}
+                        className="flex items-center gap-2 rounded-xl border border-[#3BA4FF]/20 bg-[#3BA4FF]/5 hover:bg-[#3BA4FF]/10 p-2"
+                      >
+                        <QrCode className="h-5 w-5 text-[#3BA4FF]" />
+                        <div className="flex-1 min-w-0">
+                          <div className="text-xs font-semibold text-[#071B34] truncate">{t.name}</div>
+                          <div className="font-mono text-[10px] text-[#475569]">{t.code}</div>
+                        </div>
+                        <ChevronRight className="h-3 w-3 text-[#94A3B8]" />
+                      </Link>
+                    ))}
+                  </div>
                 </div>
               )}
             </div>
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+
+// ─────────────────────────────────────────
+// E-ticket page — /avantages/commandes/:oid/billet/:tid
+// ─────────────────────────────────────────
+import { useParams } from "react-router-dom";
+
+export function AvantagesTicket() {
+  const { oid, tid } = useParams();
+  const [order, setOrder] = useState(null);
+  const [ticket, setTicket] = useState(null);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    api.get(`/cse/orders/${oid}`)
+      .then((r) => {
+        setOrder(r.data);
+        const t = (r.data.tickets || []).find((x) => x.id === tid);
+        if (!t) setError("Billet introuvable");
+        setTicket(t || null);
+      })
+      .catch((err) => setError(err?.response?.data?.detail || "Commande introuvable"));
+  }, [oid, tid]);
+
+  const printTicket = () => window.print();
+
+  if (error) {
+    return (
+      <div className="max-w-lg mx-auto">
+        <div className="ms-card p-8 text-center">
+          <div className="text-sm text-[#B91C1C]">{error}</div>
+          <Link to="/avantages/commandes" className="mt-4 inline-flex items-center gap-1 text-sm font-semibold text-[#3BA4FF]">
+            <ArrowLeft className="h-4 w-4" /> Retour aux commandes
+          </Link>
+        </div>
+      </div>
+    );
+  }
+  if (!order || !ticket) {
+    return <div className="ms-card p-10 text-center text-sm text-[#475569]">Chargement du billet…</div>;
+  }
+
+  return (
+    <div className="max-w-md mx-auto space-y-4">
+      <div className="flex items-center justify-between print:hidden">
+        <Link to="/avantages/commandes" className="inline-flex items-center gap-1 text-sm font-semibold text-[#475569] hover:text-[#071B34]">
+          <ArrowLeft className="h-4 w-4" /> Retour
+        </Link>
+        <button
+          onClick={printTicket}
+          data-testid="ticket-print"
+          className="inline-flex items-center gap-1 rounded-xl bg-[#3BA4FF] hover:bg-[#2A8DE0] text-white text-sm font-bold px-3 h-10"
+        >
+          <Printer className="h-4 w-4" /> Imprimer / PDF
+        </button>
+      </div>
+
+      <div className="rounded-3xl overflow-hidden shadow-2xl bg-white" data-testid="ticket-content">
+        {/* Header band */}
+        <div className="relative bg-gradient-to-br from-[#071B34] via-[#0B2545] to-[#3BA4FF] p-6 text-white">
+          <div className="text-[10px] uppercase tracking-widest opacity-80">E-billet MS Park CSE</div>
+          <h1 className="mt-1 text-2xl font-black leading-tight">{ticket.name}</h1>
+          <div className="mt-1 text-sm opacity-90">Commande {order.reference}</div>
+          <Gift className="absolute -right-2 -bottom-4 h-24 w-24 text-white/10" />
+        </div>
+
+        {/* Body */}
+        <div className="p-6 space-y-4">
+          <div className="rounded-2xl border border-dashed border-[#3BA4FF]/40 bg-[#3BA4FF]/5 p-4 text-center">
+            <div className="text-[10px] uppercase tracking-widest text-[#1D70B8] font-semibold">Code d&apos;accès</div>
+            <div className="mt-2 font-mono text-2xl font-black text-[#071B34] tracking-wider break-all">
+              {ticket.code}
+            </div>
+            <div className="mt-3 mx-auto h-24 w-24 rounded-xl bg-white flex items-center justify-center border-2 border-[#071B34]/10">
+              <QrCode className="h-16 w-16 text-[#071B34]" />
+            </div>
+            <div className="mt-2 text-[10px] text-[#94A3B8]">Présentez ce code lors de la validation</div>
+          </div>
+
+          <dl className="grid grid-cols-2 gap-3 text-sm">
+            <div>
+              <dt className="text-[10px] uppercase tracking-widest text-[#475569] font-semibold">Prix payé</dt>
+              <dd className="font-bold text-[#071B34]">{Number(ticket.unit_price).toFixed(2)} €</dd>
+            </div>
+            <div>
+              <dt className="text-[10px] uppercase tracking-widest text-[#475569] font-semibold">Émis le</dt>
+              <dd className="font-semibold text-[#334155]">{new Date(order.created_at).toLocaleDateString("fr-FR")}</dd>
+            </div>
+            <div className="col-span-2">
+              <dt className="text-[10px] uppercase tracking-widest text-[#475569] font-semibold">Titulaire</dt>
+              <dd className="font-semibold text-[#334155]">{order.email || "Retrait sur place"}</dd>
+            </div>
+          </dl>
+          <div className="pt-3 border-t border-[#071B34]/5 text-[10px] text-[#94A3B8] leading-relaxed">
+            Billet nominatif, non remboursable. À présenter avec une pièce d&apos;identité si demandé.
+            Ce billet a été émis par le CSE MS Park.
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

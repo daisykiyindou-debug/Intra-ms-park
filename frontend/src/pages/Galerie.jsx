@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   Camera, Search, Plus, ArrowLeft, Star, Download, Upload, Trash2, X,
   Users, Calendar, ImagePlus, Heart, MoreVertical, Edit3,
-  ChevronLeft, ChevronRight,
+  ChevronLeft, ChevronRight, Check,
 } from "lucide-react";
 import { toast } from "sonner";
 import { api, absoluteUrl, formatDateFr } from "@/lib/api";
@@ -121,8 +121,40 @@ export function GalerieAlbum() {
   const [showFav, setShowFav] = useState(false);
   const [lightbox, setLightbox] = useState(null); // { index: number }
   const [editing, setEditing] = useState(false);
+  const [selectMode, setSelectMode] = useState(false);
+  const [selected, setSelected] = useState(() => new Set());
   const isEditor = me?.is_admin || me?.can_manage_communication;
   const canContribute = isEditor || g?.allow_contributions;
+
+  const toggleSelected = (pid) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      next.has(pid) ? next.delete(pid) : next.add(pid);
+      return next;
+    });
+  };
+
+  const downloadOne = (photo) => {
+    const url = absoluteUrl(photo.url);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = photo.caption || photo.url.split("/").pop() || `photo-${photo.id}.jpg`;
+    a.target = "_blank";
+    a.rel = "noreferrer";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  };
+
+  const downloadMany = async (photos) => {
+    if (!photos.length) return;
+    // Trigger downloads sequentially with a small delay to avoid browser popup blockers
+    for (const p of photos) {
+      downloadOne(p);
+      await new Promise((r) => setTimeout(r, 250));
+    }
+    toast.success(`${photos.length} photo${photos.length > 1 ? "s" : ""} téléchargée${photos.length > 1 ? "s" : ""}`);
+  };
 
   const load = async () => {
     const { data } = await api.get(`/galleries/${id}`);
@@ -240,20 +272,83 @@ export function GalerieAlbum() {
         >
           <Star className={`h-4 w-4 ${showFav ? "fill-white" : ""}`} /> {showFav ? "Tous" : "Favoris"}
         </button>
+        <button
+          onClick={() => { setSelectMode((s) => !s); setSelected(new Set()); }}
+          data-testid="gallery-select-mode"
+          className={`inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold transition-colors ${selectMode ? "bg-[#3BA4FF] text-white" : "bg-[#F4F7FA] text-[#334155]"}`}
+        >
+          <Check className="h-4 w-4" /> {selectMode ? "Terminer" : "Sélectionner"}
+        </button>
+        {filtered.length > 0 && (
+          <button
+            onClick={() => downloadMany(filtered)}
+            data-testid="gallery-download-all"
+            className="inline-flex items-center gap-2 rounded-xl bg-[#071B34] hover:bg-[#0B2545] px-3 py-2 text-sm font-semibold text-white"
+          >
+            <Download className="h-4 w-4" /> Tout télécharger
+          </button>
+        )}
       </div>
+
+      {selectMode && (
+        <div
+          data-testid="gallery-selection-bar"
+          className="ms-card p-3 flex items-center gap-3 border-[#3BA4FF]/30 bg-gradient-to-r from-[#3BA4FF]/5 to-transparent"
+        >
+          <div className="text-sm font-semibold text-[#071B34]">
+            {selected.size} photo{selected.size > 1 ? "s" : ""} sélectionnée{selected.size > 1 ? "s" : ""}
+          </div>
+          <button
+            onClick={() => setSelected(new Set(filtered.map((p) => p.id)))}
+            className="text-xs rounded-lg bg-white hover:bg-[#F4F7FA] border border-[#071B34]/10 px-3 h-8 font-semibold text-[#334155]"
+          >
+            Tout sélectionner
+          </button>
+          <button
+            onClick={() => setSelected(new Set())}
+            disabled={selected.size === 0}
+            className="text-xs rounded-lg bg-white hover:bg-[#F4F7FA] border border-[#071B34]/10 px-3 h-8 font-semibold text-[#334155] disabled:opacity-40"
+          >
+            Effacer la sélection
+          </button>
+          <button
+            onClick={() => downloadMany(filtered.filter((p) => selected.has(p.id)))}
+            disabled={selected.size === 0}
+            data-testid="gallery-download-selection"
+            className="ml-auto inline-flex items-center gap-1.5 rounded-xl bg-[#3BA4FF] hover:bg-[#2A8DE0] disabled:opacity-40 px-3 h-9 text-sm font-bold text-white"
+          >
+            <Download className="h-4 w-4" /> Télécharger la sélection ({selected.size})
+          </button>
+        </div>
+      )}
 
       {filtered.length === 0 ? (
         <div className="ms-card p-12 text-center text-sm text-[#475569]">Aucune photo à afficher.</div>
       ) : (
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
           {filtered.map((p, i) => (
-            <div key={p.id} className="relative group rounded-2xl overflow-hidden aspect-square bg-[#F4F7FA]" data-testid={`photo-${p.id}`}>
+            <div
+              key={p.id}
+              className={`relative group rounded-2xl overflow-hidden aspect-square bg-[#F4F7FA] ${selectMode && selected.has(p.id) ? "ring-4 ring-[#3BA4FF]" : ""}`}
+              data-testid={`photo-${p.id}`}
+            >
               <img
                 src={absoluteUrl(p.url)}
                 alt={p.caption}
-                onClick={() => setLightbox({ index: i })}
-                className="w-full h-full object-cover cursor-zoom-in transition-transform group-hover:scale-105"
+                onClick={() => selectMode ? toggleSelected(p.id) : setLightbox({ index: i })}
+                className="w-full h-full object-cover cursor-pointer transition-transform group-hover:scale-105"
               />
+              {selectMode && (
+                <div
+                  onClick={() => toggleSelected(p.id)}
+                  className={`absolute top-2 left-2 h-6 w-6 rounded-full flex items-center justify-center shadow ${
+                    selected.has(p.id) ? "bg-[#3BA4FF] text-white" : "bg-white/95 text-[#94A3B8]"
+                  }`}
+                  data-testid={`photo-select-${p.id}`}
+                >
+                  {selected.has(p.id) && <Check className="h-3.5 w-3.5" />}
+                </div>
+              )}
               <div className="absolute top-2 right-2 flex items-center gap-1">
                 <button
                   onClick={() => toggleFav(p.id)}
@@ -262,9 +357,14 @@ export function GalerieAlbum() {
                 >
                   <Star className={`h-4 w-4 ${p.is_favorite ? "fill-[#F59E0B]" : ""}`} />
                 </button>
-                <a href={absoluteUrl(p.url)} download target="_blank" rel="noreferrer" className="h-8 w-8 rounded-lg bg-white/90 backdrop-blur flex items-center justify-center shadow text-[#475569]" title="Télécharger">
+                <button
+                  onClick={() => downloadOne(p)}
+                  className="h-8 w-8 rounded-lg bg-white/90 backdrop-blur flex items-center justify-center shadow text-[#475569] hover:text-[#3BA4FF]"
+                  title="Télécharger"
+                  data-testid={`photo-download-${p.id}`}
+                >
                   <Download className="h-4 w-4" />
-                </a>
+                </button>
                 {(isEditor || p.uploader_id === me?.id) && (
                   <button onClick={() => del(p.id)} className="h-8 w-8 rounded-lg bg-white/90 backdrop-blur flex items-center justify-center shadow text-[#B91C1C]" title="Supprimer">
                     <Trash2 className="h-4 w-4" />
@@ -296,6 +396,17 @@ export function GalerieAlbum() {
               data-testid="lightbox-close"
             >
               <X className="h-5 w-5" />
+            </button>
+
+            {/* Download */}
+            <button
+              onClick={(e) => { e.stopPropagation(); downloadOne(filtered[lightbox.index]); }}
+              className="absolute top-4 right-16 text-white h-10 w-10 flex items-center justify-center bg-white/10 hover:bg-white/20 rounded-full transition-colors z-10"
+              aria-label="Télécharger"
+              data-testid="lightbox-download"
+              title="Télécharger cette photo"
+            >
+              <Download className="h-5 w-5" />
             </button>
 
             {/* Counter */}

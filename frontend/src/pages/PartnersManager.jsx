@@ -35,6 +35,7 @@ const emptyForm = () => ({
   promo_code: "",
   conditions: "",
   valid_until: "",
+  usage_limit: "",
 });
 
 export default function PartnersManager() {
@@ -70,6 +71,7 @@ export default function PartnersManager() {
       promo_code: p.promo_code || "",
       conditions: p.conditions || "",
       valid_until: p.valid_until || "",
+      usage_limit: p.usage_limit ?? "",
     },
   });
 
@@ -247,6 +249,7 @@ function PartnerEditor({ editor, onClose, onSaved }) {
         promo_code: f.promo_code.trim(),
         conditions: f.conditions.trim(),
         valid_until: f.valid_until || "",
+        usage_limit: f.usage_limit === "" ? null : Math.max(1, parseInt(f.usage_limit, 10) || 1),
       };
       if (editor.id) {
         await api.put(`/admin/partners/${editor.id}`, payload);
@@ -356,6 +359,41 @@ function PartnerEditor({ editor, onClose, onSaved }) {
                 data-testid="partner-valid-until"
                 className="ms-input mt-1"
               />
+            </div>
+          </div>
+
+          {/* Usage limit */}
+          <div>
+            <label className="text-[10px] uppercase tracking-widest font-semibold text-[#475569]">
+              Limite par salarié / an
+            </label>
+            <div className="mt-1 flex items-center gap-2">
+              <input
+                type="number"
+                min="1"
+                step="1"
+                value={f.usage_limit}
+                onChange={(e) => set("usage_limit", e.target.value)}
+                placeholder={f.type === "product" ? "Ex : 5 billets max" : "Ex : 1 fois par an"}
+                data-testid="partner-usage-limit"
+                className="ms-input flex-1"
+              />
+              <button
+                type="button"
+                onClick={() => set("usage_limit", "")}
+                className="text-xs rounded-lg bg-[#F4F7FA] hover:bg-[#071B34]/5 px-3 h-9 font-semibold text-[#334155]"
+              >
+                Illimité
+              </button>
+            </div>
+            <div className="mt-1 text-[11px] text-[#475569]">
+              {f.usage_limit ? (
+                f.type === "product"
+                  ? `Chaque salarié pourra acheter ${f.usage_limit} exemplaire${Number(f.usage_limit) > 1 ? "s" : ""} maximum par an.`
+                  : `Chaque salarié pourra utiliser ce code ${f.usage_limit} fois par an.`
+              ) : (
+                "Aucune limite — l'avantage peut être utilisé autant de fois que souhaité."
+              )}
             </div>
           </div>
 

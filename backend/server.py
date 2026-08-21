@@ -3744,9 +3744,53 @@ async def read_all_notifs():
 
 
 # ─── Partners (Avantages / CSE)
+def _partner_year() -> int:
+    return date.today().year
+
+
+async def _partner_usage(user_id: str, pid: str, year: Optional[int] = None) -> int:
+    """Return the number of times a user has claimed/purchased a partner this year.
+    - `code`/`discount` types → 1 per claim recorded in `partner_claims`.
+    - `product` type → sum of qty in `cse_orders` for that partner this year.
+    """
+    year = year or _partner_year()
+    partner = await db.partners.find_one({"id": pid}, {"_id": 0})
+    if not partner:
+        return 0
+    if (partner.get("type") or "code") == "product":
+        # Sum qty from confirmed orders this year
+        start = f"{year}-01-01"
+        end = f"{year + 1}-01-01"
+        cursor = db.cse_orders.find(
+            {"user_id": user_id, "created_at": {"$gte": start, "$lt": end}}, {"_id": 0}
+        )
+        total = 0
+        async for o in cursor:
+            for it in (o.get("items") or []):
+                if it.get("partner_id") == pid:
+                    total += int(it.get("qty") or 0)
+        return total
+    claim = await db.partner_claims.find_one(
+        {"user_id": user_id, "partner_id": pid, "year": year}, {"_id": 0}
+    )
+    return int((claim or {}).get("qty") or 0)
+
+
+async def _enrich_partner_for_user(p: dict, user_id: str) -> dict:
+    limit = p.get("usage_limit")
+    used = await _partner_usage(user_id, p["id"]) if limit else 0
+    p["my_usage"] = used
+    p["my_remaining"] = None if not limit else max(0, int(limit) - used)
+    p["is_exhausted"] = bool(limit and used >= int(limit))
+    return p
+
+
 @api.get("/partners")
 async def list_partners():
     items = await db.partners.find({}, {"_id": 0}).sort("created_at", -1).to_list(200)
+    uid = current_user()
+    for p in items:
+        await _enrich_partner_for_user(p, uid)
     return items
 
 
@@ -3765,6 +3809,7 @@ class PartnerPayload(BaseModel):
     qr_code: Optional[str] = ""  # legacy field used by user-facing card
     conditions: Optional[str] = ""
     valid_until: Optional[str] = ""
+    usage_limit: Optional[int] = None  # max uses per employee per year (None = unlimited)
 
 
 def _compute_partner_display(p: dict) -> dict:
@@ -3821,6 +3866,35 @@ async def admin_delete_partner(pid: str):
     return {"ok": True, "id": pid}
 
 
+@api.post("/partners/{pid}/claim")
+async def claim_partner_code(pid: str):
+    """Register that the current user has claimed a code/discount partner.
+    Enforces `usage_limit` per year. Returns the updated usage."""
+    partner = await db.partners.find_one({"id": pid}, {"_id": 0})
+    if not partner:
+        raise HTTPException(404, "Avantage introuvable")
+    if (partner.get("type") or "code") == "product":
+        raise HTTPException(400, "Les produits se gèrent via le panier")
+    uid = current_user()
+    year = _partner_year()
+    limit = partner.get("usage_limit")
+    current = await _partner_usage(uid, pid, year)
+    if limit and current >= int(limit):
+        raise HTTPException(400, f"Vous avez déjà utilisé cet avantage ({limit}× par an maximum).")
+    await db.partner_claims.update_one(
+        {"user_id": uid, "partner_id": pid, "year": year},
+        {"$inc": {"qty": 1}, "$set": {"user_id": uid, "partner_id": pid, "year": year, "ts": _now()}},
+        upsert=True,
+    )
+    new_usage = current + 1
+    return {
+        "ok": True,
+        "my_usage": new_usage,
+        "my_remaining": None if not limit else max(0, int(limit) - new_usage),
+        "is_exhausted": bool(limit and new_usage >= int(limit)),
+    }
+
+
 # ─── Orders (mini e-commerce for CSE products/tickets)
 class OrderItem(BaseModel):
     partner_id: str
@@ -3835,6 +3909,7 @@ class OrderPayload(BaseModel):
     items: List[OrderItem]
     address: Optional[str] = ""
     payment_method: Optional[str] = "carte"
+    email: Optional[str] = ""
 
 
 @api.get("/cse/orders")
@@ -3846,13 +3921,48 @@ async def list_cse_orders():
     return items
 
 
+@api.get("/cse/orders/{oid}")
+async def get_cse_order(oid: str):
+    """Return a single order for the current user (used by the e-ticket page)."""
+    o = await db.cse_orders.find_one(
+        {"id": oid, "user_id": current_user()}, {"_id": 0}
+    )
+    if not o:
+        raise HTTPException(404, "Commande introuvable")
+    return o
+
+
 @api.post("/cse/orders")
 async def create_cse_order(payload: OrderPayload):
     if not payload.items:
         raise HTTPException(400, "Panier vide")
+    uid = current_user()
+    year = _partner_year()
+
+    # Aggregate qty per partner_id in the incoming cart
+    incoming: dict[str, int] = {}
+    for it in payload.items:
+        incoming[it.partner_id] = incoming.get(it.partner_id, 0) + max(1, int(it.qty))
+
+    # Enforce usage limits: current usage + new qty must not exceed usage_limit
+    for pid, add_qty in incoming.items():
+        partner = await db.partners.find_one({"id": pid}, {"_id": 0})
+        if not partner:
+            raise HTTPException(400, "Avantage introuvable dans le panier")
+        limit = partner.get("usage_limit")
+        if limit:
+            already = await _partner_usage(uid, pid, year)
+            if already + add_qty > int(limit):
+                remaining = max(0, int(limit) - already)
+                raise HTTPException(
+                    400,
+                    f"Limite atteinte pour « {partner.get('name')} » : {limit}/an, il vous reste {remaining}.",
+                )
+
     subtotal = 0.0
     discount = 0.0
     lines = []
+    tickets = []
     for it in payload.items:
         qty = max(1, int(it.qty))
         line_total = round(it.unit_price * qty, 2)
@@ -3868,26 +3978,48 @@ async def create_cse_order(payload: OrderPayload):
             "qty": qty,
             "line_total": line_total,
         })
+        # Generate one e-ticket per unit
+        for _ in range(qty):
+            tickets.append({
+                "id": _id(),
+                "partner_id": it.partner_id,
+                "name": it.name,
+                "code": f"MSP-{_id()[:6].upper()}-{_id()[:4].upper()}",
+                "used": False,
+                "unit_price": float(it.unit_price),
+            })
+
+    # Resolve email — payload > employee.email > employee.personal_email
+    emp = await db.employees.find_one({"id": uid}, {"_id": 0}) or {}
+    email = (payload.email or "").strip() or emp.get("email") or emp.get("personal_email") or ""
+
     order = {
         "id": _id(),
-        "user_id": current_user(),
+        "user_id": uid,
         "items": lines,
+        "tickets": tickets,
         "subtotal": round(subtotal, 2),
         "discount_total": round(discount, 2),
         "total": round(subtotal, 2),
         "status": "confirmed",
         "address": payload.address or "",
         "payment_method": payload.payment_method or "carte",
+        "email": email,
+        "email_sent": bool(email),  # mocked send
         "created_at": _now(),
         "reference": f"MSC-{_id()[:8].upper()}",
     }
     await db.cse_orders.insert_one(order.copy())
-    # Notify the user
+    # Notify the user (in-app)
     await _push_notification(
-        employee_id=current_user(),
+        employee_id=uid,
         type="order",
         title=f"Commande {order['reference']} confirmée",
-        content=f"Merci ! Votre commande de {order['total']:.2f} € est validée.",
+        content=(
+            f"Merci ! {len(tickets)} e-billet{'s' if len(tickets) > 1 else ''} disponible"
+            f"{'s' if len(tickets) > 1 else ''} — {order['total']:.2f} €"
+            + (f" — envoyé à {email}" if email else "")
+        ),
         icon="gift",
         link="/avantages/commandes",
     )
@@ -6710,11 +6842,14 @@ async def today_live_badging():
     today = _now_paris().date().isoformat()
     sched = await db.schedules.find_one({"employee_id": me["id"], "day": today}, {"_id": 0})
     manual = await db.badging_manual.find_one({"employee_id": me["id"], "day": today}, {"_id": 0})
-    base = _compute_today_badging(sched, me["id"]) if sched else {
-        "id": f"live-{today}", "employee_id": me["id"], "day": today,
-        "clock_in": None, "pause_out": None, "pause_in": None, "clock_out": None,
-        "worked_minutes": 0, "break_minutes": 0, "anomaly": None, "note": "Pas de shift planifié", "live": True,
-    }
+    base = _compute_today_badging(sched, me["id"]) if sched else None
+    if not base:
+        base = {
+            "id": f"live-{today}", "employee_id": me["id"], "day": today,
+            "clock_in": None, "pause_out": None, "pause_in": None, "clock_out": None,
+            "worked_minutes": 0, "break_minutes": 0, "anomaly": None,
+            "note": "Pas de shift planifié" if not sched else None, "live": True,
+        }
     if manual:
         # Manual punches override schedule-derived values
         for k in ("clock_in", "pause_out", "pause_in", "clock_out"):

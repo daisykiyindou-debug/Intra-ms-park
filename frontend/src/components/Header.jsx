@@ -5,7 +5,7 @@ import { useApp } from "@/contexts/AppContext";
 import { api, setAuthId } from "@/lib/api";
 
 export default function Header({ onMenuClick, onNotifClick }) {
-  const { me, notifications, adminMode, toggleAdminMode } = useApp();
+  const { me, notifications, refreshNotifications, adminMode, toggleAdminMode } = useApp();
   const canToggleAdmin = !!me && (me.is_admin || me.can_manage_communication);
 
   const messageNotifs = notifications.filter((n) => n.type === "message");
@@ -35,13 +35,13 @@ export default function Header({ onMenuClick, onNotifClick }) {
     return () => document.removeEventListener("mousedown", onClick);
   }, []);
 
-  const openMessage = (n) => {
+  const openMessage = async (n) => {
     setMsgOpen(false);
-    // Extract channel id from link like /messagerie?ch=xxx
-    let target = n.link || "/messagerie";
-    if (!target.startsWith("/messagerie")) target = "/messagerie";
-    // Mark this notification as read
-    api.post(`/notifications/${n.id}/read`).catch(() => {});
+    // Preserve the query (?ch=xxx) so the messagerie opens the right conversation
+    const target = n.link && n.link.startsWith("/messagerie") ? n.link : "/messagerie";
+    // Mark this notif as read on the backend then refresh the local list immediately
+    try { await api.post(`/notifications/${n.id}/read`); } catch { /* ignore */ }
+    refreshNotifications?.();
     navigate(target);
   };
 
