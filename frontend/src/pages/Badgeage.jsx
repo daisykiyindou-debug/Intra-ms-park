@@ -561,10 +561,10 @@ function PunchHistorySection() {
       const mondayIso = monday.toISOString().slice(0, 10);
       const sunday = new Date(monday); sunday.setDate(monday.getDate() + 6);
       const sundayIso = sunday.toISOString().slice(0, 10);
-      // Show Mon → Sun, sorted ascending (Mon first)
+      // Show Mon → Sun of current week, most recent first (Sun on top, Mon at bottom)
       return rows
         .filter((r) => r.day >= mondayIso && r.day <= sundayIso)
-        .sort((a, b) => a.day.localeCompare(b.day));
+        .sort((a, b) => b.day.localeCompare(a.day));
     }
     if (range === "month") {
       const iso = new Date().toISOString().slice(0, 7);
