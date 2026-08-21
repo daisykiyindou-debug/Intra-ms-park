@@ -2948,8 +2948,20 @@ async def _dispatch_scheduled_posts():
         await db.posts.update_one({"id": p["id"]}, {"$set": {"scheduled_broadcast_sent": True}})
 
 
+async def _newsletter_recipients(n: dict) -> list[str]:
+    """Return the list of employee ids matching the newsletter's target
+    statuses. Empty target_statuses = every active employee."""
+    statuses = n.get("recipient_statuses") or []
+    query = {}
+    if statuses:
+        query["statuses"] = {"$in": statuses}
+    emps = await db.employees.find(query, {"_id": 0, "id": 1}).to_list(500)
+    return [e["id"] for e in emps]
+
+
 async def _dispatch_scheduled_newsletters():
-    """Same, for newsletters."""
+    """Send scheduled newsletters whose publish_at is reached.
+    Only notifies employees matching the recipient_statuses filter."""
     now_iso = _now()
     due = await db.newsletters.find(
         {"published": True, "archived": False, "publish_at": {"$ne": None, "$lte": now_iso},
@@ -2957,15 +2969,26 @@ async def _dispatch_scheduled_newsletters():
         {"_id": 0},
     ).to_list(100)
     for n in due:
-        await _broadcast_notification(
-            type="news",
-            title=f"Nouvelle newsletter · {n.get('title', '')}",
-            content=n.get("preheader") or n.get("subject") or "",
-            icon="megaphone",
-            link=f"/newsletters/{n['id']}",
-            exclude_ids=[n.get("author_id")] if n.get("author_id") else [],
+        recipient_ids = await _newsletter_recipients(n)
+        for rid in recipient_ids:
+            if rid == n.get("author_id"):
+                continue
+            await _push_notification(
+                employee_id=rid,
+                type="news",
+                title=f"Nouvelle newsletter · {n.get('title', '')}",
+                content=n.get("preheader") or n.get("subject") or "",
+                icon="megaphone",
+                link=f"/newsletters/{n['id']}",
+            )
+        await db.newsletters.update_one(
+            {"id": n["id"]},
+            {"$set": {
+                "scheduled_broadcast_sent": True,
+                "recipient_count": len(recipient_ids),
+                "sent_at": now_iso,
+            }},
         )
-        await db.newsletters.update_one({"id": n["id"]}, {"$set": {"scheduled_broadcast_sent": True}})
 
 
 @api.get("/posts")
@@ -6613,6 +6636,10 @@ class NewsletterCreate(BaseModel):
     published: bool = False
     published_at: Optional[str] = None
     publish_at: Optional[str] = None  # scheduled publication — ISO datetime; when reached, the newsletter becomes visible to all employees
+    recipient_statuses: List[str] = []  # target employee statuses (bureau, management, ops, securite, nettoyage, restauration, maintenance, direction). Empty = everyone.
+    recipient_count: Optional[int] = None
+    open_count: Optional[int] = 0
+    click_count: Optional[int] = 0
 
 
 @api.get("/newsletters")
@@ -6639,6 +6666,17 @@ async def list_newsletters(archived: bool = False, category: Optional[str] = Non
     for n in items:
         pub_at = n.get("publish_at")
         n["is_scheduled"] = bool(pub_at and pub_at > now_iso)
+        # Compute the display status expected by the admin UI
+        if n.get("archived"):
+            n["send_status"] = "archived"
+        elif not n.get("published"):
+            n["send_status"] = "draft"
+        elif n["is_scheduled"]:
+            n["send_status"] = "scheduled"
+        elif n.get("scheduled_broadcast_sent") or n.get("sent_at"):
+            n["send_status"] = "sent"
+        else:
+            n["send_status"] = "published"
     if q:
         needle = q.lower()
         items = [n for n in items if needle in (n.get("title", "") + n.get("subject", "") + n.get("category", "")).lower()]
@@ -6759,6 +6797,113 @@ async def archive_newsletter(nid: str):
     await require_permission("manage_newsletter")
     await db.newsletters.update_one({"id": nid}, {"$set": {"archived": True}})
     return {"ok": True}
+
+
+class ScheduleUpdate(BaseModel):
+    publish_at: str  # ISO datetime
+
+
+@api.post("/admin/newsletters/{nid}/reschedule")
+async def reschedule_newsletter(nid: str, payload: ScheduleUpdate):
+    """Update the scheduled send date/time of a not-yet-sent newsletter."""
+    await require_permission("manage_newsletter")
+    n = await db.newsletters.find_one({"id": nid}, {"_id": 0})
+    if not n:
+        raise HTTPException(404, "Newsletter introuvable")
+    if n.get("scheduled_broadcast_sent") or n.get("sent_at"):
+        raise HTTPException(423, "Newsletter déjà envoyée — impossible de reprogrammer.")
+    await db.newsletters.update_one(
+        {"id": nid},
+        {"$set": {"publish_at": payload.publish_at, "published": True,
+                  "scheduled_broadcast_sent": False}},
+    )
+    return await db.newsletters.find_one({"id": nid}, {"_id": 0})
+
+
+@api.post("/admin/newsletters/{nid}/cancel-schedule")
+async def cancel_schedule(nid: str):
+    """Cancel a scheduled newsletter — reverts it back to draft."""
+    await require_permission("manage_newsletter")
+    n = await db.newsletters.find_one({"id": nid}, {"_id": 0})
+    if not n:
+        raise HTTPException(404, "Newsletter introuvable")
+    if n.get("scheduled_broadcast_sent") or n.get("sent_at"):
+        raise HTTPException(423, "Newsletter déjà envoyée — impossible d'annuler.")
+    await db.newsletters.update_one(
+        {"id": nid},
+        {"$set": {"publish_at": None, "published": False,
+                  "scheduled_broadcast_sent": False}},
+    )
+    return await db.newsletters.find_one({"id": nid}, {"_id": 0})
+
+
+@api.post("/admin/newsletters/{nid}/send-now")
+async def send_now(nid: str):
+    """Immediately send a scheduled newsletter (bypass the scheduled time)."""
+    await require_permission("manage_newsletter")
+    n = await db.newsletters.find_one({"id": nid}, {"_id": 0})
+    if not n:
+        raise HTTPException(404, "Newsletter introuvable")
+    if n.get("scheduled_broadcast_sent") or n.get("sent_at"):
+        raise HTTPException(423, "Newsletter déjà envoyée.")
+    now_iso = _now()
+    await db.newsletters.update_one(
+        {"id": nid},
+        {"$set": {"publish_at": now_iso, "published": True,
+                  "published_at": n.get("published_at") or now_iso}},
+    )
+    # Dispatch fires below when we call _dispatch_scheduled_newsletters
+    await _dispatch_scheduled_newsletters()
+    return await db.newsletters.find_one({"id": nid}, {"_id": 0})
+
+
+class OpenTrack(BaseModel):
+    newsletter_id: str
+
+
+@api.post("/newsletters/{nid}/open")
+async def track_open(nid: str):
+    """Increment open counter (deduped per employee)."""
+    uid = current_user()
+    existing = await db.newsletter_opens.find_one({"newsletter_id": nid, "employee_id": uid})
+    if not existing:
+        await db.newsletter_opens.insert_one({"newsletter_id": nid, "employee_id": uid, "ts": _now()})
+        await db.newsletters.update_one({"id": nid}, {"$inc": {"open_count": 1}})
+    return {"ok": True}
+
+
+@api.post("/newsletters/{nid}/click")
+async def track_click(nid: str):
+    """Increment click counter."""
+    uid = current_user()
+    await db.newsletter_clicks.insert_one({"newsletter_id": nid, "employee_id": uid, "ts": _now()})
+    await db.newsletters.update_one({"id": nid}, {"$inc": {"click_count": 1}})
+    return {"ok": True}
+
+
+@api.get("/admin/newsletters/{nid}/stats")
+async def newsletter_stats(nid: str):
+    """Return targeting + engagement stats for the admin dashboard."""
+    await require_permission("manage_newsletter")
+    n = await db.newsletters.find_one({"id": nid}, {"_id": 0})
+    if not n:
+        raise HTTPException(404, "Newsletter introuvable")
+    recipient_ids = await _newsletter_recipients(n)
+    return {
+        "recipient_statuses": n.get("recipient_statuses") or [],
+        "recipient_count": n.get("recipient_count") or len(recipient_ids),
+        "publish_at": n.get("publish_at"),
+        "sent_at": n.get("sent_at"),
+        "send_status": (
+            "draft" if not n.get("published")
+            else "scheduled" if (n.get("publish_at") and n["publish_at"] > _now())
+            else "sent" if (n.get("scheduled_broadcast_sent") or n.get("sent_at"))
+            else "published"
+        ),
+        "open_count": n.get("open_count") or 0,
+        "click_count": n.get("click_count") or 0,
+        "open_rate": round(((n.get("open_count") or 0) / max(1, n.get("recipient_count") or len(recipient_ids))) * 100, 1),
+    }
 
 
 # ═══════════════════════════════════════════════════════════════════

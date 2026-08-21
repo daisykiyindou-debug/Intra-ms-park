@@ -234,7 +234,9 @@ function NewsletterCard({ nl, isEditor, onChange }) {
                 style={{ top: `${menuPos.top}px`, right: `${menuPos.right}px` }}
                 className="fixed z-[60] w-48 rounded-xl bg-white shadow-2xl border border-[#071B34]/8 py-1 text-sm"
               >
-                <button onClick={() => { setMenu(false); navigate(`/newsletters/${nl.id}/edit`); }} className="w-full text-left px-3 py-2 hover:bg-[#F4F7FA] flex items-center gap-2"><Edit3 className="h-3.5 w-3.5" /> Modifier</button>
+                {!nl.published && (
+                  <button onClick={() => { setMenu(false); navigate(`/newsletters/${nl.id}/edit`); }} className="w-full text-left px-3 py-2 hover:bg-[#F4F7FA] flex items-center gap-2"><Edit3 className="h-3.5 w-3.5" /> Modifier</button>
+                )}
                 {!nl.archived && (
                   <button onClick={async () => { setMenu(false); await api.post(`/admin/newsletters/${nl.id}/archive`); toast.success("Archivée"); onChange(); }} className="w-full text-left px-3 py-2 hover:bg-[#F4F7FA] flex items-center gap-2"><Archive className="h-3.5 w-3.5" /> Archiver</button>
                 )}
