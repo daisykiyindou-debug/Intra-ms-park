@@ -119,7 +119,7 @@ export default function ManagementShell() {
         if (path === "attributions") return has("approve_leaves");
         if (path === "notes-de-frais") return has("view_expenses", "approve_expenses");
         if (path === "heures-supp") return has("approve_recovery", "approve_leaves");
-        if (path === "restauration") return has("manage_documents");
+        if (path === "restauration") return false;
         if (path === "carrousel") return has("manage_carousel");
         if (path === "agenda") return has("create_events", "edit_events");
         if (path === "formulaires") return has("create_forms");
@@ -128,6 +128,8 @@ export default function ManagementShell() {
         if (path === "documents-editor") return has("manage_documents", "publish_documents");
         if (path === "idees") return false;
         if (path === "avantages") return false;
+        if (path === "formations") return false;
+        if (path === "support") return has("view_tickets", "reply_tickets");
         return false;
       });
   const tabs = isAdmin ? subNav : (isComm ? [...commSubNav, ...permAwareSubNav.filter((t) => !commSubNav.find((c) => c.to === t.to))] : permAwareSubNav);
@@ -190,8 +192,8 @@ export default function ManagementShell() {
         {(isAdmin || has("manage_documents")) && <Route path="documents" element={<DocumentsManager />} />}
         {(isAdmin || has("view_expenses", "approve_expenses")) && <Route path="notes-de-frais" element={<ExpensesManager />} />}
         {(isAdmin || has("approve_recovery", "approve_leaves")) && <Route path="heures-supp" element={<OvertimeManager />} />}
-        {(isAdmin || has("manage_documents")) && <Route path="formations" element={<FormationsManager />} />}
-        {(isAdmin || has("manage_documents")) && <Route path="restauration" element={<RestaurationManager />} />}
+        {isAdmin && <Route path="formations" element={<FormationsManager />} />}
+        {isAdmin && <Route path="restauration" element={<RestaurationManager />} />}
         {(isAdmin || has("view_payslips", "manage_documents")) && <Route path="fiches-de-paie" element={<PayslipsManager />} />}
         {isAdmin && <Route path="idees" element={<IdeasAdmin />} />}
         {isAdmin && <Route path="avantages" element={<PartnersManager />} />}

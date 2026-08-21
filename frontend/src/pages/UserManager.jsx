@@ -6,7 +6,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
-import { useApp } from "@/contexts/AppContext";
+import { useApp, hasPermission } from "@/contexts/AppContext";
 import { notifyLiveRefresh } from "@/hooks/useLiveData";
 
 const ROLES = [
@@ -156,12 +156,12 @@ export default function UserManager() {
     }
   };
 
-  if (!me?.is_admin) {
+  if (!me?.is_admin && !hasPermission(me, "manage_users")) {
     return (
       <div className="ms-card p-8 text-center">
         <ShieldCheck className="h-10 w-10 mx-auto text-[#EF4444] mb-3" />
         <h3 className="text-lg font-bold text-[#071B34]">Accès restreint</h3>
-        <p className="text-sm text-[#475569] mt-1">Ce module est réservé aux administrateurs.</p>
+        <p className="text-sm text-[#475569] mt-1">Vous n&apos;avez pas la permission &quot;Gérer les utilisateurs&quot;.</p>
       </div>
     );
   }
