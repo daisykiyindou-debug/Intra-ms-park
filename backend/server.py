@@ -1251,18 +1251,45 @@ async def _seed_once() -> None:
     ]
     await db.partners.insert_many(partners)
 
-    # ─── Channels & messages (mock messagerie)
+    # ─── Channels & messages (mock messagerie).
+    # `members_ids` list is authoritative — a user only sees channels where
+    # their id appears. Newly-created accounts start with an EMPTY messagerie.
+    seeded_emp_ids = [
+        CURRENT_EMPLOYEE_ID, "emp-marcus-simeo", "emp-sophie", "emp-karim",
+        "emp-noah", "emp-thomas", "emp-emma", "emp-lucas", "emp-mia",
+        "emp-pierre",
+    ]
     channels: list[dict] = [
-        {"id": "ch-accueil", "name": "Accueil", "icon": "hash", "members": 24, "unread": 0, "is_dm": False, "is_group": False, "archived": False},
-        {"id": "ch-ops", "name": "Employés OPS", "icon": "hash", "members": 18, "unread": 3, "is_dm": False, "is_group": False, "archived": False},
-        {"id": "ch-roller", "name": "Roller", "icon": "hash", "members": 12, "unread": 2, "is_dm": False, "is_group": False, "archived": False},
-        {"id": "ch-karting", "name": "Karting", "icon": "hash", "members": 18, "unread": 0, "is_dm": False, "is_group": False, "archived": False},
-        {"id": "ch-attractions", "name": "Attractions", "icon": "hash", "members": 14, "unread": 0, "is_dm": False, "is_group": False, "archived": False},
-        {"id": "ch-restauration", "name": "Restauration", "icon": "hash", "members": 22, "unread": 1, "is_dm": False, "is_group": False, "archived": False},
-        {"id": "ch-donut", "name": "Donut House", "icon": "hash", "members": 8, "unread": 0, "is_dm": False, "is_group": False, "archived": False},
-        {"id": "ch-soccer", "name": "Soccer Bar", "icon": "hash", "members": 16, "unread": 0, "is_dm": False, "is_group": False, "archived": False},
-        {"id": "ch-securite", "name": "Sécurité", "icon": "hash", "members": 9, "unread": 0, "is_dm": False, "is_group": False, "archived": False},
-        {"id": "ch-nettoyage", "name": "Nettoyage", "icon": "hash", "members": 7, "unread": 0, "is_dm": False, "is_group": False, "archived": False},
+        {"id": "ch-accueil", "name": "Accueil", "icon": "hash",
+         "members": len(seeded_emp_ids), "members_ids": list(seeded_emp_ids),
+         "unread": 0, "is_dm": False, "is_group": False, "archived": False},
+        {"id": "ch-ops", "name": "Employés OPS", "icon": "hash",
+         "members": 6, "members_ids": [CURRENT_EMPLOYEE_ID, "emp-marcus-simeo", "emp-sophie", "emp-karim", "emp-noah", "emp-lucas"],
+         "unread": 3, "is_dm": False, "is_group": False, "archived": False},
+        {"id": "ch-roller", "name": "Roller", "icon": "hash",
+         "members": 4, "members_ids": [CURRENT_EMPLOYEE_ID, "emp-marcus-simeo", "emp-karim", "emp-noah"],
+         "unread": 2, "is_dm": False, "is_group": False, "archived": False},
+        {"id": "ch-karting", "name": "Karting", "icon": "hash",
+         "members": 4, "members_ids": [CURRENT_EMPLOYEE_ID, "emp-marcus-simeo", "emp-karim", "emp-lucas"],
+         "unread": 0, "is_dm": False, "is_group": False, "archived": False},
+        {"id": "ch-attractions", "name": "Attractions", "icon": "hash",
+         "members": 4, "members_ids": [CURRENT_EMPLOYEE_ID, "emp-marcus-simeo", "emp-sophie", "emp-mia"],
+         "unread": 0, "is_dm": False, "is_group": False, "archived": False},
+        {"id": "ch-restauration", "name": "Restauration", "icon": "hash",
+         "members": 4, "members_ids": [CURRENT_EMPLOYEE_ID, "emp-marcus-simeo", "emp-thomas", "emp-emma"],
+         "unread": 1, "is_dm": False, "is_group": False, "archived": False},
+        {"id": "ch-donut", "name": "Donut House", "icon": "hash",
+         "members": 3, "members_ids": ["emp-marcus-simeo", "emp-thomas", "emp-emma"],
+         "unread": 0, "is_dm": False, "is_group": False, "archived": False},
+        {"id": "ch-soccer", "name": "Soccer Bar", "icon": "hash",
+         "members": 4, "members_ids": [CURRENT_EMPLOYEE_ID, "emp-marcus-simeo", "emp-thomas", "emp-mia"],
+         "unread": 0, "is_dm": False, "is_group": False, "archived": False},
+        {"id": "ch-securite", "name": "Sécurité", "icon": "hash",
+         "members": 3, "members_ids": ["emp-marcus-simeo", "emp-sophie", "emp-noah"],
+         "unread": 0, "is_dm": False, "is_group": False, "archived": False},
+        {"id": "ch-nettoyage", "name": "Nettoyage", "icon": "hash",
+         "members": 3, "members_ids": ["emp-marcus-simeo", "emp-sophie", "emp-lucas"],
+         "unread": 0, "is_dm": False, "is_group": False, "archived": False},
     ]
     await db.channels.insert_many(channels)
 
@@ -4161,28 +4188,22 @@ async def create_cse_order(payload: OrderPayload):
 @api.get("/channels")
 async def list_channels():
     """Return every conversation with a live-computed `unread` count
-    based on the caller's `channel_reads` timestamp for that channel."""
+    based on the caller's `channel_reads` timestamp for that channel.
+    Only channels where the caller is a member are returned — new users
+    start with a strictly empty messagerie."""
     uid = current_user()
     all_channels = await db.channels.find({}, {"_id": 0}).to_list(200)
-    # Filter DMs to only those where current user is a participant.
-    # Legacy DMs (id = `dm-<empId>`) are considered participants if either uid
-    # matches the encoded employee OR the caller is the counterpart.
-    def _is_dm_participant(c):
-        if not c.get("is_dm"):
-            return True
+
+    def _is_member(c):
         members = c.get("members_ids") or []
         if uid in members:
             return True
-        # legacy pattern dm-<empId> — this is the "inbox" of employee <empId>.
-        # Historically it acted as a public wall; for the current UX it makes
-        # no sense to show it to the owner (looks like a self-DM), only to
-        # visitors so they can leave a message.
-        cid = c.get("id", "")
-        if cid.startswith("dm-") and "--" not in cid:
-            encoded = cid[3:]
-            return encoded != uid  # hide own inbox, keep for visitors
+        # Everything else is hidden. New DMs and groups must add the user
+        # explicitly to members_ids to be visible. Legacy dm-<empId> "inbox"
+        # channels are only visible to their owner.
         return False
-    channels = [c for c in all_channels if _is_dm_participant(c)]
+
+    channels = [c for c in all_channels if _is_member(c)]
     # Fetch all read markers for the caller in one round-trip
     reads = await db.channel_reads.find({"employee_id": uid}, {"_id": 0}).to_list(500)
     read_map = {r["channel_id"]: r.get("last_read_ts") for r in reads}
@@ -4224,8 +4245,21 @@ async def mark_channel_read(cid: str):
     return {"ok": True}
 
 
+async def _require_channel_member(cid: str) -> tuple[dict, str]:
+    """Load channel and verify the caller is a member. Returns (channel, uid)."""
+    uid = current_user()
+    ch = await db.channels.find_one({"id": cid}, {"_id": 0})
+    if not ch:
+        raise HTTPException(404, "Conversation introuvable")
+    members = ch.get("members_ids") or []
+    if uid in members:
+        return ch, uid
+    raise HTTPException(403, "Vous n'êtes pas membre de cette conversation")
+
+
 @api.get("/channels/{cid}/messages")
 async def list_messages(cid: str):
+    await _require_channel_member(cid)
     return await db.messages.find(
         {"channel_id": cid}, {"_id": 0}
     ).sort("ts", 1).to_list(200)
@@ -4235,6 +4269,7 @@ async def list_messages(cid: str):
 async def post_message(cid: str, payload: MessageCreate):
     if not (payload.content or "").strip() and not (payload.attachments or []):
         raise HTTPException(400, "Message vide")
+    ch, _uid = await _require_channel_member(cid)
     msg = {
         "id": _id(),
         "channel_id": cid,
@@ -4246,7 +4281,6 @@ async def post_message(cid: str, payload: MessageCreate):
     await db.messages.insert_one(msg.copy())
     # Notify only channel members (DM: the other person; group: every member;
     # team channel: broadcast fallback) — spare the whole company when a DM lands.
-    ch = await db.channels.find_one({"id": cid}, {"_id": 0})
     author = await db.employees.find_one({"id": current_user()}, {"_id": 0})
     author_name = (
         f"{author.get('first_name', '')} {author.get('last_name', '')}".strip()
@@ -4272,15 +4306,17 @@ async def post_message(cid: str, payload: MessageCreate):
                 link=f"/messagerie?ch={cid}",
             )
     else:
-        # Public team channel — keep the broadcast so followers see activity
-        await _broadcast_notification(
-            type="message",
-            title=f"Nouveau message · #{ch_label}",
-            content=f"{author_name} : {preview or 'Nouveau message'}",
-            icon="message-circle",
-            link=f"/messagerie?ch={cid}",
-            exclude_ids=[current_user()],
-        )
+        # Team channel — notify only its members (no company-wide broadcast).
+        member_ids = [mid for mid in (ch.get("members_ids") or []) if mid != current_user()]
+        for mid in member_ids:
+            await _push_notification(
+                employee_id=mid,
+                type="message",
+                title=f"Nouveau message · #{ch_label}",
+                content=f"{author_name} : {preview or 'Nouveau message'}",
+                icon="message-circle",
+                link=f"/messagerie?ch={cid}",
+            )
     return await _strip(msg)
 
 
