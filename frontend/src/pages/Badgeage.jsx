@@ -39,7 +39,7 @@ export default function Badgeage() {
       api.get("/badging/today-live").then((r) => r.data),
       api.get("/overtime/counter").then((r) => r.data),
       api.get("/badging/state").then((r) => r.data),
-      api.get("/badging/history?days=14").then((r) => r.data),
+      api.get("/badging/history?days=45").then((r) => r.data),
     ]);
     setHistory(h);
     setToday(t);
@@ -112,17 +112,24 @@ export default function Badgeage() {
     return rows;
   }, [history, today, punchHistory]);
 
-  const weekTotal = weekRows.reduce((s, r) => s + (r.entry?.worked_minutes || 0), 0);
   const contractWeek = (me?.contract_hours_weekly || 24) * 60;
   const dailyTarget = Math.round(contractWeek / 5);
   const monthWorkDaysPassed = Math.max(1, Math.min(22, Math.ceil(new Date().getDate() * 5 / 7)));
   const monthTarget = Math.round(contractWeek * 4.33);
-  // Monthly total resets on the 1st of each month (only counts current-month history).
+  // v2 sources: punchHistory is the authoritative source (comes from /badging/history)
   const currentMonthPrefix = new Date().toISOString().slice(0, 7);
-  const monthTotal = history
+  // Weekly total = sum of worked_minutes from punchHistory rows in the current week
+  const _monday = (() => {
+    const now = new Date();
+    const m = new Date(now); m.setDate(now.getDate() - ((now.getDay() + 6) % 7));
+    return m.toISOString().slice(0, 10);
+  })();
+  const weekTotal = punchHistory
+    .filter((h) => h.day >= _monday)
+    .reduce((s, h) => s + (h.worked_minutes || 0), 0);
+  const monthTotal = punchHistory
     .filter((h) => (h.day || "").startsWith(currentMonthPrefix))
-    .reduce((s, h) => s + (h.worked_minutes || 0), 0)
-    + ((today?.day || "").startsWith(currentMonthPrefix) ? (today?.worked_minutes || 0) : 0);
+    .reduce((s, h) => s + (h.worked_minutes || 0), 0);
 
   const dayStatusLabel = today?.clock_out
     ? "Journée complète"
