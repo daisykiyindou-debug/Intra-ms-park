@@ -3626,6 +3626,52 @@ async def admin_send_payslip(pid: str):
         "payslip_id": pid,
     }
     await db.documents.insert_one(doc.copy())
+
+    # ─── Send a DM in Messagerie from the "Service RH" identity to the employee
+    # (a persistent RH channel per employee, so all payroll DMs land in the same
+    # thread over the months).
+    rh_channel_id = f"rh-{p['employee_id']}"
+    existing_ch = await db.channels.find_one({"id": rh_channel_id}, {"_id": 0})
+    if not existing_ch:
+        await db.channels.insert_one({
+            "id": rh_channel_id,
+            "name": "Service RH",
+            "icon": "briefcase",
+            "members": 2,
+            "members_ids": [p["employee_id"], current_user()],
+            "unread": 1,
+            "is_dm": True,
+            "is_group": False,
+            "is_official": True,
+            "archived": False,
+            "avatar": None,
+            "created_at": now_iso,
+        })
+    else:
+        await db.channels.update_one({"id": rh_channel_id}, {"$inc": {"unread": 1}})
+
+    payslip_link = f"/documents?payslip={pid}"
+    msg_body = (
+        (p.get("message_body") or "").strip()
+        or f"Bonjour {emp.get('first_name', '')},\n\nVotre fiche de paie de {label} est disponible."
+    )
+    msg_content = f"{msg_body}\n\n📄 [Ouvrir ma fiche de paie]({payslip_link})"
+    await db.messages.insert_one({
+        "id": _id(),
+        "channel_id": rh_channel_id,
+        "author_id": "system-rh",
+        "author_name": "Service RH",
+        "content": msg_content,
+        "attachments": [{
+            "kind": "payslip",
+            "name": f"Fiche de paie — {label}",
+            "url": payslip_link,
+            "payslip_id": pid,
+        }],
+        "ts": now_iso,
+        "is_official": True,
+    })
+
     await _push_notification(
         employee_id=p["employee_id"],
         type="document",
@@ -3633,6 +3679,14 @@ async def admin_send_payslip(pid: str):
         content=(p.get("message_subject") or f"Votre bulletin de {label} est disponible."),
         icon="file-text",
         link="/documents",
+    )
+    await _push_notification(
+        employee_id=p["employee_id"],
+        type="message",
+        title="Service RH",
+        content=f"Votre fiche de paie de {label} vous a été envoyée.",
+        icon="briefcase",
+        link=f"/messagerie?ch={rh_channel_id}",
     )
     return await db.payslips.find_one({"id": pid}, {"_id": 0})
 

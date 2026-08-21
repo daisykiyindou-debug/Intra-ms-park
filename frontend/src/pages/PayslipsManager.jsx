@@ -417,27 +417,41 @@ function PayslipGenerator({ employees, onClose, onSaved }) {
   const emp = useMemo(() => employees.find((e) => e.id === step.employee_id) || null, [employees, step.employee_id]);
   const contractH = emp?.contract_hours_weekly || 35;
   const roleCat = emp?.role_category;
-  const defaultHourly = roleCat === "encadrement" ? 21.5 : roleCat === "restauration" ? 13.2 : 12.85;
+  // Prefer the employee's declared hourly_rate; else derive from gross_salary;
+  // else fall back to a category-based estimate. This mirrors the backend
+  // _resolve_pay_basis() logic so admin and preview stay in sync.
+  const defaultHourly = useMemo(() => {
+    if (!emp) return 12.85;
+    if (emp.hourly_rate) return Number(emp.hourly_rate);
+    if (emp.gross_salary) {
+      const monthlyH = Math.max(1, contractH * 4.33);
+      return +(Number(emp.gross_salary) / monthlyH).toFixed(2);
+    }
+    return roleCat === "encadrement" ? 21.5 : roleCat === "restauration" ? 13.2 : 12.85;
+  }, [emp, contractH, roleCat]);
+  // Base gross override: if the employee has a declared gross_salary, use it as
+  // the exact line amount so it matches the fiche RH one-to-one.
+  const baseGross = emp?.gross_salary ? Number(emp.gross_salary) : null;
 
-  // Recompute auto base line when employee/period changes
+  // Recompute auto base line when employee/period changes. Always re-sync the
+  // "Salaire de base" line so a change in the user's gross_salary or hourly_rate
+  // is reflected immediately in the payslip.
   useEffect(() => {
     if (!emp) return;
     setStep((s) => {
-      const hasBase = s.lines.some((l) => l.kind === "auto");
-      if (hasBase) return s;
       const monthlyH = +(contractH * 4.33).toFixed(2);
+      const autoAmount = baseGross || +(monthlyH * defaultHourly).toFixed(2);
+      const baseLine = { label: "Salaire de base", kind: "auto", base: monthlyH, rate: defaultHourly, amount: autoAmount };
+      const others = s.lines.filter((l) => l.kind !== "auto");
       return {
         ...s,
-        lines: [
-          { label: "Salaire de base", kind: "auto", base: monthlyH, rate: defaultHourly, amount: +(monthlyH * defaultHourly).toFixed(2) },
-          ...s.lines,
-        ],
+        lines: [baseLine, ...others],
         message_subject: s.message_subject || `Votre fiche de paie – ${FR_MONTHS[s.month - 1]} ${s.year}`,
         message_body: s.message_body ||
           `Bonjour ${emp.first_name},\n\nVeuillez trouver ci-joint votre fiche de paie pour le mois de ${FR_MONTHS[s.month - 1]} ${s.year}.\nN'hésitez pas à contacter le service RH pour toute question.\n\nCordialement,\nL'équipe RH`,
       };
     });
-  }, [emp, contractH, defaultHourly, step.month, step.year]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [emp, contractH, defaultHourly, baseGross, step.month, step.year]);
 
   const totals = useMemo(() => {
     const gross = step.lines.reduce((s, l) => s + Number(l.amount || 0), 0);
