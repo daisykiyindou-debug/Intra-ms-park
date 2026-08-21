@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import {
   Clock, Coffee, LogIn, LogOut, Fingerprint, ChevronDown, ChevronUp,
   CheckCircle2, AlertCircle, TrendingUp, CalendarClock, ArrowUpRight, Plus, X,
-  Users, Calendar as CalendarIcon, GraduationCap, Package, Wrench, MoreHorizontal, Trash2, Paperclip,
+  Users, Calendar as CalendarIcon, GraduationCap, Package, Wrench, MoreHorizontal, Trash2, Paperclip, Download,
 } from "lucide-react";
 import { toast } from "sonner";
 import { api, formatDateFr } from "@/lib/api";
@@ -523,7 +523,7 @@ function PunchChoiceModal({ onClose, onPunch }) {
               </div>
               <div className="flex-1">
                 <div className="font-bold text-[#071B34]">Départ en pause</div>
-                <div className="text-xs text-[#475569]">Durée minimum : 45 minutes. Le retour se badge automatiquement.</div>
+                <div className="text-xs text-[#475569]">Durée minimum : 45 minutes. Rebadgez à votre retour pour reprendre le poste.</div>
               </div>
             </button>
             <button
@@ -557,15 +557,15 @@ const STATUS_STYLE = {
 function PunchHistorySection() {
   const [rows, setRows] = useState([]);
   const [summary, setSummary] = useState(null);
-  const [range, setRange] = useState("day"); // day | week | month
+  const [range, setRange] = useState("day"); // day (last 7) | week (this week) | month (this month)
+  const [exportOpen, setExportOpen] = useState(false);
   useEffect(() => {
-    const days = range === "day" ? 30 : range === "week" ? 60 : 90;
+    const days = range === "day" ? 7 : range === "week" ? 21 : 92;
     api.get(`/badging/history?days=${days}`).then((r) => setRows(r.data));
     api.get(`/badging/summary`).then((r) => setSummary(r.data));
   }, [range]);
   const shown = useMemo(() => {
-    if (range === "day") return rows;
-    // For week/month keep same rows but slice
+    if (range === "day") return rows.slice(0, 7); // Last 7 days
     if (range === "week") {
       const now = new Date();
       const monday = new Date(now); monday.setDate(now.getDate() - ((now.getDay() + 6) % 7));
@@ -573,7 +573,7 @@ function PunchHistorySection() {
       return rows.filter((r) => r.day >= iso);
     }
     if (range === "month") {
-      const iso = new Date().toISOString().slice(0, 7); // YYYY-MM
+      const iso = new Date().toISOString().slice(0, 7);
       return rows.filter((r) => r.day.startsWith(iso));
     }
     return rows;
@@ -583,23 +583,33 @@ function PunchHistorySection() {
       <div className="p-5 flex items-center gap-3 flex-wrap">
         <CalendarClock className="h-4 w-4 text-[#3BA4FF]" />
         <h2 className="text-lg font-bold text-[#071B34]">Historique de badgeage</h2>
-        <div className="ml-auto inline-flex rounded-xl bg-[#F4F7FA] p-1">
-          {[
-            { k: "day", l: "Jour" },
-            { k: "week", l: "Semaine" },
-            { k: "month", l: "Mois" },
-          ].map((t) => (
-            <button
-              key={t.k}
-              onClick={() => setRange(t.k)}
-              data-testid={`punch-history-tab-${t.k}`}
-              className={`rounded-lg px-3 h-8 text-xs font-semibold ${
-                range === t.k ? "bg-white shadow text-[#071B34]" : "text-[#475569]"
-              }`}
-            >
-              {t.l}
-            </button>
-          ))}
+        <span className="text-xs text-[#94A3B8]">{range === "day" ? "7 derniers jours" : range === "week" ? "cette semaine" : "ce mois-ci"}</span>
+        <div className="ml-auto inline-flex items-center gap-2 flex-wrap">
+          <div className="inline-flex rounded-xl bg-[#F4F7FA] p-1">
+            {[
+              { k: "day", l: "7 jours" },
+              { k: "week", l: "Semaine" },
+              { k: "month", l: "Mois" },
+            ].map((t) => (
+              <button
+                key={t.k}
+                onClick={() => setRange(t.k)}
+                data-testid={`punch-history-tab-${t.k}`}
+                className={`rounded-lg px-3 h-8 text-xs font-semibold ${
+                  range === t.k ? "bg-white shadow text-[#071B34]" : "text-[#475569]"
+                }`}
+              >
+                {t.l}
+              </button>
+            ))}
+          </div>
+          <button
+            onClick={() => setExportOpen(true)}
+            data-testid="punch-history-export"
+            className="inline-flex items-center gap-1.5 rounded-xl bg-[#10B981] hover:bg-[#059669] text-white text-xs font-bold px-3 h-8"
+          >
+            <Download className="h-3.5 w-3.5" /> Exporter
+          </button>
         </div>
       </div>
 
@@ -662,7 +672,151 @@ function PunchHistorySection() {
           </tbody>
         </table>
       </div>
+
+      {exportOpen && <PunchExportModal onClose={() => setExportOpen(false)} />}
     </div>
+  );
+}
+
+function PunchExportModal({ onClose }) {
+  const [mode, setMode] = useState("month"); // month | year | custom
+  const now = new Date();
+  const [month, setMonth] = useState(now.toISOString().slice(0, 7));
+  const [year, setYear] = useState(String(now.getFullYear()));
+  const [from, setFrom] = useState(new Date(now.getFullYear(), now.getMonth() - 2, 1).toISOString().slice(0, 10));
+  const [to, setTo] = useState(now.toISOString().slice(0, 10));
+  const [busy, setBusy] = useState(false);
+
+  const doExport = async () => {
+    setBusy(true);
+    try {
+      let fromDay, toDay;
+      if (mode === "month") {
+        fromDay = `${month}-01`;
+        const [yy, mm] = month.split("-").map(Number);
+        toDay = new Date(yy, mm, 0).toISOString().slice(0, 10); // last day
+      } else if (mode === "year") {
+        fromDay = `${year}-01-01`;
+        toDay = `${year}-12-31`;
+      } else {
+        if (!from || !to || from > to) { toast.error("Période invalide"); setBusy(false); return; }
+        fromDay = from;
+        toDay = to;
+      }
+      const today = new Date().toISOString().slice(0, 10);
+      const startDate = new Date(fromDay);
+      const endDate = new Date(toDay > today ? today : toDay);
+      const days = Math.max(1, Math.floor((endDate - startDate) / 86400000) + 1);
+      const { data } = await api.get(`/badging/history?days=${days}`);
+      const rows = data.filter((r) => r.day >= fromDay && r.day <= toDay);
+      if (rows.length === 0) { toast.error("Aucune donnée sur la période"); setBusy(false); return; }
+      // Build CSV
+      const header = ["Date", "Entrée", "Début pause", "Fin pause", "Sortie", "Heures travaillées", "Retard (min)", "Heures supp (min)", "Statut"];
+      const lines = [header.join(";")];
+      rows
+        .slice()
+        .sort((a, b) => a.day.localeCompare(b.day))
+        .forEach((r) => {
+          lines.push([
+            new Date(r.day).toLocaleDateString("fr-FR"),
+            r.clock_in || "",
+            r.break_out || "",
+            r.break_in || "",
+            r.clock_out || "",
+            fmtHM(r.worked_minutes),
+            r.late_minutes || 0,
+            r.overtime_minutes || 0,
+            r.status,
+          ].map((v) => `"${String(v).replace(/"/g, '""')}"`).join(";"));
+        });
+      const csv = "\uFEFF" + lines.join("\n"); // BOM for Excel UTF-8
+      const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      const label = mode === "month" ? month : mode === "year" ? year : `${fromDay}_${toDay}`;
+      a.download = `badgeage_${label}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      toast.success(`Export téléchargé (${rows.length} jours)`);
+      onClose();
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Export impossible");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <PortalModal>
+      <div onClick={onClose} className="fixed inset-0 z-[70] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
+        <div onClick={(e) => e.stopPropagation()} data-testid="punch-export-modal" className="bg-white rounded-3xl w-full max-w-md p-6 shadow-2xl">
+          <div className="flex items-center justify-between">
+            <h2 className="text-lg font-bold text-[#071B34] inline-flex items-center gap-2"><Download className="h-4 w-4" /> Exporter l&apos;historique</h2>
+            <button onClick={onClose} className="h-9 w-9 rounded-xl hover:bg-[#F4F7FA]"><X className="h-4 w-4 mx-auto" /></button>
+          </div>
+          <p className="text-xs text-[#475569] mt-1">Le fichier CSV s&apos;ouvre directement dans Excel, Numbers ou Google Sheets.</p>
+
+          <div className="mt-4 grid grid-cols-3 gap-2">
+            {[
+              { k: "month", l: "Un mois" },
+              { k: "year", l: "Une année" },
+              { k: "custom", l: "Période" },
+            ].map((m) => (
+              <button
+                key={m.k}
+                onClick={() => setMode(m.k)}
+                data-testid={`export-mode-${m.k}`}
+                className={`rounded-xl px-3 py-2 text-xs font-semibold border transition-all ${
+                  mode === m.k ? "border-[#3BA4FF] bg-[#3BA4FF]/5 text-[#1D70B8]" : "border-[#071B34]/10 text-[#475569]"
+                }`}
+              >
+                {m.l}
+              </button>
+            ))}
+          </div>
+
+          <div className="mt-4 space-y-3">
+            {mode === "month" && (
+              <div>
+                <label className="text-[10px] uppercase tracking-widest text-[#475569] font-semibold">Mois</label>
+                <input type="month" value={month} onChange={(e) => setMonth(e.target.value)} data-testid="export-month" className="ms-input mt-1" />
+              </div>
+            )}
+            {mode === "year" && (
+              <div>
+                <label className="text-[10px] uppercase tracking-widest text-[#475569] font-semibold">Année</label>
+                <input type="number" min="2020" max="2100" value={year} onChange={(e) => setYear(e.target.value)} data-testid="export-year" className="ms-input mt-1" />
+              </div>
+            )}
+            {mode === "custom" && (
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[10px] uppercase tracking-widest text-[#475569] font-semibold">Du</label>
+                  <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} data-testid="export-from" className="ms-input mt-1" />
+                </div>
+                <div>
+                  <label className="text-[10px] uppercase tracking-widest text-[#475569] font-semibold">Au</label>
+                  <input type="date" value={to} onChange={(e) => setTo(e.target.value)} data-testid="export-to" className="ms-input mt-1" />
+                </div>
+              </div>
+            )}
+          </div>
+
+          <button
+            onClick={doExport}
+            disabled={busy}
+            data-testid="punch-export-submit"
+            className="mt-5 w-full rounded-xl bg-[#10B981] hover:bg-[#059669] disabled:opacity-50 text-white font-bold py-3 inline-flex items-center justify-center gap-2"
+          >
+            <Download className="h-4 w-4" />
+            {busy ? "Génération…" : "Télécharger .csv"}
+          </button>
+        </div>
+      </div>
+    </PortalModal>
   );
 }
 
