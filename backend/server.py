@@ -1505,7 +1505,23 @@ async def me():
     emp["leave_balance"] = _display_balance(stored, pending)
     emp["leave_balance_stored"] = stored  # for admin views / debugging
     emp["leave_balance_pending"] = pending
+    # Expose the welcome flag so the frontend can show the first-login popup.
+    # Any employee whose `welcomed_at` is not set is considered "new" and will
+    # see the intro modal until they acknowledge it.
+    emp["needs_welcome"] = not emp.get("welcomed_at")
     return emp
+
+
+@api.post("/me/welcome")
+async def acknowledge_welcome():
+    """Dismiss the first-login welcome popup for the current employee.
+    Called by the frontend when the user clicks « C'est parti ! »."""
+    now_iso = _now()
+    await db.employees.update_one(
+        {"id": current_user()},
+        {"$set": {"welcomed_at": now_iso}},
+    )
+    return {"ok": True, "welcomed_at": now_iso}
 
 
 @api.get("/employees")

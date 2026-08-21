@@ -3,6 +3,7 @@ import "@/App.css";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { Toaster } from "@/components/ui/sonner";
 import Layout from "@/components/Layout";
+import WelcomePopup from "@/components/WelcomePopup";
 import { AppContext } from "@/contexts/AppContext";
 import { api } from "@/lib/api";
 import useLiveData from "@/hooks/useLiveData";
@@ -39,7 +40,12 @@ import BirthdayGate from "@/components/BirthdayGate";
 function ProtectedShell() {
   const isOut = typeof window !== "undefined" && localStorage.getItem("ms_logged_out") === "1";
   if (isOut) return <Navigate to="/login" replace />;
-  return <Layout />;
+  return (
+    <>
+      <Layout />
+      <WelcomePopup />
+    </>
+  );
 }
 
 function App() {
