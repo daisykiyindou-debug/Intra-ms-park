@@ -388,3 +388,13 @@ Dépendance ajoutée : `canvas-confetti` (yarn add).
   - `/avantages/checkout` : adresse optionnelle, choix carte/prélèvement, simulation → écran de confirmation avec référence.
   - `/avantages/commandes` : historique par référence, statut, articles, réductions, paiement, adresse.
 
+
+
+### 2026-08-21 — Pointeuse virtuelle v2 (iter 30)
+- **Backend** : nouvelle collection `punches` `{id, employee_id, day, type: clock_in|break_out|break_in|clock_out, time, ts, source}`
+- Endpoints v2 : `GET /api/badging/state`, `POST /api/badging/punch {action: auto|break|end}`, `GET /api/badging/history?days=N`, `GET /api/badging/summary` (semaine/mois)
+- Règles métier : jour OFF/congés/RTT/récup/absence validée bloqué ; pause min = **45 min** ; retard = tolérance **15 min** ; après clock_out, badge bloqué jusqu'au prochain shift planifié
+- Endpoint legacy renommé `/badging/punch-legacy` (conservé pour l'éditeur admin badging_manual). `today-live` intégré aux punches v2 (bridge coexistence)
+- **Frontend `/app/frontend/src/pages/Badgeage.jsx`** : bannière `PunchStatusBanner` avec heure temps réel + prochain badge ; `PunchChoiceModal` (Départ en pause / Fin de journée) ; `PunchHistorySection` avec onglets Jour/Semaine/Mois + 4 KPI + table Date/Entrée/Début pause/Fin pause/Sortie/Heures/Retard/Statut
+- **Fix crash 502** : `_compute_today_badging` renvoyait `None` sur certaines conditions, corrigé avec fallback structuré
+

@@ -25,30 +25,67 @@ export default function Badgeage() {
   const [today, setToday] = useState(null);
   const [counter, setCounter] = useState(null);
   const [collapsed, setCollapsed] = useState(true);
-  const [punchModal, setPunchModal] = useState(false);
   const [overtimeModal, setOvertimeModal] = useState(false);
   const [recoveryModal, setRecoveryModal] = useState(false);
 
+  const [choiceModal, setChoiceModal] = useState(false); // { blocked_reason, break_locked_until, next_shift, step } | false
+  const [state, setState] = useState(null); // /badging/state cache
+
   const load = async () => {
-    const [h, t, c] = await Promise.all([
+    const [h, t, c, st] = await Promise.all([
       api.get("/badging?filter_range=month").then((r) => r.data),
       api.get("/badging/today-live").then((r) => r.data),
       api.get("/overtime/counter").then((r) => r.data),
+      api.get("/badging/state").then((r) => r.data),
     ]);
     setHistory(h);
     setToday(t);
     setCounter(c);
+    setState(st);
   };
 
   useLiveData(load, ["badging", "overtime"]);
   useEffect(() => { load(); }, []); // eslint-disable-line
 
-  const punch = async () => {
+  const doPunch = async (action = "auto") => {
     try {
-      const { data } = await api.post("/badging/punch");
-      toast.success(`${data.label} · ${data.time}`);
-      setPunchModal(false);
+      const { data } = await api.post("/badging/punch", { action });
+      setState(data);
+      const labels = { clock_in: "Entrée", break_out: "Départ en pause", break_in: "Retour de pause", clock_out: "Fin de journée" };
+      const last = data.punches[data.punches.length - 1];
+      if (last) toast.success(`${labels[last.type]} · ${last.time}`);
+      setChoiceModal(false);
       load();
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Erreur");
+      setChoiceModal(false);
+    }
+  };
+
+  const onBadgeClick = async () => {
+    // Refresh state first so we always show the correct next step
+    try {
+      const { data: st } = await api.get("/badging/state");
+      setState(st);
+      if (st.blocked_reason) {
+        toast.error(st.blocked_reason);
+        return;
+      }
+      if (st.step === "closed") {
+        const ns = st.next_shift ? ` le ${st.next_shift.day} à ${st.next_shift.start_time || "—"}` : "";
+        toast.error(`Journée terminée. Prochain badge${ns}.`);
+        return;
+      }
+      if (st.step === "break_in" && st.break_locked_until) {
+        toast.error(`Retour de pause possible à partir de ${st.break_locked_until}.`);
+        return;
+      }
+      if (st.step === "choose") {
+        setChoiceModal(true);
+        return;
+      }
+      // clock_in or break_in (available) → punch directly
+      doPunch("auto");
     } catch (err) {
       toast.error(err?.response?.data?.detail || "Erreur");
     }
@@ -75,15 +112,6 @@ export default function Badgeage() {
   const monthTarget = Math.round(contractWeek * 4.33);
   const monthTotal = history.reduce((s, h) => s + (h.worked_minutes || 0), 0) + (today?.worked_minutes || 0);
 
-  const nextStep = useMemo(() => {
-    if (!today) return null;
-    if (!today.clock_in) return { k: "clock_in", l: "Entrée", ic: LogIn };
-    if (!today.pause_out) return { k: "pause_out", l: "Pause (sortie)", ic: Coffee };
-    if (!today.pause_in) return { k: "pause_in", l: "Pause (entrée)", ic: Coffee };
-    if (!today.clock_out) return { k: "clock_out", l: "Sortie", ic: LogOut };
-    return null;
-  }, [today]);
-
   const dayStatusLabel = today?.clock_out ? "Journée complète" : today?.clock_in ? today.note : "En attente de pointage";
   const dayStatusColor = today?.clock_out ? "bg-[#10B981]/15 text-[#047857]" : today?.clock_in ? "bg-[#3BA4FF]/15 text-[#1D70B8]" : "bg-[#F59E0B]/15 text-[#B45309]";
 
@@ -105,11 +133,16 @@ export default function Badgeage() {
           <button onClick={() => setCollapsed((v) => !v)} data-testid="btn-history" className="ms-btn-outline text-xs">
             {collapsed ? "Historique complet" : "Réduire"} {collapsed ? <ChevronDown className="h-3 w-3" /> : <ChevronUp className="h-3 w-3" />}
           </button>
-          <button onClick={() => setPunchModal(true)} data-testid="btn-badge" className="rounded-xl bg-[#3BA4FF] text-white text-sm font-semibold px-4 py-2 hover:bg-[#2A8DE0]">
-            <Fingerprint className="h-4 w-4 inline mr-1" /> Badgeage
+          <button onClick={onBadgeClick} data-testid="btn-badge" className="rounded-xl bg-[#3BA4FF] text-white text-sm font-semibold px-4 py-2 hover:bg-[#2A8DE0]">
+            <Fingerprint className="h-4 w-4 inline mr-1" /> Badger
           </button>
         </div>
       </div>
+
+      {/* Live punch-clock banner — v2 real punches */}
+      {state && (
+        <PunchStatusBanner state={state} onPunch={onBadgeClick} />
+      )}
 
       {/* Today's punches (4 cards) */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -158,6 +191,9 @@ export default function Badgeage() {
           </div>
         </div>
       </div>
+
+      {/* Full punch-clock history (v2) — jour / semaine / mois */}
+      <PunchHistorySection />
 
       {/* Weekly table */}
       <div className="ms-card p-0 overflow-hidden">
@@ -285,7 +321,7 @@ export default function Badgeage() {
       )}
 
       {/* MODALS */}
-      {punchModal && <PunchModal onClose={() => setPunchModal(false)} onPunch={punch} nextStep={nextStep} today={today} />}
+      {choiceModal && <PunchChoiceModal onClose={() => setChoiceModal(false)} onPunch={doPunch} />}
       {overtimeModal && <OvertimeDeclareModal onClose={() => setOvertimeModal(false)} onSaved={() => { setOvertimeModal(false); load(); }} />}
       {recoveryModal && <RecoveryRequestModal counter={counter} onClose={() => setRecoveryModal(false)} onSaved={() => { setRecoveryModal(false); load(); }} />}
     </div>
@@ -400,47 +436,233 @@ function MonthlyDonut({ worked, declared, available }) {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// Punch modal
+// Punch clock v2 — status banner, choice modal, history section
 // ═══════════════════════════════════════════════════════════════════
-function PunchModal({ onClose, onPunch, nextStep, today }) {
+function PunchStatusBanner({ state, onPunch }) {
+  const step = state.step;
+  const stepLabel = {
+    clock_in: "Prêt à badger — Entrée",
+    choose: "Vous êtes en poste",
+    break_in: state.break_locked_until
+      ? `En pause — retour possible à ${state.break_locked_until}`
+      : "Prêt à revenir de pause",
+    closed: "Journée terminée",
+  }[step] || step;
+  const canPunch = !state.blocked_reason && step !== "closed" && !(step === "break_in" && state.break_locked_until);
+  const accent = state.blocked_reason || step === "closed"
+    ? "from-[#94A3B8] to-[#64748B]"
+    : step === "choose"
+    ? "from-[#3BA4FF] to-[#1D70B8]"
+    : "from-[#10B981] to-[#059669]";
   return (
-    <PortalModal>
-    <div onClick={onClose} className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
-      <div onClick={(e) => e.stopPropagation()} className="bg-white rounded-3xl w-full max-w-md p-6 space-y-4">
-        <div className="flex items-center justify-between">
-          <h2 className="text-lg font-bold text-[#071B34]">Badgeage en ligne</h2>
-          <button onClick={onClose} className="h-9 w-9 rounded-xl hover:bg-[#F4F7FA]"><X className="h-4 w-4 mx-auto" /></button>
+    <div
+      className={`relative overflow-hidden rounded-3xl bg-gradient-to-br ${accent} p-6 text-white shadow-lg`}
+      data-testid="punch-banner"
+    >
+      <div className="absolute -right-8 -top-8 h-40 w-40 rounded-full bg-white/10 blur-2xl" />
+      <div className="relative flex items-center gap-5 flex-wrap">
+        <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-white/20 backdrop-blur-sm">
+          <Fingerprint className="h-8 w-8" />
         </div>
-        {!nextStep ? (
-          <div className="text-center py-6 text-sm text-[#10B981]">
-            <CheckCircle2 className="h-8 w-8 mx-auto mb-2" />
-            Tous les pointages du jour sont effectués.
-          </div>
-        ) : (
-          <>
-            <div className="rounded-2xl bg-[#F4F7FA] p-5 text-center">
-              <div className="text-xs text-[#475569]">Prochain pointage</div>
-              <div className="mt-1 text-2xl font-bold text-[#071B34] inline-flex items-center gap-2">
-                <nextStep.ic className="h-5 w-5 text-[#3BA4FF]" /> {nextStep.l}
-              </div>
-              <div className="mt-2 text-3xl font-bold text-[#3BA4FF]">
-                {new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}
-              </div>
+        <div className="flex-1 min-w-[220px]">
+          <div className="text-[10px] uppercase tracking-widest opacity-80">Pointeuse virtuelle · {state.now}</div>
+          <div className="mt-1 text-xl font-bold">{stepLabel}</div>
+          {state.blocked_reason && (
+            <div className="text-xs mt-1 opacity-90">🚫 {state.blocked_reason}</div>
+          )}
+          {step === "closed" && state.next_shift && (
+            <div className="text-xs mt-1 opacity-90">
+              Prochain badge le <strong>{state.next_shift.day}</strong>
+              {state.next_shift.start_time && <> à <strong>{state.next_shift.start_time}</strong></>}
             </div>
-            <div className="grid grid-cols-2 gap-2 text-xs text-[#475569]">
-              <div className="rounded-lg bg-[#F4F7FA] p-2">Entrée : <span className="font-bold text-[#071B34]">{today?.clock_in || "--:--"}</span></div>
-              <div className="rounded-lg bg-[#F4F7FA] p-2">Pause (sortie) : <span className="font-bold text-[#071B34]">{today?.pause_out || "--:--"}</span></div>
-              <div className="rounded-lg bg-[#F4F7FA] p-2">Pause (entrée) : <span className="font-bold text-[#071B34]">{today?.pause_in || "--:--"}</span></div>
-              <div className="rounded-lg bg-[#F4F7FA] p-2">Sortie : <span className="font-bold text-[#071B34]">{today?.clock_out || "--:--"}</span></div>
+          )}
+          {state.aggregate && (state.aggregate.clock_in || state.aggregate.break_out) && (
+            <div className="mt-2 flex flex-wrap gap-2 text-[11px]">
+              {state.aggregate.clock_in && <span className="rounded-full bg-white/15 px-2 py-0.5">Entrée : <strong>{state.aggregate.clock_in}</strong></span>}
+              {state.aggregate.break_out && <span className="rounded-full bg-white/15 px-2 py-0.5">Pause : <strong>{state.aggregate.break_out}</strong></span>}
+              {state.aggregate.break_in && <span className="rounded-full bg-white/15 px-2 py-0.5">Retour : <strong>{state.aggregate.break_in}</strong></span>}
+              {state.aggregate.clock_out && <span className="rounded-full bg-white/15 px-2 py-0.5">Sortie : <strong>{state.aggregate.clock_out}</strong></span>}
             </div>
-            <button onClick={onPunch} data-testid="btn-punch-confirm" className="w-full rounded-xl bg-[#3BA4FF] text-white font-bold py-3 hover:bg-[#2A8DE0]">
-              <Fingerprint className="h-4 w-4 inline mr-2" /> Badger maintenant
-            </button>
-          </>
-        )}
+          )}
+        </div>
+        <button
+          onClick={onPunch}
+          disabled={!canPunch}
+          data-testid="banner-punch-btn"
+          className="rounded-xl bg-white text-[#071B34] px-5 h-12 text-sm font-bold shadow-md disabled:opacity-50 disabled:cursor-not-allowed hover:opacity-90"
+        >
+          <Fingerprint className="h-4 w-4 inline mr-2" />
+          {step === "clock_in" ? "Badger (entrée)"
+            : step === "choose" ? "Badger"
+            : step === "break_in" ? "Retour de pause"
+            : "Badger"}
+        </button>
       </div>
     </div>
+  );
+}
+
+function PunchChoiceModal({ onClose, onPunch }) {
+  return (
+    <PortalModal>
+      <div onClick={onClose} className="fixed inset-0 z-[60] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
+        <div onClick={(e) => e.stopPropagation()} data-testid="punch-choice-modal" className="bg-white rounded-3xl w-full max-w-md p-6 shadow-2xl">
+          <div className="flex items-center justify-between">
+            <h2 className="text-lg font-bold text-[#071B34]">Que souhaitez-vous faire ?</h2>
+            <button onClick={onClose} className="h-9 w-9 rounded-xl hover:bg-[#F4F7FA]"><X className="h-4 w-4 mx-auto" /></button>
+          </div>
+          <p className="text-xs text-[#475569] mt-1">Choisissez le type de badge à enregistrer maintenant.</p>
+          <div className="mt-4 space-y-2">
+            <button
+              onClick={() => onPunch("break")}
+              data-testid="punch-choice-break"
+              className="w-full flex items-center gap-3 rounded-2xl border-2 border-[#F59E0B]/30 bg-[#F59E0B]/5 hover:bg-[#F59E0B]/10 p-4 text-left transition-colors"
+            >
+              <div className="h-12 w-12 rounded-xl bg-[#F59E0B] text-white flex items-center justify-center">
+                <Coffee className="h-6 w-6" />
+              </div>
+              <div className="flex-1">
+                <div className="font-bold text-[#071B34]">Départ en pause</div>
+                <div className="text-xs text-[#475569]">Durée minimum : 45 minutes. Le retour se badge automatiquement.</div>
+              </div>
+            </button>
+            <button
+              onClick={() => onPunch("end")}
+              data-testid="punch-choice-end"
+              className="w-full flex items-center gap-3 rounded-2xl border-2 border-[#EF4444]/30 bg-[#EF4444]/5 hover:bg-[#EF4444]/10 p-4 text-left transition-colors"
+            >
+              <div className="h-12 w-12 rounded-xl bg-[#EF4444] text-white flex items-center justify-center">
+                <LogOut className="h-6 w-6" />
+              </div>
+              <div className="flex-1">
+                <div className="font-bold text-[#071B34]">Fin de journée</div>
+                <div className="text-xs text-[#475569]">Clôture la journée. Vous ne pourrez plus badger jusqu&apos;à votre prochain shift.</div>
+              </div>
+            </button>
+          </div>
+        </div>
+      </div>
     </PortalModal>
+  );
+}
+
+const STATUS_STYLE = {
+  conforme: "bg-[#10B981]/15 text-[#065F46]",
+  "en cours": "bg-[#3BA4FF]/15 text-[#1D70B8]",
+  "en retard": "bg-[#EF4444]/15 text-[#B91C1C]",
+  absent: "bg-[#F59E0B]/15 text-[#B45309]",
+  "à venir": "bg-[#94A3B8]/15 text-[#475569]",
+};
+
+function PunchHistorySection() {
+  const [rows, setRows] = useState([]);
+  const [summary, setSummary] = useState(null);
+  const [range, setRange] = useState("day"); // day | week | month
+  useEffect(() => {
+    const days = range === "day" ? 30 : range === "week" ? 60 : 90;
+    api.get(`/badging/history?days=${days}`).then((r) => setRows(r.data));
+    api.get(`/badging/summary`).then((r) => setSummary(r.data));
+  }, [range]);
+  const shown = useMemo(() => {
+    if (range === "day") return rows;
+    // For week/month keep same rows but slice
+    if (range === "week") {
+      const now = new Date();
+      const monday = new Date(now); monday.setDate(now.getDate() - ((now.getDay() + 6) % 7));
+      const iso = monday.toISOString().slice(0, 10);
+      return rows.filter((r) => r.day >= iso);
+    }
+    if (range === "month") {
+      const iso = new Date().toISOString().slice(0, 7); // YYYY-MM
+      return rows.filter((r) => r.day.startsWith(iso));
+    }
+    return rows;
+  }, [rows, range]);
+  return (
+    <div className="ms-card p-0 overflow-hidden" data-testid="punch-history-section">
+      <div className="p-5 flex items-center gap-3 flex-wrap">
+        <CalendarClock className="h-4 w-4 text-[#3BA4FF]" />
+        <h2 className="text-lg font-bold text-[#071B34]">Historique de badgeage</h2>
+        <div className="ml-auto inline-flex rounded-xl bg-[#F4F7FA] p-1">
+          {[
+            { k: "day", l: "Jour" },
+            { k: "week", l: "Semaine" },
+            { k: "month", l: "Mois" },
+          ].map((t) => (
+            <button
+              key={t.k}
+              onClick={() => setRange(t.k)}
+              data-testid={`punch-history-tab-${t.k}`}
+              className={`rounded-lg px-3 h-8 text-xs font-semibold ${
+                range === t.k ? "bg-white shadow text-[#071B34]" : "text-[#475569]"
+              }`}
+            >
+              {t.l}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {summary && (
+        <div className="px-5 pb-3 grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+          <div className="rounded-xl bg-[#3BA4FF]/10 p-3">
+            <div className="text-[10px] uppercase tracking-widest text-[#1D70B8] font-semibold">Semaine · travaillé</div>
+            <div className="text-lg font-bold text-[#071B34] mt-0.5">{fmtHM(summary.week.worked_minutes)}</div>
+          </div>
+          <div className="rounded-xl bg-[#EF4444]/10 p-3">
+            <div className="text-[10px] uppercase tracking-widest text-[#B91C1C] font-semibold">Retards · semaine</div>
+            <div className="text-lg font-bold text-[#071B34] mt-0.5">{fmtHM(summary.week.late_minutes)}</div>
+          </div>
+          <div className="rounded-xl bg-[#8B5CF6]/10 p-3">
+            <div className="text-[10px] uppercase tracking-widest text-[#7C3AED] font-semibold">HS · semaine</div>
+            <div className="text-lg font-bold text-[#071B34] mt-0.5">{fmtHM(summary.week.overtime_minutes)}</div>
+          </div>
+          <div className="rounded-xl bg-[#10B981]/10 p-3">
+            <div className="text-[10px] uppercase tracking-widest text-[#065F46] font-semibold">Mois · travaillé</div>
+            <div className="text-lg font-bold text-[#071B34] mt-0.5">{fmtHM(summary.month.worked_minutes)}</div>
+          </div>
+        </div>
+      )}
+
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="bg-[#F4F7FA] text-[#475569] text-xs uppercase tracking-wider">
+            <tr>
+              <th className="text-left p-3 font-semibold">Date</th>
+              <th className="text-left p-3 font-semibold">Entrée</th>
+              <th className="text-left p-3 font-semibold">Début pause</th>
+              <th className="text-left p-3 font-semibold">Fin pause</th>
+              <th className="text-left p-3 font-semibold">Sortie</th>
+              <th className="text-right p-3 font-semibold">Heures</th>
+              <th className="text-right p-3 font-semibold">Retard</th>
+              <th className="text-center p-3 font-semibold">Statut</th>
+            </tr>
+          </thead>
+          <tbody>
+            {shown.length === 0 ? (
+              <tr><td colSpan={8} className="text-center py-8 text-sm text-[#475569]">Aucun badgeage sur cette période.</td></tr>
+            ) : shown.map((r) => (
+              <tr key={r.day} className="border-t border-[#071B34]/5" data-testid={`punch-history-row-${r.day}`}>
+                <td className="p-3 text-[#334155] whitespace-nowrap">
+                  {new Date(r.day).toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" })}
+                </td>
+                <td className="p-3 font-mono">{r.clock_in || "—"}</td>
+                <td className="p-3 font-mono">{r.break_out || "—"}</td>
+                <td className="p-3 font-mono">{r.break_in || "—"}</td>
+                <td className="p-3 font-mono">{r.clock_out || "—"}</td>
+                <td className="p-3 text-right font-semibold text-[#071B34]">{fmtHM(r.worked_minutes)}</td>
+                <td className="p-3 text-right text-[#B91C1C]">{r.late_minutes ? fmtHM(r.late_minutes) : "—"}</td>
+                <td className="p-3 text-center">
+                  <span className={`inline-block rounded-full px-2 py-0.5 text-[11px] font-semibold ${STATUS_STYLE[r.status] || "bg-[#F4F7FA] text-[#475569]"}`}>
+                    {r.status}
+                  </span>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
   );
 }
 

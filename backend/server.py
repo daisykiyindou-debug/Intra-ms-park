@@ -6801,9 +6801,9 @@ def _hm_now() -> str:
     return f"{n.hour:02d}:{n.minute:02d}"
 
 
-@api.post("/badging/punch")
+@api.post("/badging/punch-legacy")
 async def punch_badge():
-    """Punch the next step of today's badging. Auto-detects clock_in → pause_out → pause_in → clock_out."""
+    """LEGACY (kept for admin badging_manual editor). New apps must use /badging/punch (v2)."""
     me = await _me()
     today = _now_paris().date().isoformat()
     now_hm = _hm_now()
@@ -6851,10 +6851,19 @@ async def today_live_badging():
             "note": "Pas de shift planifié" if not sched else None, "live": True,
         }
     if manual:
-        # Manual punches override schedule-derived values
+        # Manual punches (legacy admin edits) override schedule-derived values
         for k in ("clock_in", "pause_out", "pause_in", "clock_out"):
             if manual.get(k):
                 base[k] = manual[k]
+    # New v2: real punches take priority over both
+    punches = await _get_punches(me["id"], today)
+    if punches:
+        agg = _aggregate_day(punches)
+        base["clock_in"] = agg["clock_in"]
+        base["pause_out"] = agg["break_out"]
+        base["pause_in"] = agg["break_in"]
+        base["clock_out"] = agg["clock_out"]
+    if manual or punches:
         # Recompute worked minutes based on actual punches
         ci = _hm_to_minutes(base.get("clock_in"))
         co = _hm_to_minutes(base.get("clock_out"))
@@ -6867,8 +6876,327 @@ async def today_live_badging():
             if po is not None and pi is not None:
                 worked -= max(0, pi - po)
             base["worked_minutes"] = max(0, worked)
-    base["is_manual"] = bool(manual)
+    base["is_manual"] = bool(manual) or bool(punches)
     return base
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Punches system v2 — real virtual time clock
+#   Types: clock_in | break_out | break_in | clock_out
+#   Rules:
+#   - Cannot punch on OFF days, validated leaves (Congés/RTT/Récup)
+#   - Min break duration: 45 minutes (hard constraint)
+#   - Late = strictly more than 15 minutes past scheduled start
+#   - After "clock_out", cannot punch again until next scheduled shift
+# ═══════════════════════════════════════════════════════════════════
+
+MIN_BREAK_MINUTES = 45
+LATE_TOLERANCE_MINUTES = 15
+
+
+def _hm(dt: datetime) -> str:
+    return dt.strftime("%H:%M")
+
+
+def _paris_datetime_from_time(day_iso: str, hm: str) -> datetime:
+    """Build a Paris-tz datetime from a YYYY-MM-DD + HH:MM."""
+    return datetime.fromisoformat(f"{day_iso}T{hm}:00").replace(tzinfo=ZoneInfo("Europe/Paris"))
+
+
+async def _get_punches(employee_id: str, day: str) -> List[dict]:
+    return await db.punches.find(
+        {"employee_id": employee_id, "day": day}, {"_id": 0}
+    ).sort("ts", 1).to_list(50)
+
+
+async def _next_scheduled_shift(employee_id: str, after_day: str) -> Optional[dict]:
+    return await db.schedules.find_one(
+        {"employee_id": employee_id, "day": {"$gt": after_day},
+         "shift_type": {"$nin": ["off", "conges", "rtt", "recup", "rest"]}},
+        {"_id": 0},
+        sort=[("day", 1)],
+    )
+
+
+async def _has_active_leave(employee_id: str, day: str) -> Optional[str]:
+    sched = await db.schedules.find_one({"employee_id": employee_id, "day": day}, {"_id": 0})
+    if sched:
+        st = (sched.get("shift_type") or "").lower()
+        if st in ("off", "rest"):
+            return "Jour de repos"
+        if st == "conges":
+            return "Congés validés"
+        if st == "rtt":
+            return "RTT validée"
+        if st == "recup":
+            return "Récupération validée"
+    leave = await db.leave_requests.find_one({
+        "employee_id": employee_id, "status": "approved",
+        "start_date": {"$lte": day}, "end_date": {"$gte": day},
+    }, {"_id": 0})
+    if leave:
+        return f"Absence validée ({leave.get('type', 'congé')})"
+    return None
+
+
+def _minutes_between(a: str, b: str) -> int:
+    ah, am = [int(x) for x in a.split(":")]
+    bh, bm = [int(x) for x in b.split(":")]
+    return max(0, (bh * 60 + bm) - (ah * 60 + am))
+
+
+def _aggregate_day(punches: List[dict]) -> dict:
+    clock_in = None
+    break_out = None
+    break_in = None
+    clock_out = None
+    for p in punches:
+        t = p.get("type")
+        hm = p.get("time")
+        if t == "clock_in" and clock_in is None:
+            clock_in = hm
+        elif t == "break_out":
+            break_out = hm
+            break_in = None
+        elif t == "break_in":
+            break_in = hm
+        elif t == "clock_out":
+            clock_out = hm
+    worked = 0
+    if clock_in:
+        end = clock_out or _hm(_now_paris())
+        worked = _minutes_between(clock_in, end)
+        if break_out and break_in:
+            worked -= _minutes_between(break_out, break_in)
+        worked = max(0, worked)
+    return {
+        "clock_in": clock_in,
+        "break_out": break_out,
+        "break_in": break_in,
+        "clock_out": clock_out,
+        "worked_minutes": worked,
+        "is_closed": bool(clock_out),
+    }
+
+
+async def _day_status(employee_id: str, day: str, sched: Optional[dict], agg: dict) -> dict:
+    scheduled_start = None
+    scheduled_end = None
+    if sched and (sched.get("shift_type") or "") not in ("off", "conges", "rtt", "recup", "rest"):
+        scheduled_start = sched.get("start_time")
+        scheduled_end = sched.get("end_time")
+    late_min = 0
+    if agg["clock_in"] and scheduled_start:
+        delta = _minutes_between(scheduled_start, agg["clock_in"])
+        late_min = max(0, delta - LATE_TOLERANCE_MINUTES) if delta > LATE_TOLERANCE_MINUTES else 0
+    overtime_min = 0
+    if agg["clock_out"] and scheduled_end:
+        overtime_min = max(0, _minutes_between(scheduled_end, agg["clock_out"]))
+    early_leave = 0
+    if agg["clock_out"] and scheduled_end:
+        early_leave = max(0, _minutes_between(agg["clock_out"], scheduled_end))
+    status = "conforme"
+    if not agg["clock_in"]:
+        status = "à venir" if not sched else "absent"
+    elif not agg["is_closed"]:
+        status = "en cours"
+    elif late_min > 0:
+        status = "en retard"
+    return {
+        "scheduled_start": scheduled_start,
+        "scheduled_end": scheduled_end,
+        "late_minutes": late_min,
+        "overtime_minutes": overtime_min,
+        "early_leave_minutes": early_leave,
+        "status": status,
+    }
+
+
+@api.get("/badging/state")
+async def badging_state():
+    me = await _me()
+    today = _now_paris().date().isoformat()
+    now_hm = _hm(_now_paris())
+    punches = await _get_punches(me["id"], today)
+    agg = _aggregate_day(punches)
+    sched = await db.schedules.find_one({"employee_id": me["id"], "day": today}, {"_id": 0})
+    blocked = await _has_active_leave(me["id"], today)
+
+    step = "clock_in"
+    if agg["is_closed"]:
+        step = "closed"
+    elif agg["clock_in"] and agg["break_out"] and not agg["break_in"]:
+        step = "break_in"
+    elif agg["clock_in"]:
+        step = "choose"
+
+    next_shift = None
+    if agg["is_closed"] or blocked:
+        ns = await _next_scheduled_shift(me["id"], today)
+        if ns:
+            next_shift = {"day": ns["day"], "start_time": ns.get("start_time"), "end_time": ns.get("end_time")}
+
+    break_locked_until = None
+    if step == "break_in" and agg["break_out"]:
+        broke_at = _paris_datetime_from_time(today, agg["break_out"])
+        available_at = broke_at + timedelta(minutes=MIN_BREAK_MINUTES)
+        if _now_paris() < available_at:
+            break_locked_until = _hm(available_at)
+
+    status_meta = await _day_status(me["id"], today, sched, agg)
+    return {
+        "day": today,
+        "now": now_hm,
+        "step": step,
+        "punches": punches,
+        "aggregate": agg,
+        "schedule": sched,
+        "blocked_reason": blocked,
+        "next_shift": next_shift,
+        "break_locked_until": break_locked_until,
+        "min_break_minutes": MIN_BREAK_MINUTES,
+        **status_meta,
+    }
+
+
+class PunchPayload(BaseModel):
+    action: Optional[str] = "auto"
+
+
+@api.post("/badging/punch")
+async def punch(payload: PunchPayload):
+    me = await _me()
+    today = _now_paris().date().isoformat()
+    now_hm = _hm(_now_paris())
+    now_dt = _now_paris()
+
+    blocked = await _has_active_leave(me["id"], today)
+    if blocked:
+        raise HTTPException(400, f"Badgeage impossible aujourd'hui : {blocked}.")
+
+    punches = await _get_punches(me["id"], today)
+    agg = _aggregate_day(punches)
+
+    if agg["is_closed"]:
+        ns = await _next_scheduled_shift(me["id"], today)
+        if ns:
+            raise HTTPException(400, f"Journée terminée. Prochain badge le {ns['day']} à {ns.get('start_time','') or '—'}.")
+        raise HTTPException(400, "Journée terminée. Aucun prochain shift planifié.")
+
+    if agg["clock_in"] is None:
+        ptype = "clock_in"
+    elif agg["break_out"] and not agg["break_in"]:
+        broke_at = _paris_datetime_from_time(today, agg["break_out"])
+        elapsed = (now_dt - broke_at).total_seconds() / 60
+        if elapsed < MIN_BREAK_MINUTES:
+            remaining = MIN_BREAK_MINUTES - int(elapsed)
+            raise HTTPException(
+                400,
+                f"Pause minimum de {MIN_BREAK_MINUTES} min non écoulée. Encore {remaining} min avant retour.",
+            )
+        ptype = "break_in"
+    else:
+        action = (payload.action or "").lower()
+        if action not in ("break", "end"):
+            raise HTTPException(
+                400,
+                "Choisissez une action : 'break' (départ en pause) ou 'end' (fin de journée).",
+            )
+        ptype = "break_out" if action == "break" else "clock_out"
+
+    punch_doc = {
+        "id": _id(),
+        "employee_id": me["id"],
+        "day": today,
+        "type": ptype,
+        "time": now_hm,
+        "ts": _now(),
+        "source": "self",
+    }
+    await db.punches.insert_one(punch_doc.copy())
+    return await badging_state()
+
+
+@api.get("/badging/history")
+async def badging_history(days: int = 30):
+    me = await _me()
+    days = max(1, min(days, 366))
+    today = _now_paris().date()
+    from_day = (today - timedelta(days=days - 1)).isoformat()
+    cursor = db.punches.find(
+        {"employee_id": me["id"], "day": {"$gte": from_day}}, {"_id": 0}
+    )
+    by_day: dict[str, List[dict]] = {}
+    async for p in cursor:
+        by_day.setdefault(p["day"], []).append(p)
+    scheds: dict[str, dict] = {}
+    async for s in db.schedules.find(
+        {"employee_id": me["id"], "day": {"$gte": from_day}}, {"_id": 0}
+    ):
+        scheds[s["day"]] = s
+    rows = []
+    for offset in range(days):
+        d = (today - timedelta(days=offset)).isoformat()
+        p_list = sorted(by_day.get(d, []), key=lambda p: p.get("ts", ""))
+        agg = _aggregate_day(p_list)
+        meta = await _day_status(me["id"], d, scheds.get(d), agg)
+        rows.append({
+            "day": d, **agg, **meta,
+            "has_punches": len(p_list) > 0,
+        })
+    return rows
+
+
+@api.get("/badging/summary")
+async def badging_summary():
+    me = await _me()
+    today = _now_paris().date()
+    monday = today - timedelta(days=today.weekday())
+    month_start = today.replace(day=1)
+    cursor = db.punches.find(
+        {"employee_id": me["id"], "day": {"$gte": month_start.isoformat()}}, {"_id": 0}
+    )
+    by_day: dict[str, List[dict]] = {}
+    async for p in cursor:
+        by_day.setdefault(p["day"], []).append(p)
+    scheds: dict[str, dict] = {}
+    async for s in db.schedules.find(
+        {"employee_id": me["id"], "day": {"$gte": month_start.isoformat()}}, {"_id": 0}
+    ):
+        scheds[s["day"]] = s
+    week_worked = week_late = week_ot = 0
+    month_worked = month_late = month_ot = 0
+    days_worked = 0
+    for day_iso, plist in by_day.items():
+        agg = _aggregate_day(sorted(plist, key=lambda p: p.get("ts", "")))
+        meta = await _day_status(me["id"], day_iso, scheds.get(day_iso), agg)
+        d = date.fromisoformat(day_iso)
+        month_worked += agg["worked_minutes"]
+        month_late += meta["late_minutes"]
+        month_ot += meta["overtime_minutes"]
+        if agg["clock_in"]:
+            days_worked += 1
+        if d >= monday:
+            week_worked += agg["worked_minutes"]
+            week_late += meta["late_minutes"]
+            week_ot += meta["overtime_minutes"]
+    return {
+        "week": {
+            "worked_minutes": week_worked, "late_minutes": week_late,
+            "overtime_minutes": week_ot,
+            "range_start": monday.isoformat(),
+            "range_end": (monday + timedelta(days=6)).isoformat(),
+        },
+        "month": {
+            "worked_minutes": month_worked, "late_minutes": month_late,
+            "overtime_minutes": month_ot, "days_worked": days_worked,
+            "range_start": month_start.isoformat(),
+            "range_end": today.isoformat(),
+        },
+    }
+
+
+
 
 
 # ═══════════════════════════════════════════════════════════════════
