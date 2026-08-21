@@ -47,19 +47,20 @@ export default function Badgeage() {
   const [punchHistory, setPunchHistory] = useState([]); // /badging/history v2 for the week
 
   const load = async () => {
+    const safe = (p) => p.catch(() => null);
     const [h, t, c, st, ph] = await Promise.all([
-      api.get("/badging?filter_range=month").then((r) => r.data),
-      api.get("/badging/today-live").then((r) => r.data),
-      api.get("/overtime/counter").then((r) => r.data),
-      api.get("/badging/state").then((r) => r.data),
-      api.get("/badging/history?days=45").then((r) => r.data),
+      safe(api.get("/badging?filter_range=month").then((r) => r.data)),
+      safe(api.get("/badging/today-live").then((r) => r.data)),
+      safe(api.get("/overtime/counter").then((r) => r.data)),
+      safe(api.get("/badging/state").then((r) => r.data)),
+      safe(api.get("/badging/history?days=45").then((r) => r.data)),
     ]);
-    setHistory(h);
-    setToday(t);
-    setCounter(c);
-    setState(st);
-    setPunchHistory(ph);
-    setWeekSchedules(ph.map((r) => ({ day: r.day, shift_type: r.shift_type })));
+    setHistory(h || []);
+    setToday(t || null);
+    setCounter(c || null);
+    setState(st || null);
+    setPunchHistory(ph || []);
+    setWeekSchedules((ph || []).map((r) => ({ day: r.day, shift_type: r.shift_type })));
   };
 
   useLiveData(load, ["badging", "overtime"]);
@@ -171,9 +172,20 @@ export default function Badgeage() {
           <button onClick={() => setCollapsed((v) => !v)} data-testid="btn-history" className="ms-btn-outline text-xs">
             {collapsed ? "Historique complet" : "Réduire"} {collapsed ? <ChevronDown className="h-3 w-3" /> : <ChevronUp className="h-3 w-3" />}
           </button>
-          <button onClick={onBadgeClick} data-testid="btn-badge" className="rounded-xl bg-[#3BA4FF] text-white text-sm font-semibold px-4 py-2 hover:bg-[#2A8DE0]">
-            <Fingerprint className="h-4 w-4 inline mr-1" /> Badger
-          </button>
+          {(() => {
+            const disabled = !!state && (state.blocked_reason || state.step === "closed" || (state.step === "break_in" && state.break_locked_until));
+            return (
+              <button
+                onClick={onBadgeClick}
+                disabled={disabled}
+                data-testid="btn-badge"
+                title={state?.blocked_reason || (state?.step === "closed" ? "Journée terminée" : "")}
+                className="rounded-xl bg-[#3BA4FF] text-white text-sm font-semibold px-4 py-2 hover:bg-[#2A8DE0] disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <Fingerprint className="h-4 w-4 inline mr-1" /> Badger
+              </button>
+            );
+          })()}
         </div>
       </div>
 
@@ -443,16 +455,22 @@ function MonthlyDonut({ worked, declared, available }) {
 // ═══════════════════════════════════════════════════════════════════
 function PunchStatusBanner({ state, onPunch }) {
   const step = state.step;
-  const stepLabel = {
-    clock_in: "Prêt à badger — Entrée",
-    choose: "Vous êtes en poste",
-    break_in: state.break_locked_until
-      ? `En pause — retour possible à ${state.break_locked_until}`
-      : "Prêt à revenir de pause",
-    closed: "Journée terminée",
-  }[step] || step;
-  const canPunch = !state.blocked_reason && step !== "closed" && !(step === "break_in" && state.break_locked_until);
-  const accent = state.blocked_reason || step === "closed"
+  const isBlocked = !!state.blocked_reason;
+  const isClosed = step === "closed";
+  const stepLabel = isBlocked
+    ? state.blocked_reason
+    : {
+        clock_in: "Prêt à badger — Entrée",
+        choose: "Vous êtes en poste",
+        break_in: state.break_locked_until
+          ? `En pause — retour possible à ${state.break_locked_until.replace(":", "h")}`
+          : "Prêt à revenir de pause",
+        closed: "Journée terminée",
+      }[step] || step;
+  const canPunch = !isBlocked && !isClosed && !(step === "break_in" && state.break_locked_until);
+  const accent = isBlocked
+    ? "from-[#8B5CF6] to-[#6D28D9]"
+    : isClosed
     ? "from-[#94A3B8] to-[#64748B]"
     : step === "choose"
     ? "from-[#3BA4FF] to-[#1D70B8]"
@@ -470,16 +488,16 @@ function PunchStatusBanner({ state, onPunch }) {
         <div className="flex-1 min-w-[220px]">
           <div className="text-[10px] uppercase tracking-widest opacity-80">Pointeuse virtuelle · {state.now}</div>
           <div className="mt-1 text-xl font-bold">{stepLabel}</div>
-          {state.blocked_reason && (
-            <div className="text-xs mt-1 opacity-90">🚫 {state.blocked_reason}</div>
+          {isBlocked && !state.next_shift && (
+            <div className="text-xs mt-1 opacity-90">Vous ne pouvez pas badger aujourd&apos;hui. Bonne journée&nbsp;!</div>
           )}
-          {step === "closed" && state.next_shift && (
+          {(isClosed || isBlocked) && state.next_shift && (
             <div className="text-xs mt-1 opacity-90">
-              Prochain badge le <strong>{formatFrDate(state.next_shift.day)}</strong>
+              Prochain shift : <strong>{formatFrDate(state.next_shift.day)}</strong>
               {state.next_shift.start_time && <> à <strong>{state.next_shift.start_time.replace(":", "h")}</strong></>}
             </div>
           )}
-          {state.aggregate && (state.aggregate.clock_in || state.aggregate.break_out) && (
+          {!isBlocked && !isClosed && state.aggregate && (state.aggregate.clock_in || state.aggregate.break_out) && (
             <div className="mt-2 flex flex-wrap gap-2 text-[11px]">
               {state.aggregate.clock_in && <span className="rounded-full bg-white/15 px-2 py-0.5">Entrée : <strong>{state.aggregate.clock_in}</strong></span>}
               {state.aggregate.break_out && <span className="rounded-full bg-white/15 px-2 py-0.5">Pause : <strong>{state.aggregate.break_out}</strong></span>}
@@ -492,10 +510,13 @@ function PunchStatusBanner({ state, onPunch }) {
           onClick={onPunch}
           disabled={!canPunch}
           data-testid="banner-punch-btn"
-          className="rounded-xl bg-white text-[#071B34] px-5 h-12 text-sm font-bold shadow-md disabled:opacity-50 disabled:cursor-not-allowed hover:opacity-90"
+          title={isBlocked ? state.blocked_reason : isClosed ? "Journée terminée" : ""}
+          className="rounded-xl bg-white text-[#071B34] px-5 h-12 text-sm font-bold shadow-md disabled:opacity-40 disabled:cursor-not-allowed hover:opacity-90"
         >
           <Fingerprint className="h-4 w-4 inline mr-2" />
-          {step === "clock_in" ? "Badger (entrée)"
+          {isBlocked ? "Indisponible"
+            : isClosed ? "Journée terminée"
+            : step === "clock_in" ? "Badger (entrée)"
             : step === "choose" ? "Badger"
             : step === "break_in" ? "Retour de pause"
             : "Badger"}
