@@ -7181,11 +7181,12 @@ async def _has_active_leave(employee_id: str, day: str) -> Optional[str]:
     sched = await db.schedules.find_one({"employee_id": employee_id, "day": day}, {"_id": 0})
     if sched:
         st = (sched.get("shift_type") or "").lower()
-        if st in ("off", "rest"):
+        t = (sched.get("type") or "").lower()
+        if st in ("off", "rest") or t == "off":
             return "Jour de repos"
-        if st == "conges":
+        if st == "conges" or t == "leave":
             return "Congés validés"
-        if st == "rtt":
+        if st == "rtt" or t == "rtt":
             return "RTT validée"
         if st == "recup":
             return "Récupération validée"
@@ -7239,11 +7240,29 @@ def _aggregate_day(punches: List[dict]) -> dict:
 
 
 async def _day_status(employee_id: str, day: str, sched: Optional[dict], agg: dict) -> dict:
+    # Normalise the day type across both legacy `shift_type` (badging seed) and
+    # newer `type` (planning) fields. `training` counts as a work day.
+    sched_type = None
+    if sched:
+        st = (sched.get("shift_type") or "").lower()
+        t = (sched.get("type") or "").lower()
+        if st in ("off", "rest") or t == "off":
+            sched_type = "off"
+        elif st == "conges" or t == "leave":
+            sched_type = "leave"
+        elif st == "rtt" or t == "rtt":
+            sched_type = "rtt"
+        elif st == "recup":
+            sched_type = "recup"
+        elif t == "training":
+            sched_type = "training"
+        else:
+            sched_type = "shift"
     scheduled_start = None
     scheduled_end = None
-    if sched and (sched.get("shift_type") or "") not in ("off", "conges", "rtt", "recup", "rest"):
-        scheduled_start = sched.get("start_time")
-        scheduled_end = sched.get("end_time")
+    if sched_type in ("shift", "training"):
+        scheduled_start = sched.get("start_time") or sched.get("start")
+        scheduled_end = sched.get("end_time") or sched.get("end")
     late_min = 0
     if agg["clock_in"] and scheduled_start:
         delta = _minutes_between(scheduled_start, agg["clock_in"])
@@ -7254,13 +7273,23 @@ async def _day_status(employee_id: str, day: str, sched: Optional[dict], agg: di
     early_leave = 0
     if agg["clock_out"] and scheduled_end:
         early_leave = max(0, _minutes_between(agg["clock_out"], scheduled_end))
-    status = "conforme"
-    if not agg["clock_in"]:
-        status = "à venir" if not sched else "absent"
+    # Off / leave / rtt / recup / training → dedicated statuses (no "absent")
+    if sched_type == "off":
+        status = "off"
+    elif sched_type == "leave":
+        status = "congés"
+    elif sched_type == "rtt":
+        status = "rtt"
+    elif sched_type == "recup":
+        status = "récup"
+    elif not agg["clock_in"]:
+        status = "à venir" if not sched or sched_type not in ("shift", "training") else "absent"
     elif not agg["is_closed"]:
         status = "en cours"
     elif late_min > 0:
         status = "en retard"
+    else:
+        status = "conforme"
     return {
         "scheduled_start": scheduled_start,
         "scheduled_end": scheduled_end,
@@ -7409,19 +7438,28 @@ async def badging_history(days: int = 30, future_days: int = 0):
         d = (today + timedelta(days=offset_from_today)).isoformat()
         p_list = sorted(by_day.get(d, []), key=lambda p: p.get("ts", ""))
         agg = _aggregate_day(p_list)
-        meta = await _day_status(me["id"], d, scheds.get(d), agg)
         sched = scheds.get(d)
-        shift_type = (sched.get("shift_type") if sched else None) or None
-        if shift_type in ("off", "rest"):
-            meta["status"] = "off"
-        elif shift_type == "conges":
-            meta["status"] = "congés"
-        elif shift_type == "rtt":
-            meta["status"] = "rtt"
-        elif shift_type == "recup":
-            meta["status"] = "récup"
-        elif d > today.isoformat():
-            # Future day with a shift → "à venir"
+        meta = await _day_status(me["id"], d, sched, agg)
+        # Normalise shift_type field to keep the legacy contract used by the
+        # frontend badging UI (accepts: shift | off | conges | rtt | recup | training).
+        raw_st = ((sched.get("shift_type") if sched else None) or "").lower()
+        raw_t = ((sched.get("type") if sched else None) or "").lower()
+        if raw_st == "off" or raw_st == "rest" or raw_t == "off":
+            shift_type = "off"
+        elif raw_st == "conges" or raw_t == "leave":
+            shift_type = "conges"
+        elif raw_st == "rtt" or raw_t == "rtt":
+            shift_type = "rtt"
+        elif raw_st == "recup":
+            shift_type = "recup"
+        elif raw_t == "training":
+            shift_type = "training"
+        elif sched:
+            shift_type = raw_st or "shift"
+        else:
+            shift_type = None
+        if d > today.isoformat() and shift_type not in ("off", "conges", "rtt", "recup"):
+            # Future day with a shift or nothing → "à venir"
             meta["status"] = "à venir"
         rows.append({
             "day": d, **agg, **meta,
