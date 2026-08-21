@@ -7173,12 +7173,17 @@ async def punch(payload: PunchPayload):
 
 
 @api.get("/badging/history")
-async def badging_history(days: int = 30):
+async def badging_history(days: int = 30, future_days: int = 0):
+    """Return per-day rows for the current user. Includes `future_days` days ahead
+    (schedule-only rows, no punches) so the frontend can display a complete
+    Mon→Sun / month grid even for days that haven't happened yet."""
     me = await _me()
     await _auto_close_expired_days(me["id"])
     days = max(1, min(days, 366))
+    future_days = max(0, min(future_days, 60))
     today = _now_paris().date()
     from_day = (today - timedelta(days=days - 1)).isoformat()
+    to_day = (today + timedelta(days=future_days)).isoformat()
     cursor = db.punches.find(
         {"employee_id": me["id"], "day": {"$gte": from_day}}, {"_id": 0}
     )
@@ -7187,18 +7192,20 @@ async def badging_history(days: int = 30):
         by_day.setdefault(p["day"], []).append(p)
     scheds: dict[str, dict] = {}
     async for s in db.schedules.find(
-        {"employee_id": me["id"], "day": {"$gte": from_day}}, {"_id": 0}
+        {"employee_id": me["id"], "day": {"$gte": from_day, "$lte": to_day}}, {"_id": 0}
     ):
         scheds[s["day"]] = s
     rows = []
-    for offset in range(days):
-        d = (today - timedelta(days=offset)).isoformat()
+    total_range = days + future_days
+    for offset in range(total_range):
+        # offset 0 = today, positive offsets = future, else past
+        offset_from_today = future_days - offset
+        d = (today + timedelta(days=offset_from_today)).isoformat()
         p_list = sorted(by_day.get(d, []), key=lambda p: p.get("ts", ""))
         agg = _aggregate_day(p_list)
         meta = await _day_status(me["id"], d, scheds.get(d), agg)
         sched = scheds.get(d)
         shift_type = (sched.get("shift_type") if sched else None) or None
-        # Override status when the day is a validated OFF / leave
         if shift_type in ("off", "rest"):
             meta["status"] = "off"
         elif shift_type == "conges":
@@ -7207,6 +7214,9 @@ async def badging_history(days: int = 30):
             meta["status"] = "rtt"
         elif shift_type == "recup":
             meta["status"] = "récup"
+        elif d > today.isoformat():
+            # Future day with a shift → "à venir"
+            meta["status"] = "à venir"
         rows.append({
             "day": d, **agg, **meta,
             "shift_type": shift_type,

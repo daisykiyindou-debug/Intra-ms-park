@@ -546,17 +546,25 @@ function PunchHistorySection() {
   const [range, setRange] = useState("day"); // day (last 7) | week (this week) | month (this month)
   const [exportOpen, setExportOpen] = useState(false);
   useEffect(() => {
-    const days = range === "day" ? 7 : range === "week" ? 21 : 92;
-    api.get(`/badging/history?days=${days}`).then((r) => setRows(r.data));
+    // Include future days so the week and month views show Sat/Sun ahead too
+    const params = range === "day" ? "?days=7"
+      : range === "week" ? "?days=14&future_days=7"
+      : "?days=45&future_days=15";
+    api.get(`/badging/history${params}`).then((r) => setRows(r.data));
     api.get(`/badging/summary`).then((r) => setSummary(r.data));
   }, [range]);
   const shown = useMemo(() => {
-    if (range === "day") return rows.slice(0, 7); // Last 7 days
+    if (range === "day") return rows.slice(0, 7);
     if (range === "week") {
       const now = new Date();
       const monday = new Date(now); monday.setDate(now.getDate() - ((now.getDay() + 6) % 7));
-      const iso = monday.toISOString().slice(0, 10);
-      return rows.filter((r) => r.day >= iso);
+      const mondayIso = monday.toISOString().slice(0, 10);
+      const sunday = new Date(monday); sunday.setDate(monday.getDate() + 6);
+      const sundayIso = sunday.toISOString().slice(0, 10);
+      // Show Mon → Sun, sorted ascending (Mon first)
+      return rows
+        .filter((r) => r.day >= mondayIso && r.day <= sundayIso)
+        .sort((a, b) => a.day.localeCompare(b.day));
     }
     if (range === "month") {
       const iso = new Date().toISOString().slice(0, 7);
