@@ -1,0 +1,39 @@
+{
+  "summary": "Iter 30 — Validated (a) payslip DM now comes from the 'Service RH' identity and (b) automatic welcome DM with 7 in-app links on user creation. Backend: 21/21 pytest assertions pass (/app/backend/tests/test_iter30_rh_channel.py). Frontend: Playwright verified Idriss's 'Service RH' channel (name, blue RH avatar, clickable payslip card -> /documents/payslip/emp-idriss-malonga/2026/10 renders the real bulletin) and a freshly-created user (Léa TestQA) whose Messagerie contains exactly ONE 'Service RH' channel (1 unread) with the welcome message and 7 link cards; all 7 links navigate in-app to /documents, /documents?category=Reglement, /rh/planning, /rh/badgeage, /rh/demandes, /restaurant, /avantages (all PASS, no 404/error). Regressions OK: Marcus sees ch-accueil (200), new user sees no team channels and gets 403 on ch-accueil messages, payslip preview for Marcus gross = 4549.0. Test artifacts cleaned up (Léa user + payslip deleted via API; leftover DM/notifications purged).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "DELETE /api/admin/users/{uid}", "issue": "Deleting a user leaves the rh-{uid} channel and its welcome message orphaned in DB (4 orphan rh-* channels found from previously deleted wizard users). Suggest cascading delete of channels/messages/channel_reads."},
+      {"endpoint": "POST /api/admin/users", "issue": "For the created user, email == personal_email (no @mspark.fr professional address generated) when no work email is supplied — check if the wizard is expected to derive one."},
+      {"endpoint": "POST /api/admin/payslips/{pid}/send (self-send)", "issue": "rh-emp-marcus-simeo channel has duplicated members_ids ['emp-marcus-simeo','emp-marcus-simeo'] when the admin sends a payslip to himself; de-duplicate members_ids and set members=len(set(...))."},
+      {"endpoint": "GET /documents/payslip/{emp}/{y}/{m} (frontend route + payslip API)", "issue": "After DELETE /api/admin/payslips/{pid}, the payslip page still renders a fully computed bulletin for that period (no 404), and the DM attachment left in the thread stays 'valid'. Low impact but data no longer reflects a real record."},
+      {"endpoint": "POST /api/auth/login", "issue": "Auth-playbook items are NOT implemented in this app: passwords are stored/compared in plaintext (no bcrypt $2b$ hash), no httpOnly session cookie (client sends X-Employee-Id header, spoofable), no brute-force lockout after 5 failures. Also must_change_password=true is not enforced — Léa logged in with the temp password and reached /dashboard directly. Informational: app-wide design choice, flag to product owner."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {"flow": "Messagerie — legacy payslip DM (September 2026)", "issue": "Message body still shows raw markdown '[Ouvrir ma fiche de paie](/documents?payslip=...)' as plain text — message content is not markdown-rendered. Cosmetic, legacy data from a previous iteration; new messages don't embed markdown links.", "affected_selectors": ["[data-testid='msg-conv-rh-emp-idriss-malonga']"]}
+    ],
+    "design_issues": []
+  },
+  "test_report_links": ["/app/backend/tests/test_iter30_rh_channel.py", "/app/test_reports/pytest/iter30.xml"],
+  "action_items": [
+    "Optional: cascade-delete rh-{uid} channel + messages when an employee is deleted (orphan channels accumulating).",
+    "Optional: de-duplicate members_ids when the admin sends a payslip to himself.",
+    "Optional: render/strip markdown links in message content, or migrate the legacy September DM."
+  ],
+  "critical_code_review_comments": [
+    "server.py admin_create_user: the welcome-DM insert is not wrapped in try/except unlike the planning seed — a channel insert failure would 500 the whole user creation after the employee doc is already persisted (partial state).",
+    "server.py is very large (>5000 lines); messagerie/payslip/user-admin routers should be split into modules.",
+    "Consider making rh-{uid} channel creation idempotent via upsert (currently insert_one in admin_create_user vs find/insert in admin_send_payslip — a duplicate-key crash is possible if a channel with that id already exists)."
+  ],
+  "updated_files": ["/app/backend/tests/test_iter30_rh_channel.py"],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "seed_data_creation": "Created + deleted: payslip Idriss 10/2026 and user 'Léa TestQA' (lea.testqa@gmail.com). All artifacts (payslip, user, DM messages, notifications, orphan channel) removed after testing.",
+  "should_call_test_agent_after_fix": false,
+  "should_main_agent_self_test": true,
+  "test_credentials": "Admin marcus.simeo@mspark.fr / MSPark@Admin2026! ; Idriss idriss.malonga@gmail.com / Idriss2026!",
+  "context_for_next_testing_agent": "Backend suite for this iteration is re-runnable (pre_cleanup fixture removes leftover TestQA user + Idriss 10/2026 payslip before running). UI logout: localStorage.clear() is NOT enough — navigate directly to /login and submit the form (auth id is in localStorage key 'ms_employee_id', ProtectedShell only redirects when ms_logged_out==1). Sophie Marchand (8baf45d6-...) legitimately has 0 channels (wizard-created before the welcome-DM feature) — the review request's expectation of existing channels for her was inaccurate.",
+  "rca_of_the_issue": "Fix verified: admin_send_payslip writes the DM with author_id='system-rh'/author_name='Service RH' into a per-employee rh-{uid} channel (name 'Service RH', is_official), and Messagerie.jsx keeps 'Service RH' as displayName for official channels instead of overriding with the other member, plus renders the blue 'RH' avatar for system-rh. Welcome DM feature verified end-to-end: 7 kind='link' attachments rendered as React Router <Link> cards, in-app navigation confirmed for all 7 targets."
+}

@@ -150,22 +150,31 @@ export default function Messagerie() {
           }
         }
         const other = otherId ? findEmployee(otherId) : null;
+        // Official system channels (Service RH, etc.) keep their own name and
+        // identity — they must never be overridden with the other member's name.
+        const isOfficial = c.is_official || (typeof c.id === "string" && c.id.startsWith("rh-"));
         // For DMs we ALWAYS use the other member's identity (never c.name)
-        // so the displayed avatar and displayed name are always coherent.
-        const displayName = isDm
+        // so the displayed avatar and displayed name are always coherent —
+        // EXCEPT for official system channels which keep their own name.
+        const displayName = isOfficial
+          ? (c.name || "Service RH")
+          : isDm
           ? (other ? `${other.first_name} ${other.last_name}` : (c.name || "Conversation"))
           : (c.name || "Conversation");
-        const subtitle = isDm
+        const subtitle = isOfficial
+          ? "Ressources Humaines"
+          : isDm
           ? (other?.role || "")
           : (c.is_group ? `${(c.members_ids || []).length} membres` : "Conversation d'équipe");
         return {
           ...c,
           _display_name: displayName,
           _subtitle: subtitle,
-          _avatar: isDm ? (other?.avatar || null) : (c.avatar_url || null),
+          _avatar: isOfficial ? null : (isDm ? (other?.avatar || null) : (c.avatar_url || null)),
           _other: other,
-          _kind: isDm ? "dm" : c.is_group ? "group" : "team",
-          _is_birthday: isBirthdayToday(other),
+          _is_official: isOfficial,
+          _kind: isOfficial ? "official" : (isDm ? "dm" : c.is_group ? "group" : "team"),
+          _is_birthday: !isOfficial && isBirthdayToday(other),
         };
       })
       .sort((a, b) => (b.last_message_ts || b.created_at || "").localeCompare(a.last_message_ts || a.created_at || ""));
@@ -808,11 +817,14 @@ export default function Messagerie() {
                     <div className="space-y-2.5">
                       {g.items.map((m) => {
                         const mine = m.author_id === me?.id;
-                        const author = findEmployee(m.author_id);
+                        const isSystemRh = m.author_id === "system-rh";
+                        const author = isSystemRh ? null : findEmployee(m.author_id);
                         return (
                           <div key={m.id} className={`flex items-end gap-2 ${mine ? "justify-end" : "justify-start"}`}>
                             {!mine && (
-                              author?.avatar
+                              isSystemRh
+                                ? <div className="h-7 w-7 rounded-full bg-[#3BA4FF] text-white text-[10px] font-bold flex items-center justify-center shrink-0" data-testid="msg-avatar-service-rh">RH</div>
+                                : author?.avatar
                                 ? <img src={author.avatar} alt="" className="h-7 w-7 rounded-full object-cover shrink-0" />
                                 : <div className="h-7 w-7 rounded-full bg-[#3BA4FF]/15 text-[#1D70B8] text-[10px] font-bold flex items-center justify-center shrink-0">
                                     {initials(author?.first_name)}
@@ -1106,6 +1118,7 @@ function MessageAttachment({ att }) {
   const name = att?.name || "Fichier";
   const kind = att?.kind || "";
   const rawUrl = att?.url || "";
+  const description = att?.description || "";
 
   // Payslip attachment — clickable in-app card that opens the payslip viewer
   if (kind === "payslip") {
@@ -1122,6 +1135,27 @@ function MessageAttachment({ att }) {
           <div className="text-[11px] font-semibold uppercase tracking-wider text-[#1D70B8]">Fiche de paie</div>
           <div className="text-sm font-bold text-[#071B34] truncate">{name}</div>
           <div className="text-[11px] text-[#3BA4FF] mt-0.5 group-hover:underline">Ouvrir ma fiche de paie →</div>
+        </div>
+      </Link>
+    );
+  }
+
+  // Onboarding "link" attachment — in-app navigation card
+  if (kind === "link") {
+    return (
+      <Link
+        to={rawUrl}
+        data-testid="msg-attachment-link"
+        className="group flex items-center gap-3 rounded-xl bg-white hover:bg-[#F1F5F9] ring-1 ring-[#071B34]/10 px-3 py-2 text-[#0B2545] transition-colors"
+      >
+        <div className="h-9 w-9 rounded-lg bg-[#3BA4FF]/12 text-[#1D70B8] flex items-center justify-center shrink-0">
+          <FileText className="h-4 w-4" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="text-sm font-semibold text-[#071B34] truncate group-hover:text-[#1D70B8]">{name} →</div>
+          {description && (
+            <div className="text-[11px] text-[#475569] truncate">{description}</div>
+          )}
         </div>
       </Link>
     );

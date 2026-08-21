@@ -5236,6 +5236,64 @@ async def admin_create_user(payload: UserCreate):
             "issued_at": _now(),
             "uploaded_at": _now(),
         })
+
+    # ─── Onboarding: automatic welcome DM from the "Service RH" channel
+    # with actionable links to the key intranet pages the new user needs.
+    rh_channel_id = f"rh-{data['id']}"
+    admin_id = current_user()
+    await db.channels.insert_one({
+        "id": rh_channel_id,
+        "name": "Service RH",
+        "icon": "briefcase",
+        "members": 2,
+        "members_ids": [data["id"], admin_id],
+        "unread": 1,
+        "is_dm": True,
+        "is_group": False,
+        "is_official": True,
+        "archived": False,
+        "avatar": None,
+        "created_at": _now(),
+    })
+    welcome_content = (
+        f"Bonjour {data['first_name']} 👋\n\n"
+        f"Bienvenue chez MS Park ! Voici les liens essentiels pour bien démarrer :"
+    )
+    welcome_attachments = [
+        {"kind": "link", "name": "Mes documents RH", "url": "/documents",
+         "description": "Contrats, fiches de paie et pièces administratives"},
+        {"kind": "link", "name": "Règlement intérieur", "url": "/documents?category=Reglement",
+         "description": "À lire et à signer dans vos 15 premiers jours"},
+        {"kind": "link", "name": "Mon planning", "url": "/rh/planning",
+         "description": "Vos shifts, jours OFF et congés validés"},
+        {"kind": "link", "name": "Badgeage", "url": "/rh/badgeage",
+         "description": "Pointer début / pause / fin de journée"},
+        {"kind": "link", "name": "Poser un congé", "url": "/rh/demandes",
+         "description": "Demandes de CP, RTT, récupération"},
+        {"kind": "link", "name": "Points repas & Restauration", "url": "/restaurant",
+         "description": f"Vous avez {data.get('meal_points', 0)} points/jour"},
+        {"kind": "link", "name": "CSE & Avantages", "url": "/avantages",
+         "description": "Réductions partenaires + billets gratuits"},
+    ]
+    await db.messages.insert_one({
+        "id": _id(),
+        "channel_id": rh_channel_id,
+        "author_id": "system-rh",
+        "author_name": "Service RH",
+        "content": welcome_content,
+        "attachments": welcome_attachments,
+        "ts": _now(),
+        "is_official": True,
+    })
+    await _push_notification(
+        employee_id=data["id"],
+        type="message",
+        title="Service RH",
+        content=f"Bienvenue {data['first_name']} ! Retrouvez vos liens essentiels.",
+        icon="briefcase",
+        link=f"/messagerie?ch={rh_channel_id}",
+    )
+
     # Return the generated password so the admin can share it
     return {"user": {k: v for k, v in data.items() if k != "password"},
             "temp_password": temp_pwd}
