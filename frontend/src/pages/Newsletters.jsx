@@ -14,6 +14,7 @@ import { toast } from "sonner";
 import { api, formatDateFr, absoluteUrl } from "@/lib/api";
 import { useApp, hasPermission } from "@/contexts/AppContext";
 import PortalModal from "@/components/PortalModal";
+import NewsletterRichEditor from "@/components/NewsletterRichEditor";
 
 const CATEGORIES = ["Général", "RH", "Événement", "Projet", "Procédure", "Ouverture"];
 const uid = () => Math.random().toString(36).slice(2, 10);
@@ -42,11 +43,17 @@ const BLOCK_TYPES = {
   button:   { label: "Bouton",      icon: MousePointerClick, cat: "Action", def: () => ({ text: "En savoir plus", url: "https://", align: "center", bg: "#3BA4FF", color: "#ffffff", shape: "rounded", size: "md" }) },
   divider:  { label: "Séparateur",  icon: Minus,           cat: "Structure", def: () => ({ style: "solid", color: "#E5E7EB" }) },
   spacer:   { label: "Espace",      icon: MoveVertical,    cat: "Structure", def: () => ({ height: 24 }) },
-  columns:  { label: "2 colonnes",  icon: Columns2,        cat: "Layout",  def: () => ({ layout: "image-text", image: "", title: "Titre", text: "Description.", reverse: false, bg: "", shape: "rounded", buttonText: "", buttonUrl: "" }) },
+  columns:  { label: "2 colonnes",  icon: Columns2,        cat: "Layout",  def: () => ({ layout: "image-text", image: "", title: "Titre", text: "Description.", reverse: false, bg: "", shape: "rounded", buttonText: "Lire plus", buttonUrl: "", link_type: "external" }) },
   columns3: { label: "3 colonnes",  icon: Columns3,        cat: "Layout",  def: () => ({ items: [
-    { image: "", title: "Titre 1", text: "Description.", buttonText: "Lire plus", buttonUrl: "" },
-    { image: "", title: "Titre 2", text: "Description.", buttonText: "Lire plus", buttonUrl: "" },
-    { image: "", title: "Titre 3", text: "Description.", buttonText: "Lire plus", buttonUrl: "" },
+    { image: "", title: "Titre 1", text: "Description.", buttonText: "Lire plus", buttonUrl: "", link_type: "external" },
+    { image: "", title: "Titre 2", text: "Description.", buttonText: "Lire plus", buttonUrl: "", link_type: "external" },
+    { image: "", title: "Titre 3", text: "Description.", buttonText: "Lire plus", buttonUrl: "", link_type: "external" },
+  ], shape: "rounded" }) },
+  columns4: { label: "4 colonnes",  icon: Columns3,        cat: "Layout",  def: () => ({ items: [
+    { image: "", title: "Titre 1", text: "Description.", buttonText: "Lire plus", buttonUrl: "", link_type: "external" },
+    { image: "", title: "Titre 2", text: "Description.", buttonText: "Lire plus", buttonUrl: "", link_type: "external" },
+    { image: "", title: "Titre 3", text: "Description.", buttonText: "Lire plus", buttonUrl: "", link_type: "external" },
+    { image: "", title: "Titre 4", text: "Description.", buttonText: "Lire plus", buttonUrl: "", link_type: "external" },
   ], shape: "rounded" }) },
   card:     { label: "Carte",       icon: SquareStack,     cat: "Layout",  def: () => ({ image: "", overline: "SPECIAL OFFER", title: "Titre de la carte", text: "Description détaillée.", buttonText: "En savoir plus", buttonUrl: "", bg: "#F4F7FA", layout: "image-left" }) },
   stats:    { label: "Statistiques", icon: LayoutGrid,     cat: "Layout",  def: () => ({ bg: "#3BA4FF", color: "#ffffff", items: [
@@ -335,11 +342,11 @@ function RenderBlock({ b }) {
   if (b.type === "heading") {
     const Tag = `h${p.level || 2}`;
     const size = { 1: "text-3xl md:text-5xl", 2: "text-2xl md:text-4xl", 3: "text-xl md:text-2xl" }[p.level || 2];
-    return <Tag className={`${size} ${p.weight === "normal" ? "font-normal" : "font-bold"} ${alignCls} leading-tight`} style={{ color: p.color || "#071B34" }}>{p.text}</Tag>;
+    return <Tag className={`${size} ${p.weight === "normal" ? "font-normal" : "font-bold"} ${alignCls} leading-tight`} style={{ color: p.color || "#071B34" }} dangerouslySetInnerHTML={{ __html: p.text || "" }} />;
   }
   if (b.type === "text") {
     const sizeCls = { sm: "text-sm", base: "text-base", lg: "text-lg" }[p.size || "base"];
-    return <p className={`${sizeCls} leading-relaxed whitespace-pre-wrap ${alignCls}`} style={{ color: p.color || "#334155" }}>{p.text}</p>;
+    return <div className={`${sizeCls} leading-relaxed ${alignCls}`} style={{ color: p.color || "#334155" }} dangerouslySetInnerHTML={{ __html: p.text || "" }} />;
   }
   if (b.type === "image") {
     if (!p.url) return <div className="rounded-2xl bg-[#F4F7FA] p-8 text-center text-xs text-[#94A3B8]">Aucune image sélectionnée</div>;
@@ -454,16 +461,16 @@ function RenderBlock({ b }) {
       </div>
     );
   }
-  if (b.type === "columns3") {
-    const shape = _shapeClass(p.shape);
+  if (b.type === "columns3" || b.type === "columns4") {
+    const cols = b.type === "columns4" ? "md:grid-cols-4" : "md:grid-cols-3";
     return (
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className={`grid grid-cols-1 ${cols} gap-4`}>
         {(p.items || []).map((it, i) => (
           <div key={i} className="rounded-2xl overflow-hidden bg-white border border-[#071B34]/5 shadow-sm">
-            {it.image ? <img src={absoluteUrl(it.image)} alt="" className={`w-full h-40 object-cover ${shape === "rounded-full" ? "" : ""}`} /> : <div className="w-full h-40 bg-[#F4F7FA]" />}
+            {it.image ? <img src={absoluteUrl(it.image)} alt="" className="w-full h-40 object-cover" /> : <div className="w-full h-40 bg-[#F4F7FA]" />}
             <div className="p-4">
               <h4 className="font-bold text-[#071B34]">{it.title}</h4>
-              <p className="text-xs text-[#475569] mt-1">{it.text}</p>
+              <div className="text-xs text-[#475569] mt-1" dangerouslySetInnerHTML={{ __html: it.text || "" }} />
               {it.buttonText && (
                 <a href={it.buttonUrl || "#"} target="_blank" rel="noreferrer" className="mt-3 inline-block text-xs font-semibold border-b border-[#071B34]">{it.buttonText}</a>
               )}
@@ -582,20 +589,27 @@ export function NewsletterEditor() {
   }, [id, isNew]);
 
   const selected = useMemo(() => f.blocks.find((b) => b.id === selectedId), [f.blocks, selectedId]);
+  // Once a newsletter is published, its content is frozen. The UI switches to
+  // a read-only preview and the "Publier" button is replaced by an info banner.
+  const isLocked = !!f.published;
 
   const addBlock = (type) => {
+    if (isLocked) return;
     const nb = { id: uid(), type, props: BLOCK_TYPES[type].def() };
     setF((s) => ({ ...s, blocks: [...s.blocks, nb] }));
     setSelectedId(nb.id);
   };
   const updateBlock = (blockId, patch) => {
+    if (isLocked) return;
     setF((s) => ({ ...s, blocks: s.blocks.map((b) => b.id === blockId ? { ...b, props: { ...b.props, ...patch } } : b) }));
   };
   const removeBlock = (blockId) => {
+    if (isLocked) return;
     setF((s) => ({ ...s, blocks: s.blocks.filter((b) => b.id !== blockId) }));
     if (selectedId === blockId) setSelectedId(null);
   };
   const duplicateBlock = (blockId) => {
+    if (isLocked) return;
     setF((s) => {
       const idx = s.blocks.findIndex((b) => b.id === blockId);
       if (idx < 0) return s;
@@ -606,6 +620,7 @@ export function NewsletterEditor() {
     });
   };
   const moveBlock = (blockId, dir) => {
+    if (isLocked) return;
     setF((s) => {
       const idx = s.blocks.findIndex((b) => b.id === blockId);
       if (idx < 0) return s;
@@ -752,13 +767,32 @@ export function NewsletterEditor() {
             )}
           </div>
           <button onClick={() => setPreviewMode((v) => !v)} data-testid="nl-preview-toggle" className="ms-btn-outline"><Eye className="h-4 w-4" /> {previewMode ? "Éditer" : "Aperçu"}</button>
-          <button onClick={() => save(false)} data-testid="nl-save-draft" className="ms-btn-outline"><Save className="h-4 w-4" /> Brouillon</button>
-          <button onClick={() => save(true)} data-testid="nl-publish" className="ms-btn-primary">
-            <Send className="h-4 w-4" />
-            {f.publish_at && new Date(f.publish_at) > new Date() ? "Programmer" : "Publier"}
-          </button>
+          {!isLocked && <button onClick={() => save(false)} data-testid="nl-save-draft" className="ms-btn-outline"><Save className="h-4 w-4" /> Brouillon</button>}
+          {!isLocked && (
+            <button onClick={() => save(true)} data-testid="nl-publish" className="ms-btn-primary">
+              <Send className="h-4 w-4" />
+              {f.publish_at && new Date(f.publish_at) > new Date() ? "Programmer" : "Publier"}
+            </button>
+          )}
+          {isLocked && (
+            <div data-testid="nl-locked-badge" className="inline-flex items-center gap-2 rounded-full bg-[#F59E0B]/15 text-[#B45309] text-xs font-semibold px-3 py-2">
+              <Send className="h-4 w-4" /> Publiée · verrouillée
+            </div>
+          )}
         </div>
       </div>
+
+      {isLocked && (
+        <div className="ms-card p-4 border-l-4 border-[#F59E0B] bg-[#FEF3C7]/60" data-testid="nl-locked-banner">
+          <div className="flex items-start gap-3">
+            <Send className="h-5 w-5 text-[#B45309] mt-0.5" />
+            <div>
+              <div className="font-bold text-[#071B34]">Cette newsletter est publiée</div>
+              <p className="text-xs text-[#475569] mt-0.5">Son contenu est verrouillé et ne peut plus être modifié. Vous pouvez uniquement le consulter en aperçu ou l&apos;archiver depuis la liste.</p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {previewMode ? (
         <NewsletterPreview f={f} />
@@ -1015,7 +1049,7 @@ function BlockInspector({ block, onUpdate, uploadFile }) {
 
   if (block.type === "heading") return (
     <div className="space-y-3">
-      <Field label="Texte"><input className="ms-input" value={p.text || ""} onChange={(e) => onUpdate({ text: e.target.value })} data-testid="nl-inspector-text" /></Field>
+      <Field label="Texte"><NewsletterRichEditor value={p.text || ""} onChange={(v) => onUpdate({ text: v })} placeholder="Titre de la section…" minHeight={60} /></Field>
       <Field label="Niveau">
         <select className="ms-input" value={p.level || 2} onChange={(e) => onUpdate({ level: parseInt(e.target.value) })}>
           <option value={1}>H1 (grand)</option><option value={2}>H2</option><option value={3}>H3</option>
@@ -1028,7 +1062,7 @@ function BlockInspector({ block, onUpdate, uploadFile }) {
 
   if (block.type === "text") return (
     <div className="space-y-3">
-      <Field label="Contenu"><textarea rows={6} className="ms-input" value={p.text || ""} onChange={(e) => onUpdate({ text: e.target.value })} data-testid="nl-inspector-text" /></Field>
+      <Field label="Contenu"><NewsletterRichEditor value={p.text || ""} onChange={(v) => onUpdate({ text: v })} placeholder="Écrivez votre paragraphe…" minHeight={160} /></Field>
       <Field label="Taille">
         <select className="ms-input" value={p.size || "base"} onChange={(e) => onUpdate({ size: e.target.value })}>
           <option value="sm">Petite</option><option value="base">Normale</option><option value="lg">Grande</option>
@@ -1229,7 +1263,7 @@ function BlockInspector({ block, onUpdate, uploadFile }) {
     </div>
   );
 
-  if (block.type === "columns3") return (
+  if (block.type === "columns3" || block.type === "columns4") return (
     <div className="space-y-3">
       {(p.items || []).map((it, i) => (
         <div key={i} className="rounded-xl bg-[#F4F7FA] p-3 space-y-2">
@@ -1242,9 +1276,19 @@ function BlockInspector({ block, onUpdate, uploadFile }) {
               onUpdate({ items: p.items.map((x, j) => j === i ? { ...x, image: url } : x) });
             }} />
           </label>
-          <input className="ms-input text-sm" placeholder="Titre" value={it.title || ""} onChange={(e) => onUpdate({ items: p.items.map((x, j) => j === i ? { ...x, title: e.target.value } : x) })} />
-          <textarea rows={2} className="ms-input text-sm" placeholder="Texte" value={it.text || ""} onChange={(e) => onUpdate({ items: p.items.map((x, j) => j === i ? { ...x, text: e.target.value } : x) })} />
-          <input className="ms-input text-sm" placeholder="Libellé bouton" value={it.buttonText || ""} onChange={(e) => onUpdate({ items: p.items.map((x, j) => j === i ? { ...x, buttonText: e.target.value } : x) })} />
+          <input className="ms-input text-sm" placeholder="Titre" value={it.title || ""} onChange={(e) => onUpdate({ items: p.items.map((x, j) => j === i ? { ...x, title: e.target.value } : x) })} data-testid={`col-title-${i}`} />
+          <NewsletterRichEditor value={it.text || ""} onChange={(v) => onUpdate({ items: p.items.map((x, j) => j === i ? { ...x, text: v } : x) })} placeholder="Texte de la colonne…" minHeight={80} />
+          <input className="ms-input text-sm" placeholder="Libellé bouton (ex. Lire plus)" value={it.buttonText || ""} onChange={(e) => onUpdate({ items: p.items.map((x, j) => j === i ? { ...x, buttonText: e.target.value } : x) })} data-testid={`col-btn-text-${i}`} />
+          <div className="grid grid-cols-2 gap-2">
+            <select className="ms-input text-xs" value={it.link_type || "external"} onChange={(e) => onUpdate({ items: p.items.map((x, j) => j === i ? { ...x, link_type: e.target.value } : x) })} data-testid={`col-linktype-${i}`}>
+              <option value="external">URL externe</option>
+              <option value="news">Actualité</option>
+              <option value="event">Événement</option>
+              <option value="document">Document</option>
+              <option value="page">Page interne</option>
+            </select>
+            <input className="ms-input text-xs" placeholder={it.link_type === "external" ? "https://…" : it.link_type === "page" ? "/documents" : "ID ou URL"} value={it.buttonUrl || ""} onChange={(e) => onUpdate({ items: p.items.map((x, j) => j === i ? { ...x, buttonUrl: e.target.value } : x) })} data-testid={`col-btn-url-${i}`} />
+          </div>
         </div>
       ))}
       <ShapePicker value={p.shape} onChange={(v) => onUpdate({ shape: v })} />

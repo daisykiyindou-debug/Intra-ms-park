@@ -6722,6 +6722,13 @@ async def update_newsletter(nid: str, payload: NewsletterCreate):
     old = await db.newsletters.find_one({"id": nid}, {"_id": 0})
     if not old:
         raise HTTPException(404, "Newsletter introuvable")
+    # Lock published newsletters — once broadcast to employees, the content
+    # is frozen. Only the archived flag can be flipped (via /archive route).
+    if old.get("published"):
+        raise HTTPException(
+            423,
+            "Cette newsletter est déjà publiée : son contenu est verrouillé et ne peut plus être modifié.",
+        )
     upd = payload.model_dump()
     now_iso = _now()
     is_future = bool(upd.get("publish_at") and upd["publish_at"] > now_iso)
