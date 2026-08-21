@@ -619,6 +619,7 @@ function PlanningManager() {
 function EntryCard({ entry, onEdit, onDelete }) {
   const typeMeta = {
     shift: { color: "#3BA4FF", bg: "#3BA4FF1F", label: "Shift" },
+    remote: { color: "#059669", bg: "#D1FAE5", label: "Télétravail" },
     off: { color: "#64748B", bg: "#F1F5F9", label: "OFF" },
     leave: { color: "#7C3AED", bg: "#A78BFA22", label: "Congé" },
     rtt: { color: "#1D70B8", bg: "#DBEAFE", label: "RTT" },
@@ -633,12 +634,12 @@ function EntryCard({ entry, onEdit, onDelete }) {
       >
         {m.label}
       </span>
-      {entry.type === "shift" && (
+      {(entry.type === "shift" || entry.type === "remote") && (
         <div className="text-sm font-bold text-[#071B34] leading-tight">
           {entry.start}–{entry.end}
         </div>
       )}
-      {entry.type === "shift" && entry.pause_start && (
+      {(entry.type === "shift" || entry.type === "remote") && entry.pause_start && (
         <div className="text-[10px] text-[#475569]">
           pause {entry.pause_start}–{entry.pause_end}
         </div>
@@ -851,13 +852,14 @@ function WeekEditor({ employee, weekStart, existingEntries, onClose, onSaved }) 
 
 const WEEK_TYPES = [
   { v: "shift", label: "Shift", color: "#3BA4FF", bg: "#3BA4FF1F" },
+  { v: "remote", label: "Télétravail", color: "#059669", bg: "#D1FAE5" },
   { v: "off", label: "OFF", color: "#64748B", bg: "#F1F5F9" },
   { v: "training", label: "Formation", color: "#B45309", bg: "#FEF3C7" },
 ];
 
 function WeekRow({ dayLabel, dayDate, row, onChange }) {
   const isLocked = row._locked_leave;
-  const isShift = row.type === "shift";
+  const isShift = row.type === "shift" || row.type === "remote";
   const meta = WEEK_TYPES.find((t) => t.v === row.type) || WEEK_TYPES[0];
   return (
     <div
@@ -978,9 +980,10 @@ function EntryEditor({ entry, employeeName, onClose, onSave }) {
         </div>
 
         <label className="ms-overline">Type</label>
-        <div className="grid grid-cols-4 gap-1.5 mt-2 mb-3">
+        <div className="grid grid-cols-5 gap-1.5 mt-2 mb-3">
           {[
             ["shift", "Shift"],
+            ["remote", "Télétravail"],
             ["off", "OFF"],
             ["leave", "Congé"],
             ["training", "Formation"],
@@ -1000,7 +1003,7 @@ function EntryEditor({ entry, employeeName, onClose, onSave }) {
           ))}
         </div>
 
-        {(form.type === "shift" || form.type === "training") && (
+        {(form.type === "shift" || form.type === "remote" || form.type === "training") && (
           <div className="grid grid-cols-2 gap-2">
             <div>
               <label className="ms-overline">Début</label>
@@ -1025,7 +1028,7 @@ function EntryEditor({ entry, employeeName, onClose, onSave }) {
           </div>
         )}
 
-        {form.type === "shift" && (
+        {(form.type === "shift" || form.type === "remote") && (
           <div className="grid grid-cols-2 gap-2 mt-3">
             <div>
               <label className="ms-overline">Début pause</label>
@@ -1048,14 +1051,14 @@ function EntryEditor({ entry, employeeName, onClose, onSave }) {
           </div>
         )}
 
-        {form.type === "shift" && (
+        {(form.type === "shift" || form.type === "remote") && (
           <div className="mt-3">
-            <label className="ms-overline">Service / lieu</label>
+            <label className="ms-overline">{form.type === "remote" ? "Lieu (télétravail)" : "Service / lieu"}</label>
             <input
               value={form.service || ""}
               onChange={(e) => set("service", e.target.value)}
               className="ms-input mt-2"
-              placeholder="Ex. Karting, Soccer Bar…"
+              placeholder={form.type === "remote" ? "Ex. Domicile" : "Ex. Karting, Soccer Bar…"}
             />
           </div>
         )}

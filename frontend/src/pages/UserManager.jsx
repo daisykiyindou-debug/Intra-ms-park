@@ -73,6 +73,27 @@ const STATUS_BADGE = {
   deactivated: { l: "Désactivé", bg: "#FEE2E2", color: "#B91C1C" },
 };
 
+// Auto-derivation table for meal points based on employee status.
+// Mirrors backend MEAL_POINTS_BY_STATUS — keep in sync.
+const MEAL_POINTS_BY_STATUS = {
+  direction: 35,
+  restauration: 35,
+  bureau: 30,
+  management: 30,
+  ops: 25,
+  securite: 25,
+  nettoyage: 25,
+  maintenance: 25,
+  alternant: 25,
+  stage: 25,
+};
+
+const deriveMealPoints = (statuses) => {
+  if (!Array.isArray(statuses) || statuses.length === 0) return "";
+  const max = statuses.reduce((acc, s) => Math.max(acc, MEAL_POINTS_BY_STATUS[s] || 0), 0);
+  return max > 0 ? max : "";
+};
+
 export default function UserManager() {
   const { me } = useApp();
   const [users, setUsers] = useState([]);
@@ -474,6 +495,7 @@ function UserEditor({ user, employees, onClose, onSaved }) {
     locker: "",
     work_days: [],
     off_days: [],
+    remote_days: [],
     usual_hours: "",
     break_time: "",
     gross_salary: "",
@@ -509,10 +531,16 @@ function UserEditor({ user, employees, onClose, onSaved }) {
     reader.readAsDataURL(file);
   };
 
-  const toggleStatus = (k) => setF((s) => ({
-    ...s,
-    statuses: s.statuses.includes(k) ? s.statuses.filter((x) => x !== k) : [...s.statuses, k],
-  }));
+  const toggleStatus = (k) => setF((s) => {
+    const newStatuses = s.statuses.includes(k) ? s.statuses.filter((x) => x !== k) : [...s.statuses, k];
+    // Auto-derive meal_points from statuses unless the admin manually set them
+    const autoMeal = deriveMealPoints(newStatuses);
+    return {
+      ...s,
+      statuses: newStatuses,
+      meal_points: s.meal_manual ? s.meal_points : autoMeal,
+    };
+  });
 
   const submit = async (e) => {
     e.preventDefault();
@@ -523,6 +551,9 @@ function UserEditor({ user, employees, onClose, onSaved }) {
     setSaving(true);
     try {
       const payload = { ...f };
+      // Remove UI-only manual override flags
+      delete payload.meal_manual;
+      delete payload.net_manual;
       // Convert numeric strings
       ["gross_salary", "net_salary", "hourly_rate", "meal_points"].forEach((k) => {
         if (payload[k] === "" || payload[k] == null) payload[k] = null;
@@ -735,7 +766,7 @@ function UserEditor({ user, employees, onClose, onSaved }) {
           {tab === "planning" && (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div className="md:col-span-2">
-                <label className="ms-overline">Jours travaillés</label>
+                <label className="ms-overline">Jours travaillés (sur site)</label>
                 <div className="mt-2 grid grid-cols-4 md:grid-cols-7 gap-2">
                   {["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"].map((d, i) => (
                     <label key={d} className={`rounded-lg border p-2 text-center cursor-pointer text-xs ${f.work_days.includes(d) ? "border-[#3BA4FF] bg-[#3BA4FF]/8" : "border-[#071B34]/10"}`}>
@@ -745,6 +776,29 @@ function UserEditor({ user, employees, onClose, onSaved }) {
                   ))}
                 </div>
               </div>
+              <div className="md:col-span-2">
+                <label className="ms-overline">Jours de télétravail récurrent</label>
+                <div className="mt-2 grid grid-cols-4 md:grid-cols-7 gap-2">
+                  {["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"].map((d, i) => (
+                    <label key={d} className={`rounded-lg border p-2 text-center cursor-pointer text-xs ${(f.remote_days || []).includes(d) ? "border-[#059669] bg-[#10B981]/10 text-[#065F46]" : "border-[#071B34]/10"}`}>
+                      <input
+                        type="checkbox"
+                        checked={(f.remote_days || []).includes(d)}
+                        onChange={() => setF((s) => ({
+                          ...s,
+                          remote_days: (s.remote_days || []).includes(d)
+                            ? (s.remote_days || []).filter((x) => x !== d)
+                            : [...(s.remote_days || []), d],
+                        }))}
+                        data-testid={`remote-day-${d}`}
+                        className="hidden"
+                      />
+                      {["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"][i]}
+                    </label>
+                  ))}
+                </div>
+                <p className="mt-1 text-[10px] text-[#475569] italic">Les jours cochés seront automatiquement marqués « Télétravail » dans le planning hebdomadaire.</p>
+              </div>
               <Field label="Horaires habituels" testid="usual_hours" value={f.usual_hours} onChange={(v) => setF({ ...f, usual_hours: v })} placeholder="Ex. 9h-17h" />
               <Field label="Temps de pause" testid="break_time" value={f.break_time} onChange={(v) => setF({ ...f, break_time: v })} placeholder="Ex. 12h-13h" />
             </div>
@@ -752,10 +806,38 @@ function UserEditor({ user, employees, onClose, onSaved }) {
 
           {tab === "payroll" && (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <Field label="Salaire brut (€)" type="number" testid="gross_salary" value={f.gross_salary} onChange={(v) => setF({ ...f, gross_salary: v })} />
-              <Field label="Salaire net estimé (€)" type="number" testid="net_salary" value={f.net_salary} onChange={(v) => setF({ ...f, net_salary: v })} />
+              <Field
+                label="Salaire brut (€)"
+                type="number"
+                testid="gross_salary"
+                value={f.gross_salary}
+                onChange={(v) => {
+                  // Auto-calc net (~78% of gross, French approximation) unless
+                  // the admin manually edited it (net_manual flag).
+                  const netAuto = v === "" || v == null ? "" : Math.round(Number(v) * 78) / 100;
+                  setF((s) => ({
+                    ...s,
+                    gross_salary: v,
+                    net_salary: s.net_manual ? s.net_salary : netAuto,
+                  }));
+                }}
+              />
+              <Field
+                label="Salaire net estimé (€)"
+                type="number"
+                testid="net_salary"
+                value={f.net_salary}
+                onChange={(v) => setF((s) => ({ ...s, net_salary: v, net_manual: true }))}
+              />
               <Field label="Taux horaire (€)" type="number" testid="hourly_rate" value={f.hourly_rate} onChange={(v) => setF({ ...f, hourly_rate: v })} />
-              <Field label="Points repas / jour" type="number" testid="meal_points" value={f.meal_points} onChange={(v) => setF({ ...f, meal_points: v })} placeholder="Auto: Bureau=35 · Management=30 · OPS=25" />
+              <Field
+                label="Points repas / jour"
+                type="number"
+                testid="meal_points"
+                value={f.meal_points}
+                onChange={(v) => setF({ ...f, meal_points: v, meal_manual: true })}
+                placeholder="Auto: Direction/Restauration=35 · Bureau/Management=30 · OPS/Sécurité/Nettoyage/Maintenance=25"
+              />
               <Field className="md:col-span-2" label="IBAN" testid="iban" value={f.iban} onChange={(v) => setF({ ...f, iban: v })} placeholder="FR76 ..." />
               <Field label="BIC" testid="bic" value={f.bic} onChange={(v) => setF({ ...f, bic: v })} />
               <Field label="Titulaire du compte" testid="account_holder" value={f.account_holder} onChange={(v) => setF({ ...f, account_holder: v })} />

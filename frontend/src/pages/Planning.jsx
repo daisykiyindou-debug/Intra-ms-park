@@ -6,6 +6,7 @@ import useLiveData from "@/hooks/useLiveData";
 
 const typeStyles = {
   shift: { bg: "#3BA4FF15", color: "#1D70B8", label: "Shift" },
+  remote: { bg: "#D1FAE5", color: "#065F46", label: "Télétravail" },
   off: { bg: "#F1F5F9", color: "#64748B", label: "OFF" },
   leave: { bg: "#EDE9FE", color: "#7C3AED", label: "Congé" },
   rtt: { bg: "#DBEAFE", color: "#1D70B8", label: "RTT" },
@@ -58,7 +59,7 @@ export default function Planning() {
   const monthMins = useMemo(() => {
     let mins = 0;
     data.forEach((s) => {
-      if (s.type === "shift" && s.start && s.end) {
+      if ((s.type === "shift" || s.type === "remote") && s.start && s.end) {
         const [sh, sm] = s.start.split(":").map(Number);
         const [eh, em] = s.end.split(":").map(Number);
         mins += eh * 60 + em - sh * 60 - sm - s.break_minutes;
@@ -67,10 +68,10 @@ export default function Planning() {
     return mins;
   }, [data]);
 
-  // Find next upcoming shift
+  // Find next upcoming shift (site or remote)
   const todayIso = iso(today);
   const nextShift = useMemo(() => {
-    return data.find((s) => s.day >= todayIso && s.type === "shift");
+    return data.find((s) => s.day >= todayIso && (s.type === "shift" || s.type === "remote"));
   }, [data, todayIso]);
 
   const monthLabel = `${fr.months[month.m].charAt(0).toUpperCase() + fr.months[month.m].slice(1)} ${month.y}`;
@@ -300,8 +301,13 @@ export default function Planning() {
                 <X className="h-4 w-4" />
               </button>
             </div>
-            {selected.type === "shift" ? (
+            {(selected.type === "shift" || selected.type === "remote") ? (
               <div className="mt-4 space-y-3">
+                {selected.type === "remote" && (
+                  <div className="rounded-xl bg-[#10B981]/10 text-[#065F46] px-3 py-2 text-xs font-semibold">
+                    Journée en télétravail
+                  </div>
+                )}
                 <Detail icon={Clock} label="Horaires">
                   <strong>
                     {selected.start}–{selected.pause_start} / {selected.pause_end}–{selected.end}
@@ -309,7 +315,7 @@ export default function Planning() {
                   <br />
                   Pause {selected.break_minutes}min de {selected.pause_start} à {selected.pause_end}
                 </Detail>
-                <Detail icon={MapPin} label="Lieu de poste">{selected.location}</Detail>
+                <Detail icon={MapPin} label={selected.type === "remote" ? "Lieu (télétravail)" : "Lieu de poste"}>{selected.location}</Detail>
                 <Detail icon={User} label="Manager référent">{selected.manager}</Detail>
                 <Detail icon={MapPin} label="Service">{selected.service}</Detail>
               </div>

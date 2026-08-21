@@ -1984,7 +1984,7 @@ def _compute_today_badging(sched: dict, employee_id: str) -> Optional[dict]:
     the current Paris time. Fields fill progressively as the day progresses:
     clock_in → pause_out → pause_in → clock_out. Returns None if the day
     is not a shift or the shift hasn't started yet."""
-    if not sched or sched.get("type") != "shift":
+    if not sched or sched.get("type") not in ("shift", "remote"):
         return None
     start_m = _hm_to_minutes(sched.get("start"))
     end_m = _hm_to_minutes(sched.get("end"))
@@ -4970,6 +4970,7 @@ class UserCreate(BaseModel):
     # Section 3 — Planning
     work_days: List[str] = []  # ["monday", "tuesday", ...]
     off_days: List[str] = []
+    remote_days: List[str] = []  # jours de télétravail récurrent
     usual_hours: Optional[str] = None
     break_time: Optional[str] = None
     # Section 4 — Payroll
@@ -5025,6 +5026,7 @@ class UserUpdate(BaseModel):
     # Section 3 — Planning
     work_days: Optional[List[str]] = None
     off_days: Optional[List[str]] = None
+    remote_days: Optional[List[str]] = None
     usual_hours: Optional[str] = None
     break_time: Optional[str] = None
     # Section 4 — Payroll
@@ -5174,7 +5176,7 @@ async def admin_update_user(uid: str, payload: UserUpdate):
     # Persist derived fields when their inputs were part of the update payload.
     if "weekly_hours" in data:
         data["contract_hours_weekly"] = merged["contract_hours_weekly"]
-    if "work_days" in data or "off_days" in data or "usual_hours" in data:
+    if "work_days" in data or "off_days" in data or "usual_hours" in data or "remote_days" in data:
         data["weekly_pattern"] = merged["weekly_pattern"]
     if "statuses" in data or "meal_points" in data:
         data["meal_points"] = merged["meal_points"]
@@ -5238,7 +5240,7 @@ async def admin_delete_user(uid: str):
 class AdminScheduleEntry(BaseModel):
     employee_id: str
     day: str  # YYYY-MM-DD
-    type: str  # shift | off | leave | training
+    type: str  # shift | remote | off | leave | training
     start: Optional[str] = None
     end: Optional[str] = None
     pause_start: Optional[str] = None
@@ -5251,8 +5253,8 @@ class AdminScheduleEntry(BaseModel):
 
 
 def _shift_minutes(entry: dict) -> int:
-    """Compute net worked minutes for a 'shift' entry (excludes pause)."""
-    if entry.get("type") != "shift" or not entry.get("start") or not entry.get("end"):
+    """Compute net worked minutes for a 'shift' or 'remote' entry (excludes pause)."""
+    if entry.get("type") not in ("shift", "remote") or not entry.get("start") or not entry.get("end"):
         return 0
     try:
         s = datetime.strptime(entry["start"], "%H:%M")
@@ -5276,7 +5278,7 @@ def _covered_minutes(entry: dict) -> int:
             return max(0, int(entry["covered_minutes"]))
         except Exception:
             pass
-    if entry.get("type") not in ("shift", "leave", "rtt", "training"):
+    if entry.get("type") not in ("shift", "remote", "leave", "rtt", "training"):
         return 0
     if not entry.get("start") or not entry.get("end"):
         return 0
@@ -5294,10 +5296,17 @@ def _covered_minutes(entry: dict) -> int:
 
 
 MEAL_POINTS_BY_STATUS = {
-    "bureau": 35,
+    # 35 pts — Direction et restauration
+    "direction": 35,
+    "restauration": 35,
+    # 30 pts — Bureau, Management
+    "bureau": 30,
     "management": 30,
-    "direction": 30,
+    # 25 pts — OPS terrain, sécurité, nettoyage, maintenance, alternants et stagiaires
     "ops": 25,
+    "securite": 25,
+    "nettoyage": 25,
+    "maintenance": 25,
     "alternant": 25,
     "stage": 25,
 }
@@ -5315,8 +5324,9 @@ def _derive_meal_points(statuses: list[str], fallback: Optional[int] = None) -> 
     return max((MEAL_POINTS_BY_STATUS.get(s, 20) for s in statuses), default=20)
 
 
-def _build_weekly_pattern(work_days: list[str], off_days: list[str], usual_hours: Optional[str]) -> dict:
-    """Build weekly_pattern dict indexed by weekday int (0=Mon)."""
+def _build_weekly_pattern(work_days: list[str], off_days: list[str], usual_hours: Optional[str], remote_days: Optional[list[str]] = None) -> dict:
+    """Build weekly_pattern dict indexed by weekday int (0=Mon).
+    remote_days marks recurring télétravail days — they still count as worked but with type='remote'."""
     # Parse usual_hours like "9h-17h" or "09:00-17:00"
     default_start, default_end = "09:00", "17:00"
     if usual_hours:
@@ -5333,16 +5343,24 @@ def _build_weekly_pattern(work_days: list[str], off_days: list[str], usual_hours
             except Exception:
                 pass
     pattern: dict = {}
+    remote_set = set(remote_days or [])
     for d in work_days:
         idx = WEEKDAY_MAP.get(d)
         if idx is None:
             continue
-        pattern[str(idx)] = {"type": "shift", "start": default_start, "end": default_end}
+        entry_type = "remote" if d in remote_set else "shift"
+        pattern[str(idx)] = {"type": entry_type, "start": default_start, "end": default_end}
     for d in off_days:
         idx = WEEKDAY_MAP.get(d)
         if idx is None:
             continue
         pattern[str(idx)] = {"type": "off"}
+    # remote_days that aren't in work_days: mark them as remote workdays anyway
+    for d in remote_set:
+        idx = WEEKDAY_MAP.get(d)
+        if idx is None or str(idx) in pattern:
+            continue
+        pattern[str(idx)] = {"type": "remote", "start": default_start, "end": default_end}
     return pattern
 
 
@@ -5361,12 +5379,13 @@ def _apply_user_derivations(data: dict) -> None:
     data["daily_quota"] = data["meal_points"]
     work_days = data.get("work_days") or []
     off_days = data.get("off_days") or []
-    if work_days or off_days:
-        listed = set(work_days) | set(off_days)
+    remote_days = data.get("remote_days") or []
+    if work_days or off_days or remote_days:
+        listed = set(work_days) | set(off_days) | set(remote_days)
         for k in WEEKDAY_MAP:
             if k not in listed:
                 off_days = list(off_days) + [k]
-        data["weekly_pattern"] = _build_weekly_pattern(work_days, off_days, data.get("usual_hours"))
+        data["weekly_pattern"] = _build_weekly_pattern(work_days, off_days, data.get("usual_hours"), remote_days)
     if data.get("badge_active") is None:
         data["badge_active"] = True
 
@@ -5398,10 +5417,10 @@ def _entry_from_pattern(emp: dict, day: date) -> dict:
         "pause_start": p.get("pause_start"),
         "pause_end": p.get("pause_end"),
         "break_minutes": p.get("break_minutes", 0),
-        "location": p.get("location") or "MS Park",
+        "location": p.get("location") or ("Domicile" if p.get("type") == "remote" else "MS Park"),
         "manager": emp.get("manager"),
         "service": emp.get("department"),
-        "note": None,
+        "note": "Télétravail" if p.get("type") == "remote" else None,
     }
 
 
