@@ -12,6 +12,19 @@ import { useApp } from "@/contexts/AppContext";
 import PortalModal from "@/components/PortalModal";
 
 const DAYS = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"];
+
+function formatFrDate(iso) {
+  if (!iso) return "";
+  // "2026-08-22" → "sam. 22 août 2026"
+  try {
+    const d = new Date(iso + "T00:00:00");
+    return d.toLocaleDateString("fr-FR", {
+      weekday: "long", day: "numeric", month: "long", year: "numeric",
+    }).replace(/^./, (c) => c.toUpperCase());
+  } catch {
+    return iso;
+  }
+}
 const fmtHM = (min) => {
   if (!min || min < 0) return "0h 00";
   const h = Math.floor(min / 60);
@@ -77,7 +90,7 @@ export default function Badgeage() {
         return;
       }
       if (st.step === "closed") {
-        const ns = st.next_shift ? ` le ${st.next_shift.day} à ${st.next_shift.start_time || "—"}` : "";
+        const ns = st.next_shift ? ` le ${formatFrDate(st.next_shift.day)} à ${(st.next_shift.start_time || "—").replace(":", "h")}` : "";
         toast.error(`Journée terminée. Prochain badge${ns}.`);
         return;
       }
@@ -171,10 +184,10 @@ export default function Badgeage() {
 
       {/* Today's punches (4 cards) */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <PunchCard label="Entrée" time={today?.clock_in} icon={Clock} accent="#10B981" />
-        <PunchCard label="Pause (sortie)" time={today?.pause_out} icon={Coffee} accent="#F59E0B" />
-        <PunchCard label="Pause (entrée)" time={today?.pause_in} icon={Coffee} accent="#8B5CF6" />
-        <PunchCard label="Sortie" time={today?.clock_out} icon={LogOut} accent="#EF4444" />
+        <PunchCard label="Entrée" time={today?.clock_in} icon={Clock} accent="#10B981" closed={!!today?.clock_out} fallbackLabel="Non pointée" />
+        <PunchCard label="Pause (sortie)" time={today?.pause_out} icon={Coffee} accent="#F59E0B" closed={!!today?.clock_out} fallbackLabel="Sans pause" />
+        <PunchCard label="Pause (entrée)" time={today?.pause_in} icon={Coffee} accent="#8B5CF6" closed={!!today?.clock_out} fallbackLabel="Sans pause" />
+        <PunchCard label="Sortie" time={today?.clock_out} icon={LogOut} accent="#EF4444" closed={!!today?.clock_out} fallbackLabel="Non pointée" />
       </div>
 
       {/* Objectifs : Jour / Semaine / Mois avec jauges de progression et heures restantes */}
@@ -344,15 +357,25 @@ function ObjectiveCard({ label, worked, target, accent, hint }) {
 }
 
 
-function PunchCard({ label, time, icon: Icon, accent }) {
+function PunchCard({ label, time, icon: Icon, accent, fallbackLabel, closed }) {
+  const isBlank = !time;
   return (
     <div className="ms-card p-4 flex flex-col items-start gap-2" data-testid={`punch-${label}`}>
       <div className="h-9 w-9 rounded-xl flex items-center justify-center" style={{ background: `${accent}20`, color: accent }}>
         <Icon className="h-4 w-4" />
       </div>
       <div className="text-xs text-[#475569]">{label}</div>
-      <div className={`text-2xl font-bold ${time ? "text-[#071B34]" : "text-[#94A3B8]"}`}>{time || "--:--"}</div>
-      <div className="text-[10px] text-[#10B981]">{time ? "Pointage effectué" : ""}</div>
+      {isBlank && closed && fallbackLabel ? (
+        <>
+          <div className="text-lg font-semibold text-[#94A3B8] italic">{fallbackLabel}</div>
+          <div className="text-[10px] text-[#94A3B8]">Journée clôturée</div>
+        </>
+      ) : (
+        <>
+          <div className={`text-2xl font-bold ${time ? "text-[#071B34]" : "text-[#94A3B8]"}`}>{time || "--:--"}</div>
+          <div className="text-[10px] text-[#10B981]">{time ? "Pointage effectué" : ""}</div>
+        </>
+      )}
     </div>
   );
 }
@@ -452,8 +475,8 @@ function PunchStatusBanner({ state, onPunch }) {
           )}
           {step === "closed" && state.next_shift && (
             <div className="text-xs mt-1 opacity-90">
-              Prochain badge le <strong>{state.next_shift.day}</strong>
-              {state.next_shift.start_time && <> à <strong>{state.next_shift.start_time}</strong></>}
+              Prochain badge le <strong>{formatFrDate(state.next_shift.day)}</strong>
+              {state.next_shift.start_time && <> à <strong>{state.next_shift.start_time.replace(":", "h")}</strong></>}
             </div>
           )}
           {state.aggregate && (state.aggregate.clock_in || state.aggregate.break_out) && (
