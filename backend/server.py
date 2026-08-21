@@ -7223,12 +7223,24 @@ async def _auto_close_expired_days(employee_id: str) -> None:
 
 
 async def _next_scheduled_shift(employee_id: str, after_day: str) -> Optional[dict]:
-    return await db.schedules.find_one(
-        {"employee_id": employee_id, "day": {"$gt": after_day},
-         "shift_type": {"$nin": ["off", "conges", "rtt", "recup", "rest"]}},
-        {"_id": 0},
-        sort=[("day", 1)],
-    )
+    """Return the next scheduled work shift AFTER after_day.
+    Skips off/leave/rtt/recup/rest days on either the legacy `shift_type` field
+    or the newer `type` field used by the planning wizard.
+    A row is considered a real shift only if its normalised type is `shift`,
+    `remote` or `training`."""
+    cursor = db.schedules.find(
+        {"employee_id": employee_id, "day": {"$gt": after_day}}, {"_id": 0}
+    ).sort("day", 1)
+    async for s in cursor:
+        st = (s.get("shift_type") or "").lower()
+        t = (s.get("type") or "").lower()
+        if st in ("off", "conges", "rtt", "recup", "rest"):
+            continue
+        if t in ("off", "leave", "rtt", "recup", "rest"):
+            continue
+        # It's a real shift → return it
+        return s
+    return None
 
 
 async def _has_active_leave(employee_id: str, day: str) -> Optional[str]:
@@ -7377,7 +7389,11 @@ async def badging_state():
     if agg["is_closed"] or blocked:
         ns = await _next_scheduled_shift(me["id"], today)
         if ns:
-            next_shift = {"day": ns["day"], "start_time": ns.get("start_time"), "end_time": ns.get("end_time")}
+            next_shift = {
+                "day": ns["day"],
+                "start_time": ns.get("start_time") or ns.get("start"),
+                "end_time": ns.get("end_time") or ns.get("end"),
+            }
 
     break_locked_until = None
     if step == "break_in" and agg["break_out"]:
@@ -7424,7 +7440,8 @@ async def punch(payload: PunchPayload):
     if agg["is_closed"]:
         ns = await _next_scheduled_shift(me["id"], today)
         if ns:
-            raise HTTPException(400, f"Journée terminée. Prochain badge le {ns['day']} à {ns.get('start_time','') or '—'}.")
+            start = ns.get("start_time") or ns.get("start") or "—"
+            raise HTTPException(400, f"Journée terminée. Prochain badge le {ns['day']} à {start}.")
         raise HTTPException(400, "Journée terminée. Aucun prochain shift planifié.")
 
     if agg["clock_in"] is None:
