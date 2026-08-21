@@ -124,7 +124,13 @@ export default function Badgeage() {
     .reduce((s, h) => s + (h.worked_minutes || 0), 0)
     + ((today?.day || "").startsWith(currentMonthPrefix) ? (today?.worked_minutes || 0) : 0);
 
-  const dayStatusLabel = today?.clock_out ? "Journée complète" : today?.clock_in ? today.note : "En attente de pointage";
+  const dayStatusLabel = today?.clock_out
+    ? "Journée complète"
+    : today?.pause_out && !today?.pause_in
+    ? "En pause"
+    : today?.clock_in
+    ? (today.note || "En poste")
+    : "En attente de pointage";
   const dayStatusColor = today?.clock_out ? "bg-[#10B981]/15 text-[#047857]" : today?.clock_in ? "bg-[#3BA4FF]/15 text-[#1D70B8]" : "bg-[#F59E0B]/15 text-[#B45309]";
 
   return (
@@ -206,66 +212,6 @@ export default function Badgeage() {
 
       {/* Full punch-clock history (v2) — jour / semaine / mois */}
       <PunchHistorySection />
-
-      {/* Weekly table */}
-      <div className="ms-card p-0 overflow-hidden">
-        <div className="p-5 flex items-center gap-2">
-          <CalendarClock className="h-4 w-4 text-[#3BA4FF]" />
-          <h2 className="text-lg font-bold text-[#071B34]">Récapitulatif de la semaine</h2>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="bg-[#F4F7FA] text-[#475569] text-xs uppercase tracking-wider">
-              <tr>
-                <th className="text-left p-3 font-semibold">Jour</th>
-                <th className="text-left p-3 font-semibold">Entrée</th>
-                <th className="text-left p-3 font-semibold">Pause (sortie)</th>
-                <th className="text-left p-3 font-semibold">Pause (entrée)</th>
-                <th className="text-left p-3 font-semibold">Sortie</th>
-                <th className="text-right p-3 font-semibold">Heures travaillées</th>
-                <th className="text-right p-3 font-semibold">Retard</th>
-              </tr>
-            </thead>
-            <tbody>
-              {weekRows.map((r) => {
-                const isToday = r.iso === new Date().toISOString().slice(0, 10);
-                const isOff = OFF_LIKE.has(r.shift_type);
-                const offLabel = {
-                  off: "🌴 Repos", rest: "🌴 Repos",
-                  conges: "🏖️ Congés", rtt: "📆 RTT", recup: "🔄 Récup",
-                }[r.shift_type];
-                return (
-                  <tr key={r.iso} className={`border-t border-[#071B34]/5 ${isToday ? "bg-[#3BA4FF]/5 font-semibold" : ""} ${isOff ? "bg-[#F4F7FA]/60" : ""}`}>
-                    <td className="p-3 text-[#334155]">{r.dayName}. {r.date.getDate().toString().padStart(2, "0")}/{(r.date.getMonth() + 1).toString().padStart(2, "0")}</td>
-                    {isOff ? (
-                      <>
-                        <td colSpan={4} className="p-3 text-[#475569] italic">{offLabel}</td>
-                        <td className="p-3 text-right text-[#94A3B8]">—</td>
-                        <td className="p-3 text-right text-[#94A3B8]">—</td>
-                      </>
-                    ) : (
-                      <>
-                        <td className="p-3">{r.entry?.clock_in || "-"}</td>
-                        <td className="p-3">{r.entry?.pause_out || "-"}</td>
-                        <td className="p-3">{r.entry?.pause_in || "-"}</td>
-                        <td className="p-3">{r.entry?.clock_out || "-"}</td>
-                        <td className="p-3 text-right font-bold text-[#071B34]">{r.entry ? fmtHM(r.entry.worked_minutes) : "-"}</td>
-                        <td className="p-3 text-right text-[#94A3B8]">{r.entry?.anomaly ? <span className="text-[#EF4444]">{r.entry.anomaly}</span> : "-"}</td>
-                      </>
-                    )}
-                  </tr>
-                );
-              })}
-              <tr className="border-t-2 border-[#071B34]/10 bg-[#F4F7FA] font-bold">
-                <td className="p-3">Total semaine</td>
-                <td colSpan={4}></td>
-                <td className="p-3 text-right text-[#071B34]">{fmtHM(weekTotal)}</td>
-                <td className="p-3 text-right text-[#94A3B8]">-</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
 
       {/* Weekly summary (4 cards) */}
       <div>
@@ -692,8 +638,8 @@ function PunchHistorySection() {
               }[r.shift_type];
               return (
                 <tr key={r.day} className={`border-t border-[#071B34]/5 ${isOff ? "bg-[#F4F7FA]/60" : ""}`} data-testid={`punch-history-row-${r.day}`}>
-                  <td className="p-3 text-[#334155] whitespace-nowrap">
-                    {new Date(r.day).toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" })}
+                  <td className="p-3 text-[#334155] whitespace-nowrap capitalize">
+                    {new Date(r.day).toLocaleDateString("fr-FR", { weekday: "short", day: "2-digit", month: "2-digit" }).replace(",", "")}
                   </td>
                   {isOff ? (
                     <td colSpan={5} className="p-3 text-[#475569] italic">{offLabel}</td>
@@ -751,8 +697,9 @@ function PunchExportModal({ onClose }) {
       }
       const today = new Date().toISOString().slice(0, 10);
       const startDate = new Date(fromDay);
-      const endDate = new Date(toDay > today ? today : toDay);
-      const days = Math.max(1, Math.floor((endDate - startDate) / 86400000) + 1);
+      // history API returns the LAST N days from today — so we need to fetch far enough back
+      const daysBackFromToday = Math.max(1, Math.floor((new Date(today) - startDate) / 86400000) + 1);
+      const days = Math.min(daysBackFromToday, 366);
       const { data } = await api.get(`/badging/history?days=${days}`);
       const rows = data.filter((r) => r.day >= fromDay && r.day <= toDay);
       if (rows.length === 0) { toast.error("Aucune donnée sur la période"); setBusy(false); return; }
