@@ -184,10 +184,10 @@ export default function Badgeage() {
 
       {/* Today's punches (4 cards) */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <PunchCard label="Entrée" time={today?.clock_in} icon={Clock} accent="#10B981" closed={!!today?.clock_out} fallbackLabel="Non pointée" />
-        <PunchCard label="Pause (sortie)" time={today?.pause_out} icon={Coffee} accent="#F59E0B" closed={!!today?.clock_out} fallbackLabel="Sans pause" />
-        <PunchCard label="Pause (entrée)" time={today?.pause_in} icon={Coffee} accent="#8B5CF6" closed={!!today?.clock_out} fallbackLabel="Sans pause" />
-        <PunchCard label="Sortie" time={today?.clock_out} icon={LogOut} accent="#EF4444" closed={!!today?.clock_out} fallbackLabel="Non pointée" />
+        <PunchCard label="Entrée" time={today?.clock_out ? null : today?.clock_in} icon={Clock} accent="#10B981" closed={!!today?.clock_out} fallbackLabel="Journée clôturée" />
+        <PunchCard label="Pause (sortie)" time={today?.clock_out ? null : today?.pause_out} icon={Coffee} accent="#F59E0B" closed={!!today?.clock_out} fallbackLabel={today?.pause_out ? "Journée clôturée" : "Sans pause"} />
+        <PunchCard label="Pause (entrée)" time={today?.clock_out ? null : today?.pause_in} icon={Coffee} accent="#8B5CF6" closed={!!today?.clock_out} fallbackLabel={today?.pause_in ? "Journée clôturée" : "Sans pause"} />
+        <PunchCard label="Sortie" time={today?.clock_out ? null : null} icon={LogOut} accent="#EF4444" closed={!!today?.clock_out} fallbackLabel="Journée clôturée" />
       </div>
 
       {/* Objectifs : Jour / Semaine / Mois avec jauges de progression et heures restantes */}
