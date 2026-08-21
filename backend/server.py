@@ -3923,7 +3923,33 @@ async def list_notifications():
     items = await db.notifications.find(
         {"employee_id": current_user()}, {"_id": 0}
     ).sort("created_at", -1).to_list(50)
-    return [_normalize_notif(n) for n in items]
+    # Filter out stale "message" notifications pointing to channels that no
+    # longer exist or where the user is no longer a member. Deep-links to a
+    # deleted channel would otherwise 404 on click.
+    filtered: list[dict] = []
+    uid = current_user()
+    for n in items:
+        if n.get("type") == "message":
+            link = n.get("link") or ""
+            # Expected format: /messagerie?ch=<channel_id>
+            ch_id = None
+            if "ch=" in link:
+                try:
+                    ch_id = link.split("ch=", 1)[1].split("&", 1)[0]
+                except Exception:
+                    ch_id = None
+            if ch_id:
+                ch = await db.channels.find_one({"id": ch_id}, {"_id": 0})
+                members = (ch or {}).get("members_ids") or (ch or {}).get("members") or []
+                if not ch or uid not in members:
+                    # Skip and best-effort clean up
+                    try:
+                        await db.notifications.delete_one({"id": n.get("id")})
+                    except Exception:
+                        pass
+                    continue
+        filtered.append(_normalize_notif(n))
+    return filtered
 
 
 @api.post("/notifications/{nid}/read")
@@ -4357,6 +4383,69 @@ async def post_message(cid: str, payload: MessageCreate):
                 link=f"/messagerie?ch={cid}",
             )
     return await _strip(msg)
+
+
+class MessageEdit(BaseModel):
+    content: str
+
+
+@api.put("/messages/{mid}")
+async def edit_message(mid: str, payload: MessageEdit):
+    """Edit own message within the 10-minute grace window."""
+    uid = current_user()
+    msg = await db.messages.find_one({"id": mid}, {"_id": 0})
+    if not msg:
+        raise HTTPException(404, "Message introuvable")
+    if msg.get("author_id") != uid:
+        raise HTTPException(403, "Vous ne pouvez modifier que vos propres messages")
+    # Compute the age of the message in minutes
+    try:
+        sent_at = datetime.fromisoformat(str(msg["ts"]).replace("Z", "+00:00"))
+    except Exception:
+        raise HTTPException(500, "Timestamp invalide")
+    age_min = (datetime.now(timezone.utc) - sent_at).total_seconds() / 60
+    if age_min > 10:
+        raise HTTPException(423, "Vous ne pouvez plus modifier ce message (au-delà de 10 minutes).")
+    new_content = (payload.content or "").strip()
+    if not new_content:
+        raise HTTPException(400, "Message vide")
+    await db.messages.update_one(
+        {"id": mid},
+        {"$set": {"content": new_content, "edited_at": _now(), "edited": True}},
+    )
+    return await db.messages.find_one({"id": mid}, {"_id": 0})
+
+
+@api.delete("/messages/{mid}")
+async def delete_message(mid: str):
+    """Delete own message (no time limit for now)."""
+    uid = current_user()
+    msg = await db.messages.find_one({"id": mid}, {"_id": 0})
+    if not msg:
+        raise HTTPException(404, "Message introuvable")
+    if msg.get("author_id") != uid:
+        raise HTTPException(403, "Vous ne pouvez supprimer que vos propres messages")
+    await db.messages.delete_one({"id": mid})
+    return {"ok": True}
+
+
+@api.post("/messages/{mid}/like")
+async def toggle_message_like(mid: str):
+    """Toggle a like (👍) reaction on a message. One like per user, second
+    call removes it. Returns the updated liked_by list."""
+    uid = current_user()
+    msg = await db.messages.find_one({"id": mid}, {"_id": 0})
+    if not msg:
+        raise HTTPException(404, "Message introuvable")
+    # Ensure the caller is a member of the channel
+    await _require_channel_member(msg["channel_id"])
+    liked_by = list(msg.get("liked_by") or [])
+    if uid in liked_by:
+        liked_by = [x for x in liked_by if x != uid]
+    else:
+        liked_by.append(uid)
+    await db.messages.update_one({"id": mid}, {"$set": {"liked_by": liked_by, "like_count": len(liked_by)}})
+    return {"liked_by": liked_by, "like_count": len(liked_by), "liked_by_me": uid in liked_by}
 
 
 # ─── Events

@@ -1,10 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams, Link } from "react-router-dom";
 import {
   Send, Smile, Paperclip, Phone, Video, Search, Users, Plus, X, ArrowLeft,
   Info, MoreVertical, MessageSquare, SlidersHorizontal, Star, Pencil, Trash2, Archive,
   Cake, Check, BellOff, CheckCheck, User as UserIcon, FileText, Image as ImageIcon,
-  UserPlus, UserMinus, Camera, Receipt,
+  UserPlus, UserMinus, Camera, Receipt, ThumbsUp,
 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
@@ -111,14 +111,32 @@ export default function Messagerie() {
     }
   }, [active, channels]);
 
-  useEffect(() => {
-    if (!active) return;
-    api.get(`/channels/${active}/messages`).then((r) => {
+  const reload = useCallback(() => {
+    if (!active) return Promise.resolve();
+    return api.get(`/channels/${active}/messages`).then((r) => {
       setMessages(r.data);
       requestAnimationFrame(() => {
         if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
       });
+    }).catch((err) => {
+      const status = err?.response?.status;
+      if (status === 404 || status === 403) {
+        toast.error("Conversation introuvable ou accès refusé");
+        setMessages([]);
+        setActive(null);
+        // Clean stale ?ch param from the URL
+        const next = new URLSearchParams(searchParams);
+        next.delete("ch");
+        setSearchParams(next, { replace: true });
+        // Refresh notifications so the stale link disappears
+        window.dispatchEvent(new CustomEvent("ms-notifications-refresh"));
+      }
     });
+  }, [active, searchParams, setSearchParams]);
+
+  useEffect(() => {
+    if (!active) return;
+    reload();
     // Mark as read → this clears the badge + the header notification counter
     api.post(`/channels/${active}/read`).then(() => {
       loadChannels();
@@ -847,8 +865,10 @@ export default function Messagerie() {
                               )}
                               <div className={`mt-1 text-[10px] ${mine ? "text-[#1D4ED8]/70" : "text-[#94A3B8]"} text-right`}>
                                 {new Date(m.ts).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}
+                                {m.edited && <span className="ml-1 italic" data-testid="msg-edited">· Modifié</span>}
                                 {mine && <span className="ml-1">✓✓</span>}
                               </div>
+                              <MessageActions m={m} mine={mine} onChanged={reload} />
                             </div>
                             {mine && (
                               me?.avatar
@@ -1108,6 +1128,68 @@ export default function Messagerie() {
             </div>
           </div>
         </div>
+      )}
+    </div>
+  );
+}
+
+function MessageActions({ m, mine, onChanged }) {
+  const { me } = useApp();
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(m.content || "");
+  const likedByMe = (m.liked_by || []).includes(me?.id);
+  const likeCount = m.like_count || (m.liked_by || []).length;
+  // Editable window: within 10 minutes of creation
+  const ageMin = (Date.now() - new Date(m.ts).getTime()) / 60000;
+  const canEdit = mine && ageMin < 10 && m.author_id !== "system-rh";
+
+  const toggleLike = async () => {
+    try {
+      await api.post(`/messages/${m.id}/like`);
+      onChanged?.();
+    } catch (_) { /* ignore */ }
+  };
+
+  const saveEdit = async () => {
+    const c = (draft || "").trim();
+    if (!c || c === m.content) { setEditing(false); return; }
+    try {
+      await api.put(`/messages/${m.id}`, { content: c });
+      setEditing(false);
+      onChanged?.();
+    } catch (e) {
+      const msg = e?.response?.data?.detail || "Impossible de modifier ce message";
+      window.alert(msg);
+    }
+  };
+
+  if (editing) {
+    return (
+      <div className="mt-1 flex items-center gap-2" data-testid="msg-edit-form">
+        <input value={draft} onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") saveEdit(); if (e.key === "Escape") setEditing(false); }}
+          className="ms-input text-xs flex-1" autoFocus />
+        <button onClick={saveEdit} className="text-[10px] font-semibold text-[#1D70B8]" data-testid="msg-edit-save">Enregistrer</button>
+        <button onClick={() => setEditing(false)} className="text-[10px] text-[#475569]">Annuler</button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-1 flex items-center gap-2 text-[10px]">
+      <button
+        onClick={toggleLike}
+        data-testid="msg-like-btn"
+        className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 transition-colors ${likedByMe ? "bg-[#3BA4FF]/15 text-[#1D70B8]" : "text-[#94A3B8] hover:text-[#3BA4FF]"}`}
+      >
+        <ThumbsUp className={`h-3 w-3 ${likedByMe ? "fill-current" : ""}`} />
+        {likeCount > 0 && <span className="font-semibold">{likeCount}</span>}
+      </button>
+      {canEdit && (
+        <button onClick={() => { setDraft(m.content || ""); setEditing(true); }}
+          data-testid="msg-edit-btn"
+          className="inline-flex items-center gap-1 text-[#94A3B8] hover:text-[#3BA4FF]"
+        ><Pencil className="h-3 w-3" /> Modifier</button>
       )}
     </div>
   );

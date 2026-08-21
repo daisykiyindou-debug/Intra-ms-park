@@ -1,0 +1,45 @@
+{
+  "summary": "Iteration 31 — Tests ciblés des nouvelles fonctionnalités Messagerie (édition 10 min, like/unlike, deep-link notifications + auto-clear) + smoke régression. Backend: 20/20 tests pytest OK (/app/backend/tests/test_iter31_message_actions.py). Frontend: édition, indicateur 'modifié', like/unlike, fenêtre de 10 min (bouton Modifier masqué sur message vieilli de 45 min), deep-link depuis le dropdown Messages ET depuis la cloche, auto-clear du badge non-lu, changement de canal, envoi/réponse, Newsletters — tous OK. 1 bug HAUT trouvé: deep-link vers un canal inexistant/non-membre provoque une erreur runtime non gérée (overlay rouge, aucun message utilisateur) — reproduit avec une notification RÉELLE non lue existante (/messagerie?ch=rh-emp-idriss-malonga, canal supprimé).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /api/channels/{cid}/messages", "issue": "Retourne bien 404/403, mais des notifications 'message' non lues subsistent en base avec un link vers un canal supprimé (ex. /messagerie?ch=rh-emp-idriss-malonga) — deep-links morts. Prévoir un nettoyage/validation à la lecture des notifications."},
+      {"endpoint": "POST /api/admin/payslips/{pid}/send", "issue": "Le canal Service RH créé pour un admin qui s'envoie une fiche contient members_ids dupliqué (['emp-marcus-simeo','emp-marcus-simeo'])."},
+      {"endpoint": "POST /api/admin/payslips/{pid}/send", "issue": "Deux formats d'URL de pièce jointe payslip coexistent en base ('/documents?payslip=<id>' legacy vs '/documents/payslip/<emp>/<y>/<m>') — risque d'incohérence d'ouverture."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "Messagerie (indicateur)", "issue": "L'indicateur affiche '· modifié' (minuscule) alors que la spec demande 'Modifié'. Purement cosmétique.", "selector": "[data-testid=\"msg-edited\"]", "priority": "LOW"}
+    ],
+    "integration_issues": [
+      {"flow": "Deep-link notification vers un canal supprimé / non-membre", "issue": "Messagerie.jsx: reload() (api.get(`/channels/${active}/messages`)) n'a aucun .catch() → promesse rejetée non gérée. Résultat: overlay 'Uncaught runtime errors: Request failed with status code 404' en dev, et aucun message utilisateur en prod. Reproduit sur /messagerie?ch=rh-emp-idriss-malonga (notification 'Service RH' non lue réellement présente pour Idriss). Attendu: catch 404/403 → message FR 'Conversation introuvable ou accès refusé', reset du ?ch, et marquer/supprimer la notification obsolète.", "affected_selectors": ["/messagerie?ch=<id-inexistant>"], "priority": "HIGH"}
+    ],
+    "design_issues": [
+      {"screen": "Messagerie — fil de discussion (DM long)", "issues": ["Espaces verticaux vides importants (~60px) entre certains groupes de messages consécutifs dans un fil chargé (voir capture i31_messagerie) — à vérifier côté regroupement par jour."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter31_message_actions.py",
+    "/app/test_reports/pytest/iter31.xml"
+  ],
+  "action_items": [
+    "Messagerie.jsx: ajouter la gestion d'erreur sur reload() et sur POST /channels/{cid}/read (404/403) + message FR + reset du paramètre ?ch",
+    "Nettoyer / ignorer les notifications de type 'message' dont le canal cible n'existe plus (ou filtrer côté GET /api/notifications)",
+    "(optionnel) Uniformiser le libellé 'Modifié' et dédupliquer members_ids dans le canal Service RH"
+  ],
+  "critical_code_review_comments": [
+    "server.py fait 8457 lignes — à découper en routers (messagerie, paie, RH, badgeage) : maintenance et risque de régression élevés.",
+    "PUT /api/messages/{mid}: la soustraction datetime est hors du try/except de parsing; si un ts naïf est stocké un jour, la réponse sera un 500 opaque. Normaliser via une helper de parsing tolérante.",
+    "L'édition ne conserve pas d'historique de version (content original perdu) — acceptable en MVP mais à noter.",
+    "Frontend: canEdit se base sur l'horloge du client (Date.now()) ; en cas de dérive, le bouton peut s'afficher alors que le backend refuse (423). L'alerte window.alert est fonctionnelle mais non alignée avec le design (préférer un toast)."
+  ],
+  "updated_files": ["/app/backend/tests/test_iter31_message_actions.py"],
+  "success_rate": {"backend": "100% (20/20)", "frontend": "90% (7/8 scénarios; 1 bug de gestion d'erreur deep-link)"},
+  "seed_data_creation": "Messages TEST_iter31_* / TEST_ui31_* dans le DM dm-emp-idriss-malonga et dm-emp-idriss-malonga--emp-karim. Un message a été antidaté (-45 min) en base pour valider la fenêtre de 10 min.",
+  "should_call_test_agent_after_fix": false,
+  "should_main_agent_self_test": true,
+  "test_credentials": "Utilisées: quickfill-employee (Idriss) via LoginPage; auth simulée X-Employee-Id (emp-idriss-malonga / emp-marcus-simeo). Fichier /app/memory/test_credentials.md présent et exploitable.",
+  "context_for_next_testing_agent": "Les endpoints d'édition/like sont PUT /api/messages/{mid} et POST /api/messages/{mid}/like (PAS /channels/{cid}/messages/{mid} comme indiqué dans la demande). La BDD est un vrai MongoDB (motor), pas un mock in-memory: les données persistent entre redémarrages. Le test 'au-delà de 10 min' antidate le ts via motor. Réutiliser /app/backend/tests/test_iter31_message_actions.py comme régression. Bug ouvert: deep-link vers canal supprimé → erreur non gérée dans Messagerie.jsx.",
+  "rca_of_the_issue": "Messagerie.jsx synchronise `active` depuis le paramètre ?ch= sans vérifier que le canal existe/est accessible; reload() appelle api.get(`/channels/${active}/messages`) sans .catch(). Le backend répond correctement 404 (canal supprimé) ou 403 (non-membre), mais la promesse rejetée remonte en erreur runtime non capturée -> overlay CRA en dev, écran vide silencieux en prod. Déclencheur réel: notification 'message' non lue en base pointant vers rh-emp-idriss-malonga alors que ce canal n'existe plus."
+}
