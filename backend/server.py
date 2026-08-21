@@ -7196,8 +7196,20 @@ async def badging_history(days: int = 30):
         p_list = sorted(by_day.get(d, []), key=lambda p: p.get("ts", ""))
         agg = _aggregate_day(p_list)
         meta = await _day_status(me["id"], d, scheds.get(d), agg)
+        sched = scheds.get(d)
+        shift_type = (sched.get("shift_type") if sched else None) or None
+        # Override status when the day is a validated OFF / leave
+        if shift_type in ("off", "rest"):
+            meta["status"] = "off"
+        elif shift_type == "conges":
+            meta["status"] = "congés"
+        elif shift_type == "rtt":
+            meta["status"] = "rtt"
+        elif shift_type == "recup":
+            meta["status"] = "récup"
         rows.append({
             "day": d, **agg, **meta,
+            "shift_type": shift_type,
             "has_punches": len(p_list) > 0,
         })
     return rows

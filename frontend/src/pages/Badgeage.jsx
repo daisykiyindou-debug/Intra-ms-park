@@ -30,18 +30,23 @@ export default function Badgeage() {
 
   const [choiceModal, setChoiceModal] = useState(false); // { blocked_reason, break_locked_until, next_shift, step } | false
   const [state, setState] = useState(null); // /badging/state cache
+  const [weekSchedules, setWeekSchedules] = useState([]); // schedules for current week
+  const [punchHistory, setPunchHistory] = useState([]); // /badging/history v2 for the week
 
   const load = async () => {
-    const [h, t, c, st] = await Promise.all([
+    const [h, t, c, st, ph] = await Promise.all([
       api.get("/badging?filter_range=month").then((r) => r.data),
       api.get("/badging/today-live").then((r) => r.data),
       api.get("/overtime/counter").then((r) => r.data),
       api.get("/badging/state").then((r) => r.data),
+      api.get("/badging/history?days=14").then((r) => r.data),
     ]);
     setHistory(h);
     setToday(t);
     setCounter(c);
     setState(st);
+    setPunchHistory(ph);
+    setWeekSchedules(ph.map((r) => ({ day: r.day, shift_type: r.shift_type })));
   };
 
   useLiveData(load, ["badging", "overtime"]);
@@ -100,10 +105,12 @@ export default function Badgeage() {
       const d = new Date(monday); d.setDate(monday.getDate() + i);
       const iso = d.toISOString().slice(0, 10);
       const entry = history.find((h) => h.day === iso) || (today?.day === iso ? today : null);
-      rows.push({ date: d, iso, entry, dayName: DAYS[i] });
+      const punchDay = punchHistory.find((h) => h.day === iso);
+      const shift_type = punchDay?.shift_type || null;
+      rows.push({ date: d, iso, entry, dayName: DAYS[i], shift_type, punchDay });
     }
     return rows;
-  }, [history, today]);
+  }, [history, today, punchHistory]);
 
   const weekTotal = weekRows.reduce((s, r) => s + (r.entry?.worked_minutes || 0), 0);
   const contractWeek = (me?.contract_hours_weekly || 24) * 60;
@@ -222,15 +229,30 @@ export default function Badgeage() {
             <tbody>
               {weekRows.map((r) => {
                 const isToday = r.iso === new Date().toISOString().slice(0, 10);
+                const isOff = OFF_LIKE.has(r.shift_type);
+                const offLabel = {
+                  off: "🌴 Repos", rest: "🌴 Repos",
+                  conges: "🏖️ Congés", rtt: "📆 RTT", recup: "🔄 Récup",
+                }[r.shift_type];
                 return (
-                  <tr key={r.iso} className={`border-t border-[#071B34]/5 ${isToday ? "bg-[#3BA4FF]/5 font-semibold" : ""}`}>
+                  <tr key={r.iso} className={`border-t border-[#071B34]/5 ${isToday ? "bg-[#3BA4FF]/5 font-semibold" : ""} ${isOff ? "bg-[#F4F7FA]/60" : ""}`}>
                     <td className="p-3 text-[#334155]">{r.dayName}. {r.date.getDate().toString().padStart(2, "0")}/{(r.date.getMonth() + 1).toString().padStart(2, "0")}</td>
-                    <td className="p-3">{r.entry?.clock_in || "-"}</td>
-                    <td className="p-3">{r.entry?.pause_out || "-"}</td>
-                    <td className="p-3">{r.entry?.pause_in || "-"}</td>
-                    <td className="p-3">{r.entry?.clock_out || "-"}</td>
-                    <td className="p-3 text-right font-bold text-[#071B34]">{r.entry ? fmtHM(r.entry.worked_minutes) : "-"}</td>
-                    <td className="p-3 text-right text-[#94A3B8]">{r.entry?.anomaly ? <span className="text-[#EF4444]">{r.entry.anomaly}</span> : "-"}</td>
+                    {isOff ? (
+                      <>
+                        <td colSpan={4} className="p-3 text-[#475569] italic">{offLabel}</td>
+                        <td className="p-3 text-right text-[#94A3B8]">—</td>
+                        <td className="p-3 text-right text-[#94A3B8]">—</td>
+                      </>
+                    ) : (
+                      <>
+                        <td className="p-3">{r.entry?.clock_in || "-"}</td>
+                        <td className="p-3">{r.entry?.pause_out || "-"}</td>
+                        <td className="p-3">{r.entry?.pause_in || "-"}</td>
+                        <td className="p-3">{r.entry?.clock_out || "-"}</td>
+                        <td className="p-3 text-right font-bold text-[#071B34]">{r.entry ? fmtHM(r.entry.worked_minutes) : "-"}</td>
+                        <td className="p-3 text-right text-[#94A3B8]">{r.entry?.anomaly ? <span className="text-[#EF4444]">{r.entry.anomaly}</span> : "-"}</td>
+                      </>
+                    )}
                   </tr>
                 );
               })}
@@ -557,7 +579,13 @@ const STATUS_STYLE = {
   "en retard": "bg-[#EF4444]/15 text-[#B91C1C]",
   absent: "bg-[#F59E0B]/15 text-[#B45309]",
   "à venir": "bg-[#94A3B8]/15 text-[#475569]",
+  off: "bg-[#94A3B8]/20 text-[#475569]",
+  "congés": "bg-[#8B5CF6]/15 text-[#6D28D9]",
+  rtt: "bg-[#3BA4FF]/15 text-[#1D70B8]",
+  "récup": "bg-[#F59E0B]/15 text-[#B45309]",
 };
+
+const OFF_LIKE = new Set(["off", "rest", "conges", "rtt", "recup"]);
 
 function PunchHistorySection() {
   const [rows, setRows] = useState([]);
@@ -656,24 +684,37 @@ function PunchHistorySection() {
           <tbody>
             {shown.length === 0 ? (
               <tr><td colSpan={8} className="text-center py-8 text-sm text-[#475569]">Aucun badgeage sur cette période.</td></tr>
-            ) : shown.map((r) => (
-              <tr key={r.day} className="border-t border-[#071B34]/5" data-testid={`punch-history-row-${r.day}`}>
-                <td className="p-3 text-[#334155] whitespace-nowrap">
-                  {new Date(r.day).toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" })}
-                </td>
-                <td className="p-3 font-mono">{r.clock_in || "—"}</td>
-                <td className="p-3 font-mono">{r.break_out || "—"}</td>
-                <td className="p-3 font-mono">{r.break_in || "—"}</td>
-                <td className="p-3 font-mono">{r.clock_out || "—"}</td>
-                <td className="p-3 text-right font-semibold text-[#071B34]">{fmtHM(r.worked_minutes)}</td>
-                <td className="p-3 text-right text-[#B91C1C]">{r.late_minutes ? fmtHM(r.late_minutes) : "—"}</td>
-                <td className="p-3 text-center">
-                  <span className={`inline-block rounded-full px-2 py-0.5 text-[11px] font-semibold ${STATUS_STYLE[r.status] || "bg-[#F4F7FA] text-[#475569]"}`}>
-                    {r.status}
-                  </span>
-                </td>
-              </tr>
-            ))}
+            ) : shown.map((r) => {
+              const isOff = OFF_LIKE.has(r.shift_type);
+              const offLabel = {
+                off: "Jour de repos", rest: "Jour de repos",
+                conges: "Congés validés", rtt: "RTT validée", recup: "Récupération",
+              }[r.shift_type];
+              return (
+                <tr key={r.day} className={`border-t border-[#071B34]/5 ${isOff ? "bg-[#F4F7FA]/60" : ""}`} data-testid={`punch-history-row-${r.day}`}>
+                  <td className="p-3 text-[#334155] whitespace-nowrap">
+                    {new Date(r.day).toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" })}
+                  </td>
+                  {isOff ? (
+                    <td colSpan={5} className="p-3 text-[#475569] italic">{offLabel}</td>
+                  ) : (
+                    <>
+                      <td className="p-3 font-mono">{r.clock_in || "—"}</td>
+                      <td className="p-3 font-mono">{r.break_out || "—"}</td>
+                      <td className="p-3 font-mono">{r.break_in || "—"}</td>
+                      <td className="p-3 font-mono">{r.clock_out || "—"}</td>
+                      <td className="p-3 text-right font-semibold text-[#071B34]">{fmtHM(r.worked_minutes)}</td>
+                    </>
+                  )}
+                  <td className="p-3 text-right text-[#B91C1C]">{r.late_minutes ? fmtHM(r.late_minutes) : "—"}</td>
+                  <td className="p-3 text-center">
+                    <span className={`inline-block rounded-full px-2 py-0.5 text-[11px] font-semibold ${STATUS_STYLE[r.status] || "bg-[#F4F7FA] text-[#475569]"}`}>
+                      {r.status}
+                    </span>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
