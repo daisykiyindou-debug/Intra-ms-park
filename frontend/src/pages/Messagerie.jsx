@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useSearchParams, Link } from "react-router-dom";
 import {
   Send, Smile, Paperclip, Phone, Video, Search, Users, Plus, X, ArrowLeft,
   Info, MoreVertical, MessageSquare, SlidersHorizontal, Star, Pencil, Trash2, Archive,
   Cake, Check, BellOff, CheckCheck, User as UserIcon, FileText, Image as ImageIcon,
-  UserPlus, UserMinus, Camera,
+  UserPlus, UserMinus, Camera, Receipt,
 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
@@ -1102,9 +1102,32 @@ export default function Messagerie() {
 }
 
 function MessageAttachment({ att }) {
-  const url = absoluteUrl(att?.url);
   const type = att?.type || "";
   const name = att?.name || "Fichier";
+  const kind = att?.kind || "";
+  const rawUrl = att?.url || "";
+
+  // Payslip attachment — clickable in-app card that opens the payslip viewer
+  if (kind === "payslip") {
+    return (
+      <Link
+        to={rawUrl}
+        data-testid="msg-attachment-payslip"
+        className="group flex items-center gap-3 rounded-xl bg-gradient-to-br from-[#3BA4FF]/10 to-[#3BA4FF]/5 hover:from-[#3BA4FF]/20 hover:to-[#3BA4FF]/10 ring-1 ring-[#3BA4FF]/25 px-3 py-2.5 text-[#0B2545] transition-colors"
+      >
+        <div className="h-10 w-10 rounded-lg bg-[#3BA4FF] text-white flex items-center justify-center shrink-0">
+          <Receipt className="h-5 w-5" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="text-[11px] font-semibold uppercase tracking-wider text-[#1D70B8]">Fiche de paie</div>
+          <div className="text-sm font-bold text-[#071B34] truncate">{name}</div>
+          <div className="text-[11px] text-[#3BA4FF] mt-0.5 group-hover:underline">Ouvrir ma fiche de paie →</div>
+        </div>
+      </Link>
+    );
+  }
+
+  const url = absoluteUrl(rawUrl);
   const isImage = type.startsWith("image/");
   if (isImage) {
     return (

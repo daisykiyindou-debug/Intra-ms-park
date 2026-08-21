@@ -3650,12 +3650,11 @@ async def admin_send_payslip(pid: str):
     else:
         await db.channels.update_one({"id": rh_channel_id}, {"$inc": {"unread": 1}})
 
-    payslip_link = f"/documents?payslip={pid}"
-    msg_body = (
+    payslip_link = f"/documents/payslip/{p['employee_id']}/{p['year']}/{p['month']}"
+    msg_content = (
         (p.get("message_body") or "").strip()
-        or f"Bonjour {emp.get('first_name', '')},\n\nVotre fiche de paie de {label} est disponible."
+        or f"Bonjour {emp.get('first_name', '')},\n\nVotre fiche de paie de {label} est disponible ci-dessous."
     )
-    msg_content = f"{msg_body}\n\n📄 [Ouvrir ma fiche de paie]({payslip_link})"
     await db.messages.insert_one({
         "id": _id(),
         "channel_id": rh_channel_id,
