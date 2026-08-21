@@ -6892,6 +6892,7 @@ async def today_live_badging():
 
 MIN_BREAK_MINUTES = 45
 LATE_TOLERANCE_MINUTES = 15
+MAX_SHIFT_MINUTES = 8 * 60  # Auto-close a day after 8h of shift duration if not closed by user
 
 
 def _hm(dt: datetime) -> str:
@@ -6907,6 +6908,58 @@ async def _get_punches(employee_id: str, day: str) -> List[dict]:
     return await db.punches.find(
         {"employee_id": employee_id, "day": day}, {"_id": 0}
     ).sort("ts", 1).to_list(50)
+
+
+async def _auto_close_expired_days(employee_id: str) -> None:
+    """If a day started ≥8h ago and was never manually closed, insert an
+    auto clock_out at clock_in + 8h. Runs lazily on state reads / punches so
+    the day gets clôturée automatically without needing a cron."""
+    now_dt = _now_paris()
+    today = now_dt.date().isoformat()
+    # Look at the last 3 days worth of open sessions (safe window)
+    cutoff = (now_dt.date() - timedelta(days=3)).isoformat()
+    cursor = db.punches.find(
+        {"employee_id": employee_id, "day": {"$gte": cutoff}}, {"_id": 0}
+    )
+    by_day: dict[str, List[dict]] = {}
+    async for p in cursor:
+        by_day.setdefault(p["day"], []).append(p)
+    for day_iso, plist in by_day.items():
+        plist.sort(key=lambda p: p.get("ts", ""))
+        agg = _aggregate_day(plist)
+        if not agg["clock_in"] or agg["is_closed"]:
+            continue
+        # Compute the elapsed minutes since clock_in on that specific day
+        start_dt = _paris_datetime_from_time(day_iso, agg["clock_in"])
+        elapsed = (now_dt - start_dt).total_seconds() / 60
+        if elapsed < MAX_SHIFT_MINUTES:
+            # Not yet expired
+            continue
+        # Force close at clock_in + 8h
+        close_dt = start_dt + timedelta(minutes=MAX_SHIFT_MINUTES)
+        # If a break is still open (no break_in), we also register a break_in at
+        # break_out + MIN_BREAK_MINUTES so the day has coherent data.
+        if agg["break_out"] and not agg["break_in"]:
+            bi_dt = _paris_datetime_from_time(day_iso, agg["break_out"]) + timedelta(minutes=MIN_BREAK_MINUTES)
+            if bi_dt < close_dt:
+                await db.punches.insert_one({
+                    "id": _id(),
+                    "employee_id": employee_id,
+                    "day": day_iso,
+                    "type": "break_in",
+                    "time": _hm(bi_dt),
+                    "ts": bi_dt.isoformat(),
+                    "source": "auto-close",
+                })
+        await db.punches.insert_one({
+            "id": _id(),
+            "employee_id": employee_id,
+            "day": day_iso,
+            "type": "clock_out",
+            "time": _hm(close_dt),
+            "ts": close_dt.isoformat(),
+            "source": "auto-close",
+        })
 
 
 async def _next_scheduled_shift(employee_id: str, after_day: str) -> Optional[dict]:
@@ -7015,6 +7068,7 @@ async def _day_status(employee_id: str, day: str, sched: Optional[dict], agg: di
 @api.get("/badging/state")
 async def badging_state():
     me = await _me()
+    await _auto_close_expired_days(me["id"])
     today = _now_paris().date().isoformat()
     now_hm = _hm(_now_paris())
     punches = await _get_punches(me["id"], today)
@@ -7066,6 +7120,7 @@ class PunchPayload(BaseModel):
 @api.post("/badging/punch")
 async def punch(payload: PunchPayload):
     me = await _me()
+    await _auto_close_expired_days(me["id"])
     today = _now_paris().date().isoformat()
     now_hm = _hm(_now_paris())
     now_dt = _now_paris()
@@ -7120,6 +7175,7 @@ async def punch(payload: PunchPayload):
 @api.get("/badging/history")
 async def badging_history(days: int = 30):
     me = await _me()
+    await _auto_close_expired_days(me["id"])
     days = max(1, min(days, 366))
     today = _now_paris().date()
     from_day = (today - timedelta(days=days - 1)).isoformat()

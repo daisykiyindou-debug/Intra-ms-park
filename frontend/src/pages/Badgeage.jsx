@@ -110,7 +110,12 @@ export default function Badgeage() {
   const dailyTarget = Math.round(contractWeek / 5);
   const monthWorkDaysPassed = Math.max(1, Math.min(22, Math.ceil(new Date().getDate() * 5 / 7)));
   const monthTarget = Math.round(contractWeek * 4.33);
-  const monthTotal = history.reduce((s, h) => s + (h.worked_minutes || 0), 0) + (today?.worked_minutes || 0);
+  // Monthly total resets on the 1st of each month (only counts current-month history).
+  const currentMonthPrefix = new Date().toISOString().slice(0, 7);
+  const monthTotal = history
+    .filter((h) => (h.day || "").startsWith(currentMonthPrefix))
+    .reduce((s, h) => s + (h.worked_minutes || 0), 0)
+    + ((today?.day || "").startsWith(currentMonthPrefix) ? (today?.worked_minutes || 0) : 0);
 
   const dayStatusLabel = today?.clock_out ? "Journée complète" : today?.clock_in ? today.note : "En attente de pointage";
   const dayStatusColor = today?.clock_out ? "bg-[#10B981]/15 text-[#047857]" : today?.clock_in ? "bg-[#3BA4FF]/15 text-[#1D70B8]" : "bg-[#F59E0B]/15 text-[#B45309]";
