@@ -528,10 +528,10 @@ export default function Messagerie() {
             ))}
           </div>
 
-          {/* Conversations list — cap visible height so at most ~10 conversations
-              are shown; the rest is accessible via scroll to avoid an infinite
-              sidebar. */}
-          <div className="flex-1 overflow-y-auto max-h-[calc(10*4.75rem)]" data-testid="msg-conv-list">
+          {/* Conversations list — cap visible height so at most ~5
+              conversations are shown; the rest is accessible via scroll to
+              keep the sidebar compact. */}
+          <div className="flex-1 overflow-y-auto max-h-[380px]" data-testid="msg-conv-list">
             {filtered.length === 0 && (
               <div className="p-10 text-center text-sm text-[#475569]">
                 Aucune conversation.
