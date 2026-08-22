@@ -40,6 +40,38 @@ function initials(name) {
     .toUpperCase();
 }
 
+// Human-friendly "last seen" text based on an ISO timestamp.
+// - < 2 min → "En ligne"
+// - < 60 min → "il y a X min"
+// - same day → "aujourd'hui à HHhMM"
+// - other day → "le JJ/MM/YYYY à HHhMM"
+function formatLastSeen(iso) {
+  if (!iso) return "Hors ligne";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "Hors ligne";
+  const now = new Date();
+  const diffMin = Math.floor((now - d) / 60000);
+  if (diffMin < 2) return "En ligne";
+  if (diffMin < 60) return `Dernière connexion il y a ${diffMin} min`;
+  const hhmm = d.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }).replace(":", "h");
+  if (d.toDateString() === now.toDateString()) {
+    return `Dernière connexion aujourd'hui à ${hhmm}`;
+  }
+  const date = d.toLocaleDateString("fr-FR");
+  return `Dernière connexion le ${date} à ${hhmm}`;
+}
+
+// Format a read-receipt tag ("Vu à HHhMM" or "Vu le JJ/MM/YYYY à HHhMM").
+function formatReadAt(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const hhmm = d.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }).replace(":", "h");
+  const now = new Date();
+  if (d.toDateString() === now.toDateString()) return `Vu à ${hhmm}`;
+  return `Vu le ${d.toLocaleDateString("fr-FR")} à ${hhmm}`;
+}
+
 // Helper — is today the person's birthday? (based on birth_date on the employee)
 function isBirthdayToday(emp) {
   if (!emp?.birth_date) return false;
@@ -77,6 +109,16 @@ export default function Messagerie() {
   const [filterKind, setFilterKind] = useState("all"); // all | dm | group | unread | archived
   // Corporate canals catalog (Service RH, Communication, etc.)
   const [corpCatalog, setCorpCatalog] = useState([]);
+  // Absence auto-reply settings modal
+  const [showAbsence, setShowAbsence] = useState(false);
+  const [absence, setAbsence] = useState({
+    auto_from_planning: true,
+    manual_enabled: false,
+    manual_start: "",
+    manual_end: "",
+    message: "",
+  });
+  const [absenceLoading, setAbsenceLoading] = useState(false);
   const scrollRef = useRef(null);
   const inputRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -394,6 +436,40 @@ export default function Messagerie() {
     }
   }, [composer, corpCatalog.length]);
 
+  // Load absence-reply settings when the modal opens
+  useEffect(() => {
+    if (showAbsence) {
+      api.get("/me/absence-reply")
+        .then((r) => setAbsence({
+          auto_from_planning: !!r.data.auto_from_planning,
+          manual_enabled: !!r.data.manual_enabled,
+          manual_start: r.data.manual_start || "",
+          manual_end: r.data.manual_end || "",
+          message: r.data.message || "",
+        }))
+        .catch(() => {});
+    }
+  }, [showAbsence]);
+
+  const saveAbsence = async () => {
+    setAbsenceLoading(true);
+    try {
+      await api.put("/me/absence-reply", {
+        auto_from_planning: absence.auto_from_planning,
+        manual_enabled: absence.manual_enabled,
+        manual_start: absence.manual_start || null,
+        manual_end: absence.manual_end || null,
+        message: absence.message,
+      });
+      toast.success("Message d'absence enregistré");
+      setShowAbsence(false);
+    } catch {
+      toast.error("Impossible d'enregistrer");
+    } finally {
+      setAbsenceLoading(false);
+    }
+  };
+
   const openCorporate = async (canalKey) => {
     try {
       const { data } = await api.post("/channels/corporate", { canal_key: canalKey });
@@ -434,6 +510,17 @@ export default function Messagerie() {
     }
     return groups;
   }, [messages]);
+
+  // Id of the last own message that has been read by the DM peer.
+  // We only render the "Vu à HHhMM" tag on THAT message to avoid clutter.
+  const lastReadOwnMsgId = useMemo(() => {
+    if (!currentDisplay || currentDisplay._kind !== "dm") return null;
+    let id = null;
+    for (const m of messages) {
+      if (m.author_id === me?.id && m.read_at) id = m.id;
+    }
+    return id;
+  }, [messages, currentDisplay, me?.id]);
 
   return (
     <div className="ms-fade-up">
@@ -490,6 +577,14 @@ export default function Messagerie() {
                 </div>
               )}
             </div>
+            <button
+              onClick={() => setShowAbsence(true)}
+              className="h-10 w-10 rounded-xl bg-[#F4F7FA] hover:bg-[#071B34]/5 text-[#475569] inline-flex items-center justify-center"
+              title="Message d'absence"
+              data-testid="msg-absence-open"
+            >
+              <BellOff className="h-4 w-4" />
+            </button>
             <button
               onClick={() => setComposer("dm")}
               className="h-10 w-10 rounded-xl bg-[#3BA4FF] hover:bg-[#2A8DE0] text-white inline-flex items-center justify-center"
@@ -626,11 +721,24 @@ export default function Messagerie() {
                 {currentDisplay._avatar ? (
                   <div className="relative">
                     <img src={currentDisplay._avatar} alt="" className="h-11 w-11 rounded-full object-cover" />
-                    <span className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full bg-[#10B981] ring-2 ring-white" />
+                    {currentDisplay._kind === "dm" && currentDisplay._other?.is_online && (
+                      <span
+                        data-testid="msg-header-online-dot"
+                        className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full bg-[#10B981] ring-2 ring-white"
+                      />
+                    )}
                   </div>
                 ) : currentDisplay._kind === "dm" ? (
-                  <div className="h-11 w-11 rounded-full bg-[#3BA4FF]/15 text-[#1D70B8] flex items-center justify-center font-bold">
-                    {initials(currentDisplay._display_name)}
+                  <div className="relative">
+                    <div className="h-11 w-11 rounded-full bg-[#3BA4FF]/15 text-[#1D70B8] flex items-center justify-center font-bold">
+                      {initials(currentDisplay._display_name)}
+                    </div>
+                    {currentDisplay._other?.is_online && (
+                      <span
+                        data-testid="msg-header-online-dot"
+                        className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full bg-[#10B981] ring-2 ring-white"
+                      />
+                    )}
                   </div>
                 ) : (
                   <div className="h-11 w-11 rounded-full bg-[#EEF2FF] text-[#4338CA] flex items-center justify-center">
@@ -660,7 +768,11 @@ export default function Messagerie() {
                       <Star className={`h-4 w-4 ${favorites.has(currentDisplay.id) ? "fill-[#F59E0B] text-[#F59E0B]" : "text-[#94A3B8]"}`} />
                     </button>
                   </div>
-                  <div className="text-xs text-[#475569] truncate">{currentDisplay._subtitle}</div>
+                  <div className="text-xs text-[#475569] truncate" data-testid="msg-header-presence">
+                    {currentDisplay._kind === "dm"
+                      ? formatLastSeen(currentDisplay._other?.last_seen_at)
+                      : currentDisplay._subtitle}
+                  </div>
                 </div>
                 <div className="flex items-center gap-1">
                   <IconBtn title="Appel audio" onClick={() => toast.info("Appel audio bientôt disponible")}><Phone className="h-4 w-4" /></IconBtn>
@@ -895,8 +1007,16 @@ export default function Messagerie() {
                               <div className={`mt-1 text-[10px] ${mine ? "text-[#1D4ED8]/70" : "text-[#94A3B8]"} text-right`}>
                                 {new Date(m.ts).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}
                                 {m.edited && <span className="ml-1 italic" data-testid="msg-edited">· Modifié</span>}
+                                {m.is_auto_reply && (
+                                  <span className="ml-1 italic text-[#F59E0B]" data-testid="msg-auto-reply">· Réponse automatique</span>
+                                )}
                                 {mine && <span className="ml-1">✓✓</span>}
                               </div>
+                              {mine && m.id === lastReadOwnMsgId && (
+                                <div className="mt-0.5 text-[10px] text-[#1D4ED8]/70 text-right italic" data-testid="msg-read-receipt">
+                                  {formatReadAt(m.read_at)}
+                                </div>
+                              )}
                               <MessageActions m={m} mine={mine} onChanged={reload} />
                             </div>
                             {mine && (
@@ -1202,6 +1322,106 @@ export default function Messagerie() {
                     </button>
                   ))}
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Absence auto-reply settings modal */}
+      {showAbsence && (
+        <div
+          onClick={() => setShowAbsence(false)}
+          className="fixed inset-0 z-[60] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="bg-white rounded-3xl w-full max-w-lg max-h-[90vh] overflow-hidden flex flex-col"
+            data-testid="msg-absence-modal"
+          >
+            <div className="flex items-center justify-between px-5 py-3 border-b border-[#071B34]/5">
+              <div>
+                <h3 className="text-base font-bold text-[#071B34]">Message d&apos;absence</h3>
+                <p className="text-xs text-[#475569]">Une réponse automatique sera envoyée sur vos DM.</p>
+              </div>
+              <button onClick={() => setShowAbsence(false)} className="h-9 w-9 rounded-lg hover:bg-[#F4F7FA] inline-flex items-center justify-center">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="p-5 space-y-4 flex-1 overflow-y-auto">
+              <label className="flex items-start gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={absence.auto_from_planning}
+                  onChange={(e) => setAbsence((a) => ({ ...a, auto_from_planning: e.target.checked }))}
+                  data-testid="msg-absence-auto"
+                  className="mt-1 h-4 w-4 accent-[#3BA4FF]"
+                />
+                <div>
+                  <div className="text-sm font-semibold text-[#071B34]">Activer automatiquement selon mon planning</div>
+                  <div className="text-xs text-[#475569]">Se déclenche lors d&apos;un congé validé ou d&apos;un jour OFF.</div>
+                </div>
+              </label>
+              <label className="flex items-start gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={absence.manual_enabled}
+                  onChange={(e) => setAbsence((a) => ({ ...a, manual_enabled: e.target.checked }))}
+                  data-testid="msg-absence-manual"
+                  className="mt-1 h-4 w-4 accent-[#3BA4FF]"
+                />
+                <div className="flex-1">
+                  <div className="text-sm font-semibold text-[#071B34]">Activer maintenant pour une période précise</div>
+                  <div className="text-xs text-[#475569] mb-2">Écrase la logique automatique pendant cette période.</div>
+                  {absence.manual_enabled && (
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="ms-overline">Du</label>
+                        <input
+                          type="date"
+                          value={absence.manual_start}
+                          onChange={(e) => setAbsence((a) => ({ ...a, manual_start: e.target.value }))}
+                          data-testid="msg-absence-start"
+                          className="ms-input mt-1"
+                        />
+                      </div>
+                      <div>
+                        <label className="ms-overline">Au</label>
+                        <input
+                          type="date"
+                          value={absence.manual_end}
+                          onChange={(e) => setAbsence((a) => ({ ...a, manual_end: e.target.value }))}
+                          data-testid="msg-absence-end"
+                          className="ms-input mt-1"
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </label>
+              <div>
+                <label className="ms-overline">Message envoyé automatiquement</label>
+                <textarea
+                  value={absence.message}
+                  onChange={(e) => setAbsence((a) => ({ ...a, message: e.target.value }))}
+                  placeholder="Bonjour, je suis actuellement en congé jusqu'au…"
+                  rows={5}
+                  data-testid="msg-absence-message"
+                  className="ms-input mt-1 resize-y"
+                />
+                <div className="text-[11px] text-[#94A3B8] mt-1">Envoyé une fois par heure au maximum pour chaque contact.</div>
+              </div>
+            </div>
+            <div className="px-5 py-3 border-t border-[#071B34]/5 flex items-center justify-end gap-2">
+              <button onClick={() => setShowAbsence(false)} className="px-3 py-2 rounded-xl text-sm text-[#475569] hover:bg-[#F4F7FA]">
+                Annuler
+              </button>
+              <button
+                onClick={saveAbsence}
+                disabled={absenceLoading}
+                data-testid="msg-absence-save"
+                className="ms-btn-primary"
+              >
+                {absenceLoading ? "Enregistrement…" : "Enregistrer"}
+              </button>
             </div>
           </div>
         </div>

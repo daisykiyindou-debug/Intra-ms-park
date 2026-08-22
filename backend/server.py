@@ -1527,7 +1527,113 @@ async def acknowledge_welcome():
 @api.get("/employees")
 async def list_employees():
     items = await db.employees.find({}, {"_id": 0}).to_list(500)
+    # Enrich with live presence status (last_seen_at + is_online)
+    presences = {
+        p["employee_id"]: p.get("last_seen_at")
+        async for p in db.presence.find({}, {"_id": 0})
+    }
+    now = datetime.now(timezone.utc)
+    for e in items:
+        ls = presences.get(e["id"])
+        e["last_seen_at"] = ls
+        e["is_online"] = False
+        if ls:
+            try:
+                dt = datetime.fromisoformat(str(ls).replace("Z", "+00:00"))
+                if (now - dt).total_seconds() < 120:  # < 2 min = online
+                    e["is_online"] = True
+            except Exception:
+                pass
     return items
+
+
+# ─── Presence (heartbeat every ~60s from the frontend)
+@api.post("/presence/ping")
+async def presence_ping():
+    uid = current_user()
+    now_iso = _now()
+    await db.presence.update_one(
+        {"employee_id": uid},
+        {"$set": {"employee_id": uid, "last_seen_at": now_iso}},
+        upsert=True,
+    )
+    return {"ok": True, "last_seen_at": now_iso}
+
+
+# ─── Absence auto-reply
+class AbsenceReply(BaseModel):
+    auto_from_planning: bool = True
+    manual_enabled: bool = False
+    manual_start: Optional[str] = None  # YYYY-MM-DD
+    manual_end: Optional[str] = None    # YYYY-MM-DD
+    message: str = ""
+
+
+DEFAULT_ABSENCE_MESSAGE = (
+    "Bonjour, je suis actuellement absent(e). Je prendrai connaissance de "
+    "votre message dès mon retour. En cas d'urgence, merci de contacter mon responsable."
+)
+
+
+@api.get("/me/absence-reply")
+async def get_my_absence_reply():
+    emp = await db.employees.find_one({"id": current_user()}, {"_id": 0})
+    ar = (emp or {}).get("absence_reply") or {}
+    return {
+        "auto_from_planning": ar.get("auto_from_planning", True),
+        "manual_enabled": ar.get("manual_enabled", False),
+        "manual_start": ar.get("manual_start"),
+        "manual_end": ar.get("manual_end"),
+        "message": ar.get("message") or DEFAULT_ABSENCE_MESSAGE,
+    }
+
+
+@api.put("/me/absence-reply")
+async def put_my_absence_reply(payload: AbsenceReply):
+    data = payload.model_dump()
+    if not (data.get("message") or "").strip():
+        data["message"] = DEFAULT_ABSENCE_MESSAGE
+    await db.employees.update_one(
+        {"id": current_user()},
+        {"$set": {"absence_reply": data}},
+    )
+    return {"ok": True, **data}
+
+
+async def _is_user_absent_today(uid: str) -> tuple[bool, str]:
+    """Return (is_absent, reason) for a given employee based on:
+    - manual toggle covering today (highest priority)
+    - approved leave / OFF day from their planning
+    """
+    emp = await db.employees.find_one({"id": uid}, {"_id": 0})
+    if not emp:
+        return False, ""
+    ar = emp.get("absence_reply") or {}
+    today = _now_paris().date().isoformat()
+    # Manual toggle
+    if ar.get("manual_enabled"):
+        start = ar.get("manual_start") or today
+        end = ar.get("manual_end") or start
+        if start <= today <= end:
+            return True, "manual"
+    # Automatic from planning
+    if ar.get("auto_from_planning", True):
+        # Approved leave request covering today?
+        leave = await db.requests.find_one({
+            "employee_id": uid,
+            "status": "approved",
+            "start_date": {"$lte": today},
+            "end_date": {"$gte": today},
+        }, {"_id": 0})
+        if leave:
+            return True, "leave"
+        # OFF day: no work shift scheduled for today
+        sched = await db.schedules.find_one(
+            {"employee_id": uid, "day": today, "type": "shift"}, {"_id": 0}
+        )
+        if not sched:
+            return True, "off"
+    return False, ""
 
 
 # ─── Dashboard summary
@@ -4324,10 +4430,26 @@ async def _require_channel_member(cid: str) -> tuple[dict, str]:
 
 @api.get("/channels/{cid}/messages")
 async def list_messages(cid: str):
-    await _require_channel_member(cid)
-    return await db.messages.find(
+    ch, uid = await _require_channel_member(cid)
+    msgs = await db.messages.find(
         {"channel_id": cid}, {"_id": 0}
     ).sort("ts", 1).to_list(200)
+    # DM read receipt: the other member's last_read_ts tells us which of my
+    # messages they have already seen. Attach `read_at` to each of *my*
+    # messages sent before that timestamp.
+    if ch.get("is_dm"):
+        others = [m for m in (ch.get("members_ids") or []) if m != uid]
+        if others:
+            other_id = others[0]
+            other_read = await db.channel_reads.find_one(
+                {"employee_id": other_id, "channel_id": cid}, {"_id": 0}
+            )
+            other_last_read_ts = (other_read or {}).get("last_read_ts")
+            if other_last_read_ts:
+                for m in msgs:
+                    if m.get("author_id") == uid and str(m.get("ts") or "") <= str(other_last_read_ts):
+                        m["read_at"] = other_last_read_ts
+    return msgs
 
 
 @api.post("/channels/{cid}/messages")
@@ -4382,6 +4504,48 @@ async def post_message(cid: str, payload: MessageCreate):
                 icon="message-circle",
                 link=f"/messagerie?ch={cid}",
             )
+
+    # ─── Auto-reply on absence (DM only)
+    # If the recipient is currently absent (approved leave, OFF day, or
+    # manual toggle covering today), post an automated reply from them,
+    # once per hour max to avoid spam.
+    if ch and ch.get("is_dm") and not ch.get("is_group"):
+        others = [m for m in (ch.get("members_ids") or []) if m != current_user()]
+        if others:
+            other_id = others[0]
+            is_absent, _reason = await _is_user_absent_today(other_id)
+            if is_absent:
+                # Debounce: skip if we already auto-replied within the last hour
+                last_auto = await db.messages.find_one(
+                    {"channel_id": cid, "author_id": other_id, "is_auto_reply": True},
+                    {"_id": 0}, sort=[("ts", -1)],
+                )
+                debounce_ok = True
+                if last_auto:
+                    try:
+                        last_dt = datetime.fromisoformat(
+                            str(last_auto["ts"]).replace("Z", "+00:00")
+                        )
+                        if (datetime.now(timezone.utc) - last_dt).total_seconds() < 3600:
+                            debounce_ok = False
+                    except Exception:
+                        pass
+                if debounce_ok:
+                    other_emp = await db.employees.find_one(
+                        {"id": other_id}, {"_id": 0}
+                    )
+                    ar = (other_emp or {}).get("absence_reply") or {}
+                    body = (ar.get("message") or "").strip() or DEFAULT_ABSENCE_MESSAGE
+                    auto_msg = {
+                        "id": _id(),
+                        "channel_id": cid,
+                        "author_id": other_id,
+                        "content": body,
+                        "attachments": [],
+                        "ts": _now(),
+                        "is_auto_reply": True,
+                    }
+                    await db.messages.insert_one(auto_msg.copy())
     return await _strip(msg)
 
 

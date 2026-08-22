@@ -14,7 +14,7 @@ Intranet ultra premium (glassmorphism, cartes arrondies) pour les employés de M
 - Auth simulée: header `X-Employee-Id`.
 - Uploads: dossier local `/app/backend/uploads`.
 
-## Fonctionnalités livrées (état actuel — 22 août 2026, iter 32)
+## Fonctionnalités livrées (état actuel — 22 août 2026, iter 33)
 - Authentification simulée + Onboarding: WelcomePopup première connexion.
 - Permissions granulaires (Super Admin / RH / Communication / Employé) appliquées back+front.
 - Dashboard temps réel (horloge Paris, planning du jour, carousel).
@@ -28,8 +28,11 @@ Intranet ultra premium (glassmorphism, cartes arrondies) pour les employés de M
   - like/unlike 👍
   - deep-link notifications avec auto-clear du badge
   - filtrage auto des notifs vers canaux supprimés/inaccessibles
-  - **NEW iter32**: onglet "Canaux" dans la modale Nouveau message (Service RH, Communication, Managers OPS, Département financier, Direction) — 1 canal unique par utilisateur, membres calculés dynamiquement, non-membres bloqués (403)
-  - **NEW iter32**: sidebar limitée à ~10 conversations visibles avec scroll pour les plus anciennes
+  - onglet "Canaux" dans la modale Nouveau message (Service RH, Communication, Managers OPS, Département financier, Direction) — 1 canal unique par utilisateur, membres calculés dynamiquement, non-membres bloqués (403)
+  - sidebar remplit toute la hauteur avec scroll interne indépendant (aside + section, `min-h-0` sur flex containers)
+  - **NEW iter33**: statut de présence dynamique (heartbeat 60s, "En ligne" / "Dernière connexion il y a X min / aujourd'hui à HHhMM / le JJ/MM/YYYY à HHhMM")
+  - **NEW iter33**: read receipts DM ("Vu à HHhMM" sous le dernier message envoyé lu, calculé depuis `channel_reads`)
+  - **NEW iter33**: message d'absence automatique paramétrable depuis la messagerie (icône cloche barrée) — auto (congés validés + jour OFF) + toggle manuel avec dates + message personnalisé, debounce 1h par contact
 - Contacts, Agenda, Formation, Galerie photos, Boîte à idées, CSE & Avantages (e-commerce partenaires).
 - Gestion utilisateurs (wizard admin, réinitialisation de mot de passe).
 

@@ -81,6 +81,28 @@ function App() {
     refreshNotifications();
   }, []);
 
+  // Live presence: ping every 60s while the tab is visible, and once on mount.
+  // Refresh employees every 60s too so the sidebar/chat header reflect online
+  // status changes without requiring a page reload.
+  useEffect(() => {
+    const ping = () => {
+      if (document.visibilityState !== "visible") return;
+      api.post("/presence/ping").catch(() => {});
+    };
+    ping();
+    const t1 = setInterval(ping, 60_000);
+    const t2 = setInterval(() => {
+      if (document.visibilityState === "visible") refreshEmployees();
+    }, 60_000);
+    const onVis = () => { if (document.visibilityState === "visible") ping(); };
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      clearInterval(t1);
+      clearInterval(t2);
+      document.removeEventListener("visibilitychange", onVis);
+    };
+  }, []);
+
   // Global live sync: when any mutation fires notifyLiveRefresh(["me"|"notifications"...])
   // the AppContext-level data reloads instantly, on this tab and other tabs.
   useLiveData(refreshMe, ["me"]);
