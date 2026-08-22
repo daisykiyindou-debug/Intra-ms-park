@@ -380,6 +380,9 @@ class PostCreate(BaseModel):
     hashtags: List[str] = []
     posted_as: Optional[str] = "personal"
     publish_at: Optional[str] = None  # ISO datetime — if in the future the post is scheduled
+    # Audience targeting: empty list = visible by everyone, otherwise visible
+    # only to employees whose `statuses` intersect this list.
+    audience_status_targets: List[str] = []
 
 
 class Comment(BaseModel):
@@ -3124,6 +3127,7 @@ async def list_posts():
     # except for the author (so they see their own drafts) and admins.
     now_iso = _now()
     is_admin = me.get("is_admin") or me.get("can_manage_communication")
+    my_statuses = set(me.get("statuses") or [])
     visible: list[dict] = []
     for p in items:
         pub = p.get("publish_at")
@@ -3133,6 +3137,12 @@ async def list_posts():
             p["is_scheduled"] = True
         else:
             p["is_scheduled"] = False
+        # Audience filtering: if targets are set, only show to matching
+        # employees (author + admins always see their own posts).
+        targets = p.get("audience_status_targets") or []
+        if targets and not is_admin and p.get("author_id") != me.get("id"):
+            if not (my_statuses & set(targets)):
+                continue
         visible.append(p)
     return visible[:50]
 
@@ -3161,6 +3171,7 @@ async def create_post(payload: PostCreate):
         "hashtags": payload.hashtags or [],
         "posted_as": posted_as,
         "publish_at": publish_at,
+        "audience_status_targets": payload.audience_status_targets or [],
         "likes": [],
         "comments": [],
         "created_at": now_iso,
@@ -3171,14 +3182,31 @@ async def create_post(payload: PostCreate):
     is_future = bool(publish_at and publish_at > now_iso)
     if not is_future:
         me_name = f"{me.get('first_name', '')} {me.get('last_name', '')}".strip() or "MS Park"
-        await _broadcast_notification(
-            type="post",
-            title="Nouvelle publication",
-            content=f"{me_name} a publié : {p['title']}",
-            icon="megaphone",
-            link=f"/actualites/{p['id']}",
-            exclude_ids=[current_user()],
-        )
+        targets = payload.audience_status_targets or []
+        if targets:
+            # Only notify employees whose statuses intersect the targets
+            audience = await db.employees.find(
+                {"statuses": {"$in": targets}, "id": {"$ne": current_user()}},
+                {"_id": 0, "id": 1},
+            ).to_list(1000)
+            for e in audience:
+                await _push_notification(
+                    employee_id=e["id"],
+                    type="post",
+                    title="Nouvelle publication",
+                    content=f"{me_name} a publié : {p['title']}",
+                    icon="megaphone",
+                    link=f"/actualites/{p['id']}",
+                )
+        else:
+            await _broadcast_notification(
+                type="post",
+                title="Nouvelle publication",
+                content=f"{me_name} a publié : {p['title']}",
+                icon="megaphone",
+                link=f"/actualites/{p['id']}",
+                exclude_ids=[current_user()],
+            )
     return await _strip(p)
 
 
@@ -6616,6 +6644,9 @@ class NewsCreate(BaseModel):
     # Enhanced button targeting: "news" | "event" | "internal" | "external" | "document"
     target_type: Optional[str] = None
     target_id: Optional[str] = None  # e.g. news id or event id
+    # Audience targeting: which employee statuses can see this carousel item.
+    # Empty = visible by everyone.
+    audience_status_targets: Optional[List[str]] = None
 
 
 @api.post("/admin/news")
@@ -6640,6 +6671,7 @@ async def admin_publish_news(payload: NewsCreate):
         "cta_url": payload.cta_url,
         "target_type": payload.target_type,
         "target_id": payload.target_id,
+        "audience_status_targets": payload.audience_status_targets or [],
         "pinned": bool(payload.pinned),
         "date": _now(),
         "author_id": me["id"],
@@ -6649,14 +6681,30 @@ async def admin_publish_news(payload: NewsCreate):
         "comments": [],
     }
     await db.news.insert_one(item.copy())
-    await _broadcast_notification(
-        type="news",
-        title="Nouvelle actualité",
-        content=item["title"],
-        icon="megaphone",
-        link=f"/actualites/{item['id']}",
-        exclude_ids=[me["id"]],
-    )
+    audience_targets = payload.audience_status_targets or []
+    if audience_targets:
+        emps = await db.employees.find(
+            {"statuses": {"$in": audience_targets}, "id": {"$ne": me["id"]}},
+            {"_id": 0, "id": 1},
+        ).to_list(1000)
+        for e in emps:
+            await _push_notification(
+                employee_id=e["id"],
+                type="news",
+                title="Nouvelle actualité",
+                content=item["title"],
+                icon="megaphone",
+                link=f"/actualites/{item['id']}",
+            )
+    else:
+        await _broadcast_notification(
+            type="news",
+            title="Nouvelle actualité",
+            content=item["title"],
+            icon="megaphone",
+            link=f"/actualites/{item['id']}",
+            exclude_ids=[me["id"]],
+        )
     return await _strip(item)
 
 
@@ -6712,11 +6760,21 @@ async def admin_reorder_news(payload: ReorderPayload):
 
 @api.get("/carousel")
 async def get_carousel():
-    """Public: news marked featured & active, sorted by order (asc)."""
+    """Public: news marked featured & active, sorted by order (asc). Filters
+    audience-restricted items based on the caller's statuses."""
     items = await db.news.find(
         {"featured": True, "active": {"$ne": False}}, {"_id": 0},
-    ).sort([("order", 1), ("date", -1)]).to_list(20)
-    return items
+    ).sort([("order", 1), ("date", -1)]).to_list(50)
+    me = await db.employees.find_one({"id": current_user()}, {"_id": 0}) or {}
+    my_statuses = set(me.get("statuses") or [])
+    is_admin = me.get("is_admin") or me.get("can_manage_communication")
+    out: list[dict] = []
+    for it in items:
+        targets = it.get("audience_status_targets") or []
+        if targets and not is_admin and not (my_statuses & set(targets)):
+            continue
+        out.append(it)
+    return out[:20]
 
 
 # ─── Admin RTT/CP allocation

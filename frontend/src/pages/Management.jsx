@@ -40,6 +40,7 @@ import PayslipsManager from "@/pages/PayslipsManager";
 import IdeasAdmin from "@/pages/IdeasAdmin";
 import PartnersManager from "@/pages/PartnersManager";
 import AdminSalles from "@/pages/AdminSalles";
+import { AudiencePicker } from "@/pages/Actualites";
 import ImageUpload from "@/components/ImageUpload";
 
 const subNav = [
@@ -1295,6 +1296,7 @@ function NewsManager() {
     pinned: false, featured: false, active: true, order: 100,
     image: "", cta_text: "En savoir plus", cta_url: "",
     target_type: "news", target_id: "",
+    audience_status_targets: [],
   });
   const [news, setNews] = useState([]);
   const [posts, setPosts] = useState([]);
@@ -1333,6 +1335,7 @@ function NewsManager() {
         pinned: false, featured: false, active: true, order: 100,
         image: "", cta_text: "En savoir plus", cta_url: "",
         target_type: "news", target_id: "",
+        audience_status_targets: [],
       });
       load();
       notifyLiveRefresh(["news", "carousel"]);
@@ -1510,6 +1513,12 @@ function NewsManager() {
               />
               Active
             </label>
+          </div>
+          <div className="pt-2">
+            <AudiencePicker
+              value={form.audience_status_targets || []}
+              onChange={(v) => setForm({ ...form, audience_status_targets: v })}
+            />
           </div>
           <button
             onClick={publish}

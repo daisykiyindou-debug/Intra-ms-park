@@ -166,9 +166,67 @@ export default function Actualites() {
 
 // ────────────────────── Composer
 
+// Reusable audience picker: pick employee statuses (or "Tous") to restrict
+// who can see the publication.
+const AUDIENCE_STATUSES = [
+  { k: "cdi", l: "CDI" },
+  { k: "cdd", l: "CDD" },
+  { k: "manager", l: "Managers" },
+  { k: "direction", l: "Direction" },
+  { k: "alternant", l: "Alternants" },
+  { k: "stagiaire", l: "Stagiaires" },
+  { k: "extra", l: "Extras" },
+  { k: "prestataire", l: "Prestataires" },
+];
+
+export function AudiencePicker({ value = [], onChange }) {
+  const all = (value || []).length === 0;
+  const toggle = (k) => {
+    const s = new Set(value || []);
+    if (s.has(k)) s.delete(k); else s.add(k);
+    onChange?.(Array.from(s));
+  };
+  return (
+    <div>
+      <label className="text-[10px] uppercase tracking-wider text-[#475569] font-semibold mb-1.5 block">
+        Cible — qui peut voir ?
+      </label>
+      <div className="flex flex-wrap gap-1.5" data-testid="audience-picker">
+        <button
+          type="button"
+          onClick={() => onChange?.([])}
+          data-testid="audience-all"
+          className={`px-3 py-1.5 rounded-full text-xs font-semibold transition ${all ? "bg-[#3BA4FF] text-white shadow" : "bg-[#F4F7FA] text-[#475569]"}`}
+        >
+          Tous les employés
+        </button>
+        {AUDIENCE_STATUSES.map((s) => {
+          const on = (value || []).includes(s.k);
+          return (
+            <button
+              key={s.k}
+              type="button"
+              onClick={() => toggle(s.k)}
+              data-testid={`audience-${s.k}`}
+              className={`px-3 py-1.5 rounded-full text-xs font-semibold transition ${on ? "bg-[#7C3AED] text-white shadow" : "bg-[#F4F7FA] text-[#475569]"}`}
+            >
+              {s.l}
+            </button>
+          );
+        })}
+      </div>
+      <div className="text-[10px] text-[#94A3B8] mt-1">
+        {all ? "Visible par toute l'entreprise." : `Visible uniquement par les employés ayant l'un des statuts sélectionnés.`}
+      </div>
+    </div>
+  );
+}
+
 function AdminComposer({ me, onPublished, canUseOfficial = true }) {
   const isCommOnly = !me?.is_admin && !!me?.can_manage_communication;
-  const showOfficialToggle = !isCommOnly && canUseOfficial;
+  // Per product decision: admins & comm editors always publish as MS Park
+  // (never propose the personal account for news publishing).
+  const showOfficialToggle = false;
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
@@ -177,13 +235,12 @@ function AdminComposer({ me, onPublished, canUseOfficial = true }) {
   const [attachments, setAttachments] = useState([]);
   const [links, setLinks] = useState([]);
   const [linkDraft, setLinkDraft] = useState("");
-  const [postedAs, setPostedAs] = useState(
-    isCommOnly ? "official" : "personal"
-  );
-  // If the admin is in user mode, they can only post as themselves.
+  const [postedAs, setPostedAs] = useState("official");
+  const [audienceTargets, setAudienceTargets] = useState([]); // empty = all
+  // Force official identity as soon as the user is entitled to use it.
   useEffect(() => {
-    if (!canUseOfficial && postedAs === "official") setPostedAs("personal");
-  }, [canUseOfficial, postedAs]);
+    if (canUseOfficial || isCommOnly) setPostedAs("official");
+  }, [canUseOfficial, isCommOnly]);
   const [publishing, setPublishing] = useState(false);
   const [showGallery, setShowGallery] = useState(false);
   const [showAttachments, setShowAttachments] = useState(false);
@@ -217,6 +274,7 @@ function AdminComposer({ me, onPublished, canUseOfficial = true }) {
         links,
         posted_as: postedAs,
         publish_at: publishIso,
+        audience_status_targets: audienceTargets,
       });
       toast.success(publishIso && new Date(publishIso) > new Date()
         ? "Publication programmée !"
@@ -227,6 +285,7 @@ function AdminComposer({ me, onPublished, canUseOfficial = true }) {
       setAttachments([]);
       setLinks([]);
       setPublishAt("");
+      setAudienceTargets([]);
       setShowGallery(false);
       setShowAttachments(false);
       setShowLinkInput(false);
@@ -388,6 +447,8 @@ function AdminComposer({ me, onPublished, canUseOfficial = true }) {
           ))}
         </select>
       </div>
+
+      <AudiencePicker value={audienceTargets} onChange={setAudienceTargets} />
 
       <div>
         <label className="text-[10px] uppercase tracking-wider text-[#475569] font-semibold mb-1.5 block">
