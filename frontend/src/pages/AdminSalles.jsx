@@ -82,6 +82,10 @@ export default function AdminSalles() {
 
   return (
     <div className="ms-fade-up">
+      {editing ? (
+        <RoomEditor room={editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load(); }} />
+      ) : (
+      <>
       <div className="flex items-start justify-between gap-4 mb-6">
         <div>
           <h1 className="text-3xl font-bold text-[#071B34] tracking-tight flex items-center gap-2">
@@ -194,8 +198,8 @@ export default function AdminSalles() {
         </div>
       )}
 
-      {editing && (
-        <RoomEditor room={editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load(); }} />
+      {editing && null /* handled at top */}
+      </>
       )}
     </div>
   );
@@ -327,7 +331,6 @@ function RoomEditor({ room, onClose, onSaved }) {
         ...form,
         capacity: Number(form.capacity) || 1,
         min_duration_minutes: Number(form.min_duration_minutes) || 15,
-        // Sync is_active from status
         is_active: form.status === "available",
       };
       if (isNew) await api.post("/admin/rooms", body);
@@ -340,204 +343,213 @@ function RoomEditor({ room, onClose, onSaved }) {
   };
 
   const photos = form.photos && form.photos.length > 0 ? form.photos : (form.photo_url ? [form.photo_url] : []);
+  const bannerPhoto = photos[carouselIdx % Math.max(1, photos.length)] || DEFAULT_PHOTO;
   const statusMeta = STATUS_META[form.status] || STATUS_META.available;
 
-  return (
-    <div onClick={onClose} className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-start justify-center p-4 overflow-y-auto">
-      <div onClick={(e) => e.stopPropagation()} className="bg-white rounded-3xl w-full max-w-5xl my-8 overflow-hidden" data-testid="admin-room-modal">
-        <div className="flex items-center justify-between px-5 py-3 border-b border-[#071B34]/5">
+  if (preview) {
+    return (
+      <div className="ms-fade-up" data-testid="admin-room-editor">
+        <div className="mb-5 flex items-center gap-3">
+          <button onClick={() => setPreview(false)} className="ms-btn-secondary"><ChevronLeft className="h-4 w-4" /> Retour à l&apos;édition</button>
           <div>
-            <h3 className="text-base font-bold text-[#071B34]">{isNew ? "Créer une nouvelle salle" : "Modifier la salle"}</h3>
-            <p className="text-xs text-[#475569] mt-0.5">Toute modification est instantanément visible côté employé.</p>
+            <div className="text-[11px] uppercase tracking-widest text-[#94A3B8]">Aperçu employé</div>
+            <h1 className="text-2xl font-bold text-[#071B34]">{form.name || "Nom de la salle"}</h1>
           </div>
-          <div className="flex items-center gap-2">
-            <button onClick={() => setPreview((p) => !p)} className="ms-btn-secondary" data-testid="admin-room-preview">
-              <Eye className="h-4 w-4" /> {preview ? "Éditer" : "Aperçu employé"}
-            </button>
-            <button onClick={onClose} className="h-9 w-9 rounded-lg hover:bg-[#F4F7FA] inline-flex items-center justify-center">
-              <X className="h-4 w-4" />
-            </button>
+        </div>
+        <PreviewCard form={form} photos={photos} />
+      </div>
+    );
+  }
+
+  return (
+    <div className="ms-fade-up" data-testid="admin-room-editor">
+      {/* Header */}
+      <div className="mb-5 flex items-center gap-3 flex-wrap">
+        <button onClick={onClose} className="ms-btn-secondary" data-testid="admin-editor-back"><ChevronLeft className="h-4 w-4" /> Retour</button>
+        <div className="flex-1">
+          <div className="text-[11px] uppercase tracking-widest text-[#94A3B8]">Salles de réunion</div>
+          <h1 className="text-2xl font-bold text-[#071B34]">
+            {isNew ? "Créer une nouvelle salle" : `Modifier — ${form.name || "Sans nom"}`}
+          </h1>
+          <p className="text-xs text-[#475569] mt-1">Toute modification est instantanément visible côté employé.</p>
+        </div>
+        <button onClick={() => setPreview(true)} className="ms-btn-secondary" data-testid="admin-room-preview">
+          <Eye className="h-4 w-4" /> Aperçu employé
+        </button>
+        <button onClick={save} disabled={saving} className="ms-btn-primary" data-testid="admin-room-save">
+          <Sparkles className="h-4 w-4" /> {saving ? "Enregistrement…" : (isNew ? "Publier la salle" : "Enregistrer")}
+        </button>
+      </div>
+
+      {/* Big banner with carousel + main infos — same layout as employee side */}
+      <div className="ms-card overflow-hidden mb-5">
+        <div className="relative h-56 sm:h-72 bg-black">
+          <img src={bannerPhoto} onError={(e) => { e.currentTarget.src = DEFAULT_PHOTO; }} alt="" className="w-full h-full object-cover" />
+          {photos.length > 1 && (
+            <>
+              <button onClick={() => setCarouselIdx((i) => (i - 1 + photos.length) % photos.length)} className="absolute left-3 top-1/2 -translate-y-1/2 h-10 w-10 rounded-full bg-white/90 hover:bg-white shadow inline-flex items-center justify-center" data-testid="editor-carousel-prev">
+                <ChevronLeft className="h-4 w-4" />
+              </button>
+              <button onClick={() => setCarouselIdx((i) => (i + 1) % photos.length)} className="absolute right-3 top-1/2 -translate-y-1/2 h-10 w-10 rounded-full bg-white/90 hover:bg-white shadow inline-flex items-center justify-center" data-testid="editor-carousel-next">
+                <ChevronRight className="h-4 w-4" />
+              </button>
+              <div className="absolute bottom-3 left-0 right-0 flex justify-center gap-1.5">
+                {photos.map((_, i) => (
+                  <button key={i} onClick={() => setCarouselIdx(i)}
+                    className={`h-1.5 rounded-full transition-all ${i === carouselIdx ? "w-6 bg-white" : "w-1.5 bg-white/60"}`} />
+                ))}
+              </div>
+            </>
+          )}
+          <span className={`absolute top-3 left-3 text-[10px] font-bold uppercase tracking-widest px-2 py-1 rounded-full ${statusMeta.cls}`}>
+            {statusMeta.l}
+          </span>
+        </div>
+      </div>
+
+      {/* Content grid, structured like the employee page */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+        {/* Left column — main form */}
+        <div className="lg:col-span-2 space-y-5">
+          <div className="ms-card p-5 space-y-4">
+            <div className="text-xs uppercase tracking-widest font-semibold text-[#475569]">Identité de la salle</div>
+            <div>
+              <label className="ms-overline">Nom de la salle *</label>
+              <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="ms-input mt-1" placeholder="Ex : Salle Horizon" data-testid="admin-room-name" />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="ms-overline">Bâtiment</label>
+                <input value={form.building || ""} onChange={(e) => setForm({ ...form, building: e.target.value })} className="ms-input mt-1" placeholder="Ex : Bureaux" data-testid="admin-room-building" />
+              </div>
+              <div>
+                <label className="ms-overline">Étage</label>
+                <input value={form.floor || ""} onChange={(e) => setForm({ ...form, floor: e.target.value })} className="ms-input mt-1" placeholder="Ex : 2ᵉ étage" data-testid="admin-room-floor" />
+              </div>
+              <div>
+                <label className="ms-overline">Zone</label>
+                <input value={form.zone || ""} onChange={(e) => setForm({ ...form, zone: e.target.value })} className="ms-input mt-1" placeholder="Ex : Aile Est" data-testid="admin-room-zone" />
+              </div>
+              <div>
+                <label className="ms-overline">Numéro</label>
+                <input value={form.room_number || ""} onChange={(e) => setForm({ ...form, room_number: e.target.value })} className="ms-input mt-1" placeholder="Ex : 204" data-testid="admin-room-number" />
+              </div>
+              <div>
+                <label className="ms-overline">Capacité maximale</label>
+                <input type="number" min={1} value={form.capacity} onChange={(e) => setForm({ ...form, capacity: e.target.value })} className="ms-input mt-1" data-testid="admin-room-capacity" />
+              </div>
+              <div>
+                <label className="ms-overline">Durée minimale (min)</label>
+                <input type="number" min={5} step={5} value={form.min_duration_minutes || 15} onChange={(e) => setForm({ ...form, min_duration_minutes: e.target.value })} className="ms-input mt-1" data-testid="admin-room-mindur" />
+              </div>
+            </div>
+            <div>
+              <label className="ms-overline">Description</label>
+              <textarea rows={3} value={form.description || ""} onChange={(e) => setForm({ ...form, description: e.target.value })} className="ms-input mt-1 resize-y" data-testid="admin-room-desc" placeholder="Décrivez l'ambiance, l'usage recommandé…" />
+            </div>
+          </div>
+
+          <div className="ms-card p-5 space-y-4">
+            <div className="text-xs uppercase tracking-widest font-semibold text-[#475569]">Équipements et services</div>
+            <div>
+              <label className="ms-overline">Équipements disponibles</label>
+              <div className="mt-1 flex flex-wrap gap-1.5">
+                {EQUIPMENT_OPTIONS.map(([k, l]) => {
+                  const on = (form.equipments || []).includes(k);
+                  return (
+                    <button key={k} onClick={() => toggleArr("equipments", k)} className={`px-3 py-1.5 rounded-full text-[12px] font-semibold ${on ? "bg-[#3BA4FF] text-white" : "bg-[#F4F7FA] text-[#475569]"}`} data-testid={`admin-room-eq-${k}`}>
+                      {l}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+            <div>
+              <label className="ms-overline">Services disponibles</label>
+              <div className="mt-1 flex flex-wrap gap-1.5">
+                {SERVICE_OPTIONS.map(([k, l]) => {
+                  const on = (form.services || []).includes(k);
+                  return (
+                    <button key={k} onClick={() => toggleArr("services", k)} className={`px-3 py-1.5 rounded-full text-[12px] font-semibold ${on ? "bg-[#F59E0B] text-white" : "bg-[#F4F7FA] text-[#475569]"}`} data-testid={`admin-room-svc-${k}`}>
+                      {l}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
           </div>
         </div>
 
-        {preview ? (
-          <PreviewCard form={form} photos={photos} />
-        ) : (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-0 max-h-[70vh] overflow-y-auto">
-            <div className="p-5 space-y-4 border-r border-[#071B34]/5">
-              <div>
-                <label className="ms-overline">Nom de la salle *</label>
-                <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="ms-input mt-1" placeholder="Ex : Salle Horizon" data-testid="admin-room-name" />
+        {/* Right column — photos + status */}
+        <div className="space-y-5">
+          <div className="ms-card p-5 space-y-4">
+            <div className="text-xs uppercase tracking-widest font-semibold text-[#475569]">Photos</div>
+            <div>
+              <label className="ms-overline">Photo principale</label>
+              <div className="mt-1 rounded-xl bg-[#F8FAFC] p-3 space-y-2">
+                <img src={form.photo_url || DEFAULT_PHOTO} onError={(e) => { e.currentTarget.src = DEFAULT_PHOTO; }} alt="" className="w-full h-32 object-cover rounded-lg" />
+                <input value={form.photo_url || ""} onChange={(e) => setForm({ ...form, photo_url: e.target.value })} placeholder="URL de la photo" className="ms-input text-xs" data-testid="admin-room-photo-url" />
+                <button onClick={() => mainFileRef.current?.click()} disabled={uploading} className="ms-btn-secondary text-xs w-full justify-center" data-testid="admin-room-photo-upload">
+                  <Upload className="h-3.5 w-3.5" /> {uploading ? "Envoi…" : "Importer depuis la galerie"}
+                </button>
+                <input ref={mainFileRef} type="file" accept="image/*" hidden onChange={onMainUpload} />
               </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="ms-overline">Bâtiment</label>
-                  <input value={form.building || ""} onChange={(e) => setForm({ ...form, building: e.target.value })} className="ms-input mt-1" placeholder="Ex : Bureaux" data-testid="admin-room-building" />
-                </div>
-                <div>
-                  <label className="ms-overline">Étage</label>
-                  <input value={form.floor || ""} onChange={(e) => setForm({ ...form, floor: e.target.value })} className="ms-input mt-1" placeholder="Ex : 2ᵉ étage" data-testid="admin-room-floor" />
-                </div>
-                <div>
-                  <label className="ms-overline">Zone</label>
-                  <input value={form.zone || ""} onChange={(e) => setForm({ ...form, zone: e.target.value })} className="ms-input mt-1" placeholder="Ex : Aile Est" data-testid="admin-room-zone" />
-                </div>
-                <div>
-                  <label className="ms-overline">Numéro</label>
-                  <input value={form.room_number || ""} onChange={(e) => setForm({ ...form, room_number: e.target.value })} className="ms-input mt-1" placeholder="Ex : 204" data-testid="admin-room-number" />
-                </div>
+            </div>
+            <div>
+              <div className="flex items-center justify-between">
+                <label className="ms-overline">Galerie carrousel ({(form.photos || []).length})</label>
+                <button onClick={() => galleryFileRef.current?.click()} disabled={uploading} className="text-xs font-semibold text-[#3BA4FF] hover:underline inline-flex items-center gap-1" data-testid="admin-room-gallery-upload">
+                  <ImageIcon className="h-3.5 w-3.5" /> Ajouter
+                </button>
+                <input ref={galleryFileRef} type="file" accept="image/*" multiple hidden onChange={onGalleryUpload} />
               </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="ms-overline">Capacité maximale</label>
-                  <input type="number" min={1} value={form.capacity} onChange={(e) => setForm({ ...form, capacity: e.target.value })} className="ms-input mt-1" data-testid="admin-room-capacity" />
-                </div>
-                <div>
-                  <label className="ms-overline">Durée minimale (min)</label>
-                  <input type="number" min={5} step={5} value={form.min_duration_minutes || 15} onChange={(e) => setForm({ ...form, min_duration_minutes: e.target.value })} className="ms-input mt-1" data-testid="admin-room-mindur" />
-                </div>
-              </div>
-
-              <div>
-                <label className="ms-overline">Description</label>
-                <textarea rows={3} value={form.description || ""} onChange={(e) => setForm({ ...form, description: e.target.value })} className="ms-input mt-1 resize-y" data-testid="admin-room-desc" />
-              </div>
-
-              <div>
-                <label className="ms-overline">Équipements</label>
-                <div className="mt-1 flex flex-wrap gap-1.5">
-                  {EQUIPMENT_OPTIONS.map(([k, l]) => {
-                    const on = (form.equipments || []).includes(k);
-                    return (
-                      <button key={k} onClick={() => toggleArr("equipments", k)} className={`px-2.5 py-1 rounded-full text-[11px] font-semibold ${on ? "bg-[#3BA4FF] text-white" : "bg-[#F4F7FA] text-[#475569]"}`} data-testid={`admin-room-eq-${k}`}>
-                        {l}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <div>
-                <label className="ms-overline">Services disponibles</label>
-                <div className="mt-1 flex flex-wrap gap-1.5">
-                  {SERVICE_OPTIONS.map(([k, l]) => {
-                    const on = (form.services || []).includes(k);
-                    return (
-                      <button key={k} onClick={() => toggleArr("services", k)} className={`px-2.5 py-1 rounded-full text-[11px] font-semibold ${on ? "bg-[#F59E0B] text-white" : "bg-[#F4F7FA] text-[#475569]"}`} data-testid={`admin-room-svc-${k}`}>
-                        {l}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <div>
-                <label className="ms-overline">Statut</label>
-                <div className="mt-1 flex gap-2">
-                  {Object.entries(STATUS_META).map(([k, m]) => (
-                    <button key={k} onClick={() => setForm({ ...form, status: k })} data-testid={`admin-room-status-${k}`}
-                      className={`px-3 py-2 rounded-xl text-sm font-semibold flex-1 ${form.status === k ? `${m.cls} ring-2 ring-current/40` : "bg-[#F4F7FA] text-[#475569]"}`}>
-                      {m.l}
+              <div className="mt-2 grid grid-cols-3 gap-2">
+                {(form.photos || []).map((p, i) => (
+                  <div key={i} className="relative rounded-lg overflow-hidden group aspect-video bg-[#F4F7FA]" data-testid={`admin-room-photo-${i}`}>
+                    <img src={p} alt="" onError={(e) => { e.currentTarget.src = DEFAULT_PHOTO; }} className="w-full h-full object-cover" />
+                    <button onClick={() => removePhoto(i)} className="absolute top-1 right-1 h-6 w-6 rounded-full bg-white/90 hover:bg-white shadow inline-flex items-center justify-center text-red-600 opacity-0 group-hover:opacity-100">
+                      <Trash2 className="h-3 w-3" />
                     </button>
-                  ))}
-                </div>
-                {form.status === "maintenance" && (
-                  <input
-                    className="ms-input mt-2"
-                    placeholder="Note de maintenance (ex : peinture en cours jusqu'au 30/08)"
-                    value={form.maintenance_note || ""}
-                    onChange={(e) => setForm({ ...form, maintenance_note: e.target.value })}
-                    data-testid="admin-room-maint-note"
-                  />
+                  </div>
+                ))}
+                {(form.photos || []).length === 0 && (
+                  <div className="col-span-3 rounded-lg bg-[#F8FAFC] p-6 text-center text-xs text-[#94A3B8]">
+                    Aucune photo secondaire. Ajoutez plusieurs photos pour créer un carrousel côté employé.
+                  </div>
                 )}
               </div>
-
-              <label className="flex items-center gap-2 cursor-pointer rounded-xl bg-[#F8FAFC] p-3">
-                <input
-                  type="checkbox"
-                  checked={form.status === "available"}
-                  onChange={(e) => setForm({ ...form, status: e.target.checked ? "available" : "unavailable" })}
-                  className="h-4 w-4 accent-[#3BA4FF]"
-                  data-testid="admin-room-allow"
-                />
-                <span className="text-sm text-[#334155]">Autoriser la réservation par les collaborateurs</span>
-              </label>
-            </div>
-
-            {/* Right column — photos */}
-            <div className="p-5 space-y-4">
-              <div>
-                <label className="ms-overline">Photo principale</label>
-                <div className="mt-1 rounded-2xl bg-[#F8FAFC] p-3 flex items-center gap-3">
-                  <img src={form.photo_url || DEFAULT_PHOTO} onError={(e) => { e.currentTarget.src = DEFAULT_PHOTO; }} alt="" className="h-20 w-28 object-cover rounded-lg" />
-                  <div className="flex-1 space-y-2">
-                    <input value={form.photo_url || ""} onChange={(e) => setForm({ ...form, photo_url: e.target.value })} placeholder="URL de la photo" className="ms-input" data-testid="admin-room-photo-url" />
-                    <button onClick={() => mainFileRef.current?.click()} disabled={uploading} className="ms-btn-secondary text-xs" data-testid="admin-room-photo-upload">
-                      <Upload className="h-3.5 w-3.5" /> {uploading ? "Envoi…" : "Importer depuis la galerie"}
-                    </button>
-                    <input ref={mainFileRef} type="file" accept="image/*" hidden onChange={onMainUpload} />
-                  </div>
-                </div>
-              </div>
-
-              <div>
-                <div className="flex items-center justify-between">
-                  <label className="ms-overline">Galerie ({(form.photos || []).length})</label>
-                  <button onClick={() => galleryFileRef.current?.click()} disabled={uploading} className="ms-btn-secondary text-xs" data-testid="admin-room-gallery-upload">
-                    <ImageIcon className="h-3.5 w-3.5" /> Ajouter des photos
-                  </button>
-                  <input ref={galleryFileRef} type="file" accept="image/*" multiple hidden onChange={onGalleryUpload} />
-                </div>
-                <div className="mt-2 grid grid-cols-3 gap-2">
-                  {(form.photos || []).map((p, i) => (
-                    <div key={i} className="relative rounded-lg overflow-hidden group" data-testid={`admin-room-photo-${i}`}>
-                      <img src={p} alt="" onError={(e) => { e.currentTarget.src = DEFAULT_PHOTO; }} className="w-full h-20 object-cover" />
-                      <button onClick={() => removePhoto(i)} className="absolute top-1 right-1 h-6 w-6 rounded-full bg-white/90 hover:bg-white shadow inline-flex items-center justify-center text-red-600 opacity-0 group-hover:opacity-100">
-                        <Trash2 className="h-3 w-3" />
-                      </button>
-                    </div>
-                  ))}
-                  {(form.photos || []).length === 0 && (
-                    <div className="col-span-3 rounded-lg bg-[#F8FAFC] p-6 text-center text-xs text-[#94A3B8]">
-                      Aucune photo secondaire. Ajoutez plusieurs photos pour créer un carrousel côté employé.
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {photos.length > 0 && (
-                <div>
-                  <label className="ms-overline">Aperçu carrousel</label>
-                  <div className="relative mt-1 rounded-xl overflow-hidden bg-black h-40">
-                    <img src={photos[carouselIdx % photos.length]} alt="" onError={(e) => { e.currentTarget.src = DEFAULT_PHOTO; }} className="w-full h-full object-cover" />
-                    {photos.length > 1 && (
-                      <>
-                        <button onClick={() => setCarouselIdx((i) => (i - 1 + photos.length) % photos.length)} className="absolute left-2 top-1/2 -translate-y-1/2 h-8 w-8 rounded-full bg-white/90 hover:bg-white shadow inline-flex items-center justify-center">
-                          <ChevronLeft className="h-4 w-4" />
-                        </button>
-                        <button onClick={() => setCarouselIdx((i) => (i + 1) % photos.length)} className="absolute right-2 top-1/2 -translate-y-1/2 h-8 w-8 rounded-full bg-white/90 hover:bg-white shadow inline-flex items-center justify-center">
-                          <ChevronRight className="h-4 w-4" />
-                        </button>
-                      </>
-                    )}
-                  </div>
-                </div>
-              )}
             </div>
           </div>
-        )}
 
-        <div className="px-5 py-3 border-t border-[#071B34]/5 flex items-center justify-between">
-          <div className="text-xs text-[#475569]">
-            Statut publié : <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-widest ${statusMeta.cls}`}>{statusMeta.l}</span>
-          </div>
-          <div className="flex gap-2">
-            <button onClick={onClose} className="px-3 py-2 rounded-xl text-sm text-[#475569] hover:bg-[#F4F7FA]">Annuler</button>
-            <button onClick={save} disabled={saving} className="ms-btn-primary" data-testid="admin-room-save">
-              <Sparkles className="h-4 w-4" /> {saving ? "Enregistrement…" : (isNew ? "Publier la salle" : "Enregistrer")}
-            </button>
+          <div className="ms-card p-5 space-y-3">
+            <div className="text-xs uppercase tracking-widest font-semibold text-[#475569]">Statut</div>
+            <div className="grid grid-cols-3 gap-2">
+              {Object.entries(STATUS_META).map(([k, m]) => (
+                <button key={k} onClick={() => setForm({ ...form, status: k })} data-testid={`admin-room-status-${k}`}
+                  className={`px-3 py-2 rounded-xl text-sm font-semibold ${form.status === k ? `${m.cls} ring-2 ring-current/40` : "bg-[#F4F7FA] text-[#475569]"}`}>
+                  {m.l}
+                </button>
+              ))}
+            </div>
+            {form.status === "maintenance" && (
+              <input
+                className="ms-input"
+                placeholder="Note de maintenance (ex : peinture en cours jusqu'au 30/08)"
+                value={form.maintenance_note || ""}
+                onChange={(e) => setForm({ ...form, maintenance_note: e.target.value })}
+                data-testid="admin-room-maint-note"
+              />
+            )}
+            <label className="flex items-center gap-2 cursor-pointer rounded-xl bg-[#F8FAFC] p-3">
+              <input
+                type="checkbox"
+                checked={form.status === "available"}
+                onChange={(e) => setForm({ ...form, status: e.target.checked ? "available" : "unavailable" })}
+                className="h-4 w-4 accent-[#3BA4FF]"
+                data-testid="admin-room-allow"
+              />
+              <span className="text-sm text-[#334155]">Autoriser la réservation par les collaborateurs</span>
+            </label>
           </div>
         </div>
       </div>
