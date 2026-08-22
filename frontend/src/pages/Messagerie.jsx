@@ -437,7 +437,7 @@ export default function Messagerie() {
 
   return (
     <div className="ms-fade-up">
-      <div className="ms-card overflow-hidden grid grid-cols-1 lg:grid-cols-[340px_1fr] min-h-[calc(100vh-160px)]">
+      <div className="ms-card overflow-hidden grid grid-cols-1 lg:grid-cols-[340px_1fr] h-[calc(100vh-160px)]">
         {/* ── LEFT column: conversations ── */}
         <aside className={`border-r border-[#071B34]/5 flex flex-col ${mobileShowChat ? "hidden lg:flex" : "flex"}`}>
           {/* Search + compose */}
