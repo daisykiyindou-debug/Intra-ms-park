@@ -142,14 +142,16 @@ export default function Sidebar({ open, onClose }) {
       "view_expenses", "approve_expenses", "export_data", "view_stats", "full_admin", "add_gallery"].includes(p)
   );
 
+  const tagSection = (arr, section) => arr.map((it) => it.divider ? it : ({ ...it, section }));
+
   const items = isSuperAdmin
-    ? [...superAdminBase, ...(showAdmin ? adminNav : [])]
+    ? [...superAdminBase, ...(showAdmin ? tagSection(adminNav, "admin") : [])]
     : isAdmin
-    ? [...employeeNav, ...(showAdmin ? adminNav : [])]
+    ? [...employeeNav, ...(showAdmin ? tagSection(adminNav, "admin") : [])]
     : isComm
-    ? [...employeeNav, ...(showAdmin ? [...commNav, ...filterByPerm(adminNav).filter((i) => !i.divider)] : [])]
+    ? [...employeeNav, ...(showAdmin ? [...tagSection(commNav, "comm"), ...tagSection(filterByPerm(adminNav).filter((i) => !i.divider), "admin")] : [])]
     : hasAnyMgmtPerm && showAdmin
-    ? [...employeeNav, ...filterByPerm(adminNav)]
+    ? [...employeeNav, ...tagSection(filterByPerm(adminNav), "admin")]
     : employeeNav;
 
   return (
@@ -202,28 +204,44 @@ export default function Sidebar({ open, onClose }) {
                 to={item.to}
                 onClick={onClose}
                 data-testid={`nav-${item.key}`}
-                className={({ isActive }) =>
-                  `group flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-200 ${
-                    isActive
-                      ? "bg-[#3BA4FF]/15 text-white shadow-inner"
-                      : "text-white/70 hover:text-white hover:bg-white/5"
-                  }`
-                }
+                className={({ isActive }) => {
+                  const isAdminItem = item.section === "admin";
+                  const isCommItem = item.section === "comm";
+                  const base = "group flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-200";
+                  if (isActive) {
+                    if (isAdminItem) return `${base} bg-[#A78BFA]/20 text-white shadow-inner`;
+                    if (isCommItem) return `${base} bg-[#F59E0B]/20 text-white shadow-inner`;
+                    return `${base} bg-[#3BA4FF]/15 text-white shadow-inner`;
+                  }
+                  if (isAdminItem) return `${base} text-[#DDD6FE] hover:text-white hover:bg-[#A78BFA]/10 border-l-2 border-[#A78BFA]/30 ml-1`;
+                  if (isCommItem) return `${base} text-[#FDE68A] hover:text-white hover:bg-[#F59E0B]/10 border-l-2 border-[#F59E0B]/30 ml-1`;
+                  return `${base} text-white/70 hover:text-white hover:bg-white/5`;
+                }}
               >
-                {({ isActive }) => (
-                  <>
-                    <item.icon
-                      className={`h-[18px] w-[18px] transition-colors ${
-                        isActive ? "text-[#3BA4FF]" : "text-white/60 group-hover:text-white"
-                      }`}
-                      strokeWidth={2}
-                    />
-                    <span>{item.label}</span>
-                    {isActive && (
-                      <span className="ml-auto h-1.5 w-1.5 rounded-full bg-[#3BA4FF] animate-pulse" />
-                    )}
-                  </>
-                )}
+                {({ isActive }) => {
+                  const isAdminItem = item.section === "admin";
+                  const isCommItem = item.section === "comm";
+                  let iconCls = "text-white/60 group-hover:text-white";
+                  if (isActive) {
+                    iconCls = isAdminItem ? "text-[#A78BFA]"
+                      : isCommItem ? "text-[#F59E0B]"
+                      : "text-[#3BA4FF]";
+                  } else if (isAdminItem) {
+                    iconCls = "text-[#A78BFA] group-hover:text-white";
+                  } else if (isCommItem) {
+                    iconCls = "text-[#F59E0B] group-hover:text-white";
+                  }
+                  const dotCls = isAdminItem ? "bg-[#A78BFA]"
+                    : isCommItem ? "bg-[#F59E0B]"
+                    : "bg-[#3BA4FF]";
+                  return (
+                    <>
+                      <item.icon className={`h-[18px] w-[18px] transition-colors ${iconCls}`} strokeWidth={2} />
+                      <span>{item.label}</span>
+                      {isActive && <span className={`ml-auto h-1.5 w-1.5 rounded-full animate-pulse ${dotCls}`} />}
+                    </>
+                  );
+                }}
               </NavLink>
             )
           )}
