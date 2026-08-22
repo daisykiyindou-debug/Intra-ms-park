@@ -119,6 +119,9 @@ export default function Messagerie() {
     message: "",
   });
   const [absenceLoading, setAbsenceLoading] = useState(false);
+  // Multi-select for bulk archive/delete
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState(() => new Set());
   const scrollRef = useRef(null);
   const inputRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -391,6 +394,47 @@ export default function Messagerie() {
     }
   };
 
+  // ─── Bulk archive / delete for the selected conversations
+  const toggleSelected = (cid) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(cid)) next.delete(cid); else next.add(cid);
+      return next;
+    });
+  };
+  const exitSelectMode = () => {
+    setSelectMode(false);
+    setSelectedIds(new Set());
+  };
+  const bulkArchive = async () => {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) return;
+    if (!window.confirm(`Archiver ${ids.length} conversation${ids.length > 1 ? "s" : ""} ?`)) return;
+    try {
+      await Promise.all(ids.map((cid) => api.post(`/channels/${cid}/archive`).catch(() => null)));
+      toast.success(`${ids.length} conversation${ids.length > 1 ? "s archivées" : " archivée"}`);
+      if (active && selectedIds.has(active)) setActive(null);
+      exitSelectMode();
+      loadChannels();
+    } catch {
+      toast.error("Impossible d'archiver certaines conversations");
+    }
+  };
+  const bulkDelete = async () => {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) return;
+    if (!window.confirm(`Supprimer définitivement ${ids.length} conversation${ids.length > 1 ? "s" : ""} et leur historique ?`)) return;
+    try {
+      await Promise.all(ids.map((cid) => api.delete(`/channels/${cid}`).catch(() => null)));
+      toast.success(`${ids.length} conversation${ids.length > 1 ? "s supprimées" : " supprimée"}`);
+      if (active && selectedIds.has(active)) setActive(null);
+      exitSelectMode();
+      loadChannels();
+    } catch {
+      toast.error("Impossible de supprimer certaines conversations");
+    }
+  };
+
   const startDm = async (empId) => {
     try {
       const { data } = await api.post("/channels/dm", { employee_id: empId });
@@ -621,6 +665,15 @@ export default function Messagerie() {
                 {tab === t.k && <span className="absolute left-0 right-0 -bottom-px h-0.5 bg-[#3BA4FF] rounded-t" />}
               </button>
             ))}
+            <button
+              onClick={() => selectMode ? exitSelectMode() : setSelectMode(true)}
+              data-testid="msg-select-toggle"
+              className={`ml-auto pb-3 text-xs font-semibold transition-colors ${
+                selectMode ? "text-[#B91C1C]" : "text-[#475569] hover:text-[#3BA4FF]"
+              }`}
+            >
+              {selectMode ? "Annuler" : "Sélectionner"}
+            </button>
           </div>
 
           {/* Conversations list — fills the full sidebar height, scrolls internally.
@@ -631,18 +684,35 @@ export default function Messagerie() {
                 Aucune conversation.
               </div>
             )}
-            {filtered.map((c) => (
+            {filtered.map((c) => {
+              const checked = selectedIds.has(c.id);
+              return (
               <button
                 key={c.id}
-                onClick={() => { setActive(c.id); setSearchParams({ ch: c.id }); setMobileShowChat(true); }}
+                onClick={() => {
+                  if (selectMode) { toggleSelected(c.id); return; }
+                  setActive(c.id); setSearchParams({ ch: c.id }); setMobileShowChat(true);
+                }}
                 data-testid={`msg-conv-${c.id}`}
                 className={`w-full text-left px-3 py-3 border-b border-[#071B34]/5 transition-all flex items-center gap-3 relative ${
-                  active === c.id
+                  selectMode && checked
+                    ? "bg-[#FEE2E2]/40"
+                    : active === c.id
                     ? "bg-gradient-to-r from-[#3BA4FF]/15 to-[#3BA4FF]/5"
                     : "hover:bg-[#F4F7FA]"
                 }`}
               >
-                {active === c.id && (
+                {selectMode && (
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    readOnly
+                    aria-label="Sélectionner la conversation"
+                    data-testid={`msg-conv-check-${c.id}`}
+                    className="h-4 w-4 accent-[#B91C1C] shrink-0 pointer-events-none"
+                  />
+                )}
+                {!selectMode && active === c.id && (
                   <span className="absolute left-0 top-2 bottom-2 w-1 rounded-r-full bg-[#3BA4FF]" />
                 )}
                 {c._avatar ? (
@@ -688,8 +758,33 @@ export default function Messagerie() {
                   </div>
                 </div>
               </button>
-            ))}
+              );
+            })}
           </div>
+          {/* Bulk actions bar — only in select mode */}
+          {selectMode && (
+            <div className="border-t border-[#071B34]/5 bg-[#F8FAFC] px-3 py-2 flex items-center gap-2" data-testid="msg-bulk-bar">
+              <span className="text-xs font-semibold text-[#475569] mr-auto">
+                {selectedIds.size} sélectionnée{selectedIds.size > 1 ? "s" : ""}
+              </span>
+              <button
+                onClick={bulkArchive}
+                disabled={selectedIds.size === 0}
+                data-testid="msg-bulk-archive"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white ring-1 ring-[#071B34]/10 text-[#334155] text-xs font-semibold hover:bg-[#F4F7FA] disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <Archive className="h-3.5 w-3.5" /> Archiver
+              </button>
+              <button
+                onClick={bulkDelete}
+                disabled={selectedIds.size === 0}
+                data-testid="msg-bulk-delete"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#FEE2E2] text-[#B91C1C] text-xs font-semibold hover:bg-[#FCA5A5] disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <Trash2 className="h-3.5 w-3.5" /> Supprimer
+              </button>
+            </div>
+          )}
         </aside>
 
         {/* ── RIGHT column: chat ── */}
@@ -979,7 +1074,7 @@ export default function Messagerie() {
                         const isSystemRh = m.author_id === "system-rh";
                         const author = isSystemRh ? null : findEmployee(m.author_id);
                         return (
-                          <div key={m.id} className={`flex items-end gap-2 ${mine ? "justify-end" : "justify-start"}`}>
+                          <div key={m.id} className={`group flex items-end gap-2 ${mine ? "justify-end" : "justify-start"}`}>
                             {!mine && (
                               isSystemRh
                                 ? <div className="h-7 w-7 rounded-full bg-[#3BA4FF] text-white text-[10px] font-bold flex items-center justify-center shrink-0" data-testid="msg-avatar-service-rh">RH</div>
@@ -989,7 +1084,7 @@ export default function Messagerie() {
                                     {initials(author?.first_name)}
                                   </div>
                             )}
-                            <div className={`max-w-[70%] rounded-2xl px-3.5 py-2 text-sm ${
+                            <div className={`relative max-w-[70%] rounded-2xl px-3.5 py-2 text-sm ${
                               mine
                                 ? "bg-[#DBEAFE] text-[#0B2545] rounded-br-sm"
                                 : "bg-[#F1F5F9] text-[#0B2545] rounded-bl-sm"
@@ -1017,8 +1112,19 @@ export default function Messagerie() {
                                   {formatReadAt(m.read_at)}
                                 </div>
                               )}
-                              <MessageActions m={m} mine={mine} onChanged={reload} />
+                              {/* Persistent tiny like-count badge, only if reactions exist */}
+                              {(m.like_count || (m.liked_by || []).length) > 0 && (
+                                <span
+                                  data-testid="msg-like-badge"
+                                  className={`absolute -bottom-2 ${mine ? "-left-1" : "-right-1"} inline-flex items-center gap-0.5 rounded-full bg-white shadow ring-1 ring-[#071B34]/10 px-1.5 py-0.5 text-[10px] font-semibold text-[#1D70B8]`}
+                                >
+                                  <ThumbsUp className="h-3 w-3 fill-current" />
+                                  {(m.like_count || (m.liked_by || []).length)}
+                                </span>
+                              )}
                             </div>
+                            {/* Hover-only actions row (like + edit), rendered OUTSIDE the bubble for a subtle look */}
+                            <MessageActions m={m} mine={mine} onChanged={reload} />
                             {mine && (
                               me?.avatar
                                 ? <img src={me.avatar} alt="" className="h-7 w-7 rounded-full object-cover shrink-0" />
@@ -1473,20 +1579,24 @@ function MessageActions({ m, mine, onChanged }) {
   }
 
   return (
-    <div className="mt-1 flex items-center gap-2 text-[10px]">
+    <div className="opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity flex items-center gap-1 text-[#94A3B8]" data-testid="msg-actions">
       <button
         onClick={toggleLike}
         data-testid="msg-like-btn"
-        className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 transition-colors ${likedByMe ? "bg-[#3BA4FF]/15 text-[#1D70B8]" : "text-[#94A3B8] hover:text-[#3BA4FF]"}`}
+        title={likedByMe ? "Retirer le like" : "J'aime"}
+        className={`inline-flex items-center justify-center h-7 w-7 rounded-full hover:bg-[#F4F7FA] transition-colors ${likedByMe ? "text-[#1D70B8]" : ""}`}
       >
-        <ThumbsUp className={`h-3 w-3 ${likedByMe ? "fill-current" : ""}`} />
-        {likeCount > 0 && <span className="font-semibold">{likeCount}</span>}
+        <ThumbsUp className={`h-3.5 w-3.5 ${likedByMe ? "fill-current" : ""}`} />
       </button>
       {canEdit && (
-        <button onClick={() => { setDraft(m.content || ""); setEditing(true); }}
+        <button
+          onClick={() => { setDraft(m.content || ""); setEditing(true); }}
           data-testid="msg-edit-btn"
-          className="inline-flex items-center gap-1 text-[#94A3B8] hover:text-[#3BA4FF]"
-        ><Pencil className="h-3 w-3" /> Modifier</button>
+          title="Modifier"
+          className="inline-flex items-center justify-center h-7 w-7 rounded-full hover:bg-[#F4F7FA] hover:text-[#3BA4FF] transition-colors"
+        >
+          <Pencil className="h-3.5 w-3.5" />
+        </button>
       )}
     </div>
   );
