@@ -2553,6 +2553,7 @@ function EventEditor({ event, news, onClose, onSaved }) {
     cta_url: event?.cta_url || event?.external_link || event?.signup_url || "",
     group_targets: event?.group_targets || ["all"],
     employee_targets: event?.employee_targets || [],
+    audience_status_targets: event?.audience_status_targets || [],
   });
 
   const [employees, setEmployees] = useState([]);
@@ -2928,6 +2929,13 @@ function EventEditor({ event, news, onClose, onSaved }) {
                 Aucun bouton ne sera affiché sur la fiche de l'événement.
               </div>
             )}
+          </div>
+
+          <div className="pt-2">
+            <AudiencePicker
+              value={form.audience_status_targets || []}
+              onChange={(v) => setForm({ ...form, audience_status_targets: v })}
+            />
           </div>
 
           <div className="flex gap-2 pt-3">

@@ -169,14 +169,16 @@ export default function Actualites() {
 // Reusable audience picker: pick employee statuses (or "Tous") to restrict
 // who can see the publication.
 const AUDIENCE_STATUSES = [
-  { k: "cdi", l: "CDI" },
-  { k: "cdd", l: "CDD" },
-  { k: "manager", l: "Managers" },
+  { k: "ops", l: "Employé terrain (OPS)" },
+  { k: "management", l: "Management" },
+  { k: "bureau", l: "Employé Bureau" },
   { k: "direction", l: "Direction" },
-  { k: "alternant", l: "Alternants" },
-  { k: "stagiaire", l: "Stagiaires" },
-  { k: "extra", l: "Extras" },
-  { k: "prestataire", l: "Prestataires" },
+  { k: "alternant", l: "Alternant" },
+  { k: "stage", l: "Stage" },
+  { k: "restauration", l: "Restauration" },
+  { k: "securite", l: "Sécurité" },
+  { k: "nettoyage", l: "Nettoyage" },
+  { k: "maintenance", l: "Maintenance" },
 ];
 
 export function AudiencePicker({ value = [], onChange }) {
@@ -224,8 +226,8 @@ export function AudiencePicker({ value = [], onChange }) {
 
 function AdminComposer({ me, onPublished, canUseOfficial = true }) {
   const isCommOnly = !me?.is_admin && !!me?.can_manage_communication;
-  // Per product decision: admins & comm editors always publish as MS Park
-  // (never propose the personal account for news publishing).
+  // Post as MS Park when admin mode is ON (canUseOfficial), else as the user.
+  // No toggle is shown — the identity follows the top-right Admin switch.
   const showOfficialToggle = false;
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState("");
@@ -235,11 +237,11 @@ function AdminComposer({ me, onPublished, canUseOfficial = true }) {
   const [attachments, setAttachments] = useState([]);
   const [links, setLinks] = useState([]);
   const [linkDraft, setLinkDraft] = useState("");
-  const [postedAs, setPostedAs] = useState("official");
+  const [postedAs, setPostedAs] = useState(canUseOfficial || isCommOnly ? "official" : "personal");
   const [audienceTargets, setAudienceTargets] = useState([]); // empty = all
-  // Force official identity as soon as the user is entitled to use it.
+  // Follow the admin toggle live: ON → publish as MS Park, OFF → personal.
   useEffect(() => {
-    if (canUseOfficial || isCommOnly) setPostedAs("official");
+    setPostedAs(canUseOfficial || isCommOnly ? "official" : "personal");
   }, [canUseOfficial, isCommOnly]);
   const [publishing, setPublishing] = useState(false);
   const [showGallery, setShowGallery] = useState(false);

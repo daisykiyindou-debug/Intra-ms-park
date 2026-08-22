@@ -4650,8 +4650,14 @@ async def list_events():
     dept = emp.get("department") if emp else None
 
     items = await db.events.find({}, {"_id": 0}).sort("date", 1).to_list(200)
+    my_statuses = set(emp.get("statuses") or []) if emp else set()
     visible = []
     for e in items:
+        # New audience filter — if `audience_status_targets` is set, the
+        # event is visible only to employees whose statuses match.
+        aud = e.get("audience_status_targets") or []
+        if aud and not is_admin and not (my_statuses & set(aud)):
+            continue
         groups = e.get("group_targets") or ["all"]
         emp_ids = e.get("employee_targets") or []
         # Broad group targeting
@@ -4708,6 +4714,7 @@ class EventPayload(BaseModel):
     internal_page: Optional[str] = None
     group_targets: Optional[List[str]] = None  # ["all", "admin", "managers", "ops", "restauration", "encadrement", ...]
     employee_targets: Optional[List[str]] = None
+    audience_status_targets: Optional[List[str]] = None  # ["ops","management","bureau","direction",...]
     category: Optional[str] = "event"
 
 
@@ -4777,6 +4784,12 @@ async def admin_create_event(payload: EventPayload):
         if e.get("department") and e["department"] in groups:
             targets.add(e["id"])
     targets.discard(me["id"])
+    # Audience filter also constrains notification targets
+    aud = ev.get("audience_status_targets") or []
+    if aud:
+        aud_set = set(aud)
+        allowed = {e["id"] for e in all_emps if set(e.get("statuses") or []) & aud_set}
+        targets &= allowed
     when = ev.get("date", "")
     for tid in targets:
         await _push_notification(
