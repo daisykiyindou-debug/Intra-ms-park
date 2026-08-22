@@ -439,7 +439,7 @@ export default function Messagerie() {
     <div className="ms-fade-up">
       <div className="ms-card overflow-hidden grid grid-cols-1 lg:grid-cols-[340px_1fr] h-[calc(100vh-160px)]">
         {/* ── LEFT column: conversations ── */}
-        <aside className={`border-r border-[#071B34]/5 flex flex-col ${mobileShowChat ? "hidden lg:flex" : "flex"}`}>
+        <aside className={`border-r border-[#071B34]/5 flex flex-col min-h-0 ${mobileShowChat ? "hidden lg:flex" : "flex"}`}>
           {/* Search + compose */}
           <div className="p-3 border-b border-[#071B34]/5 flex items-center gap-2">
             <div className="relative flex-1">
@@ -528,8 +528,9 @@ export default function Messagerie() {
             ))}
           </div>
 
-          {/* Conversations list — fills the full sidebar height, scrolls internally */}
-          <div className="flex-1 overflow-y-auto" data-testid="msg-conv-list">
+          {/* Conversations list — fills the full sidebar height, scrolls internally.
+              min-h-0 is required so `flex-1` can shrink and enable overflow. */}
+          <div className="flex-1 min-h-0 overflow-y-auto" data-testid="msg-conv-list">
             {filtered.length === 0 && (
               <div className="p-10 text-center text-sm text-[#475569]">
                 Aucune conversation.
@@ -597,7 +598,7 @@ export default function Messagerie() {
         </aside>
 
         {/* ── RIGHT column: chat ── */}
-        <section className={`flex flex-col relative ${!mobileShowChat ? "hidden lg:flex" : "flex"}`}>
+        <section className={`flex flex-col relative min-h-0 min-w-0 ${!mobileShowChat ? "hidden lg:flex" : "flex"}`}>
           {!currentDisplay ? (
             <div className="flex-1 flex flex-col items-center justify-center text-center p-10">
               <div className="h-16 w-16 rounded-2xl bg-[#3BA4FF]/10 text-[#3BA4FF] flex items-center justify-center">
@@ -847,7 +848,7 @@ export default function Messagerie() {
               )}
 
               {/* Messages */}
-              <div ref={scrollRef} className="flex-1 overflow-y-auto px-5 py-6 space-y-4 bg-white">
+              <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto px-5 py-6 space-y-4 bg-white">
                 {messagesByDay.length === 0 && (
                   <div className="text-center text-sm text-[#94A3B8] py-6">
                     Aucun message. Envoyez le premier !
