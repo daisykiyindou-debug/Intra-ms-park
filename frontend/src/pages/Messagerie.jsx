@@ -5,6 +5,7 @@ import {
   Info, MoreVertical, MessageSquare, SlidersHorizontal, Star, Pencil, Trash2, Archive,
   Cake, Check, BellOff, CheckCheck, User as UserIcon, FileText, Image as ImageIcon,
   UserPlus, UserMinus, Camera, Receipt, ThumbsUp,
+  Briefcase, Megaphone, UserCog, Landmark, Shield, ChevronRight,
 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
@@ -74,6 +75,8 @@ export default function Messagerie() {
   const [pendingAttachments, setPendingAttachments] = useState([]); // [{url,name,type}]
   const [uploading, setUploading] = useState(false);
   const [filterKind, setFilterKind] = useState("all"); // all | dm | group | unread | archived
+  // Corporate canals catalog (Service RH, Communication, etc.)
+  const [corpCatalog, setCorpCatalog] = useState([]);
   const scrollRef = useRef(null);
   const inputRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -382,6 +385,31 @@ export default function Messagerie() {
     }
   };
 
+  // Load the 5 corporate canals catalog when the "Canaux" tab opens
+  useEffect(() => {
+    if (composer === "corporate" && corpCatalog.length === 0) {
+      api.get("/channels/corporate/catalog")
+        .then((r) => setCorpCatalog(r.data))
+        .catch(() => setCorpCatalog([]));
+    }
+  }, [composer, corpCatalog.length]);
+
+  const openCorporate = async (canalKey) => {
+    try {
+      const { data } = await api.post("/channels/corporate", { canal_key: canalKey });
+      setActive(data.id);
+      setSearchParams({ ch: data.id });
+      setComposer(null);
+      setMobileShowChat(true);
+      // Refresh channels so the new corporate canal appears in the sidebar
+      loadChannels();
+      // Reset catalog so `already_open` refreshes next time
+      setCorpCatalog([]);
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Impossible d'ouvrir le canal");
+    }
+  };
+
   const otherEmployees = useMemo(
     () => (employees || []).filter((e) => e.id !== me?.id && !e.is_super_admin),
     [employees, me?.id]
@@ -500,8 +528,10 @@ export default function Messagerie() {
             ))}
           </div>
 
-          {/* Conversations list */}
-          <div className="flex-1 overflow-y-auto">
+          {/* Conversations list — cap visible height so at most ~10 conversations
+              are shown; the rest is accessible via scroll to avoid an infinite
+              sidebar. */}
+          <div className="flex-1 overflow-y-auto max-h-[calc(10*4.75rem)]" data-testid="msg-conv-list">
             {filtered.length === 0 && (
               <div className="p-10 text-center text-sm text-[#475569]">
                 Aucune conversation.
@@ -1003,10 +1033,12 @@ export default function Messagerie() {
               {[
                 { k: "dm", l: "Contact" },
                 { k: "group", l: "Groupe" },
+                { k: "corporate", l: "Canaux" },
               ].map((t) => (
                 <button
                   key={t.k}
                   onClick={() => setComposer(t.k)}
+                  data-testid={`msg-compose-tab-${t.k}`}
                   className={`px-3 py-1.5 rounded-full text-xs font-semibold ${
                     composer === t.k ? "bg-[#3BA4FF] text-white" : "bg-[#F4F7FA] text-[#475569]"
                   }`}
@@ -1016,59 +1048,105 @@ export default function Messagerie() {
               ))}
             </div>
             <div className="p-5 space-y-3 flex-1 overflow-y-auto">
-              {composer === "group" && (
-                <div>
-                  <label className="ms-overline">Nom du groupe</label>
-                  <input
-                    value={groupName}
-                    onChange={(e) => setGroupName(e.target.value)}
-                    placeholder="Ex : Équipe accueil"
-                    className="ms-input mt-1"
-                  />
-                </div>
-              )}
-              <div>
-                <label className="ms-overline">
-                  {composer === "group" ? "Membres" : "Contact"}
-                </label>
-                <div className="relative mt-1">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[#94A3B8]" />
-                  <input
-                    value={empSearch}
-                    onChange={(e) => setEmpSearch(e.target.value)}
-                    placeholder="Rechercher un collègue…"
-                    className="w-full h-10 pl-9 pr-3 rounded-xl bg-[#F4F7FA] outline-none text-sm"
-                  />
-                </div>
-                <div className="mt-2 space-y-1 max-h-64 overflow-y-auto pr-1">
-                  {filteredEmployees.map((e) => {
-                    const isSelected = groupMembers.includes(e.id);
+              {composer === "corporate" ? (
+                <div className="space-y-2" data-testid="msg-corporate-list">
+                  <div className="text-xs text-[#475569] px-1 pb-1">
+                    Écrivez à un service. Seuls ses membres reçoivent votre message et peuvent y répondre.
+                  </div>
+                  {corpCatalog.length === 0 && (
+                    <div className="text-center text-sm text-[#94A3B8] py-6">Chargement…</div>
+                  )}
+                  {corpCatalog.map((c) => {
+                    const Icon = ({
+                      "briefcase": Briefcase,
+                      "megaphone": Megaphone,
+                      "user-cog": UserCog,
+                      "landmark": Landmark,
+                      "shield": Shield,
+                    })[c.icon] || Briefcase;
                     return (
                       <button
-                        key={e.id}
-                        onClick={() => {
-                          if (composer === "dm") startDm(e.id);
-                          else setGroupMembers((m) => isSelected ? m.filter((x) => x !== e.id) : [...m, e.id]);
-                        }}
-                        className={`w-full flex items-center gap-2 rounded-xl px-2 py-2 hover:bg-[#F4F7FA] ${isSelected ? "bg-[#3BA4FF]/8" : ""}`}
+                        key={c.key}
+                        onClick={() => openCorporate(c.key)}
+                        data-testid={`msg-corp-${c.key}`}
+                        className="w-full text-left rounded-xl px-3 py-3 hover:bg-[#F4F7FA] flex items-center gap-3 transition-colors border border-transparent hover:border-[#3BA4FF]/20"
                       >
-                        {e.avatar
-                          ? <img src={e.avatar} alt="" className="h-8 w-8 rounded-full object-cover" />
-                          : <div className="h-8 w-8 rounded-full bg-[#3BA4FF]/15 text-[#1D70B8] text-[10px] font-bold flex items-center justify-center">{initials(e.first_name)}</div>}
-                        <div className="flex-1 text-left min-w-0">
-                          <div className="text-sm font-semibold text-[#071B34] truncate">{e.first_name} {e.last_name}</div>
-                          <div className="text-xs text-[#475569] truncate">{e.role || "—"}</div>
+                        <div className="h-11 w-11 rounded-full bg-gradient-to-br from-[#3BA4FF]/15 to-[#4338CA]/10 text-[#1D70B8] flex items-center justify-center shrink-0">
+                          <Icon className="h-5 w-5" />
                         </div>
-                        {composer === "group" && isSelected && <span className="text-xs font-bold text-[#3BA4FF]">✓</span>}
+                        <div className="flex-1 min-w-0">
+                          <div className="text-sm font-semibold text-[#071B34] flex items-center gap-1.5">
+                            {c.name}
+                            {c.already_open && (
+                              <span className="text-[10px] font-bold text-[#10B981] bg-[#10B981]/10 px-1.5 py-0.5 rounded-full">Ouvert</span>
+                            )}
+                          </div>
+                          <div className="text-xs text-[#475569] truncate">
+                            {c.description} · {c.recipient_count} destinataire{c.recipient_count > 1 ? "s" : ""}
+                          </div>
+                        </div>
+                        <ChevronRight className="h-4 w-4 text-[#94A3B8] shrink-0" />
                       </button>
                     );
                   })}
                 </div>
-              </div>
-              {composer === "group" && (
-                <button onClick={createGroup} className="w-full ms-btn-primary">
-                  <Plus className="h-4 w-4" /> Créer le groupe
-                </button>
+              ) : (
+                <>
+                  {composer === "group" && (
+                    <div>
+                      <label className="ms-overline">Nom du groupe</label>
+                      <input
+                        value={groupName}
+                        onChange={(e) => setGroupName(e.target.value)}
+                        placeholder="Ex : Équipe accueil"
+                        className="ms-input mt-1"
+                      />
+                    </div>
+                  )}
+                  <div>
+                    <label className="ms-overline">
+                      {composer === "group" ? "Membres" : "Contact"}
+                    </label>
+                    <div className="relative mt-1">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[#94A3B8]" />
+                      <input
+                        value={empSearch}
+                        onChange={(e) => setEmpSearch(e.target.value)}
+                        placeholder="Rechercher un collègue…"
+                        className="w-full h-10 pl-9 pr-3 rounded-xl bg-[#F4F7FA] outline-none text-sm"
+                      />
+                    </div>
+                    <div className="mt-2 space-y-1 max-h-64 overflow-y-auto pr-1">
+                      {filteredEmployees.map((e) => {
+                        const isSelected = groupMembers.includes(e.id);
+                        return (
+                          <button
+                            key={e.id}
+                            onClick={() => {
+                              if (composer === "dm") startDm(e.id);
+                              else setGroupMembers((m) => isSelected ? m.filter((x) => x !== e.id) : [...m, e.id]);
+                            }}
+                            className={`w-full flex items-center gap-2 rounded-xl px-2 py-2 hover:bg-[#F4F7FA] ${isSelected ? "bg-[#3BA4FF]/8" : ""}`}
+                          >
+                            {e.avatar
+                              ? <img src={e.avatar} alt="" className="h-8 w-8 rounded-full object-cover" />
+                              : <div className="h-8 w-8 rounded-full bg-[#3BA4FF]/15 text-[#1D70B8] text-[10px] font-bold flex items-center justify-center">{initials(e.first_name)}</div>}
+                            <div className="flex-1 text-left min-w-0">
+                              <div className="text-sm font-semibold text-[#071B34] truncate">{e.first_name} {e.last_name}</div>
+                              <div className="text-xs text-[#475569] truncate">{e.role || "—"}</div>
+                            </div>
+                            {composer === "group" && isSelected && <span className="text-xs font-bold text-[#3BA4FF]">✓</span>}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  {composer === "group" && (
+                    <button onClick={createGroup} className="w-full ms-btn-primary">
+                      <Plus className="h-4 w-4" /> Créer le groupe
+                    </button>
+                  )}
+                </>
               )}
             </div>
           </div>

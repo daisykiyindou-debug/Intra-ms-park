@@ -4891,6 +4891,181 @@ async def poles():
     ]
 
 
+# ─── Corporate canals (Service RH, Communication, Managers OPS,
+# Département financier, Direction) — one canal per user linking them with
+# the members of the target service. Every employee can *write* to any of
+# these canals, but only the service members *receive* the messages and
+# can reply. Deterministic canal id per user, so a user always finds the
+# same thread in their sidebar.
+CORPORATE_CANALS = {
+    "service-rh": {
+        "name": "Service RH",
+        "icon": "briefcase",
+        "description": "Ressources humaines",
+    },
+    "communication": {
+        "name": "Communication",
+        "icon": "megaphone",
+        "description": "Équipe communication interne",
+    },
+    "managers-ops": {
+        "name": "Managers OPS",
+        "icon": "user-cog",
+        "description": "Encadrement opérationnel",
+    },
+    "dept-financier": {
+        "name": "Département financier",
+        "icon": "landmark",
+        "description": "Finance & comptabilité",
+    },
+    "direction": {
+        "name": "Direction",
+        "icon": "shield",
+        "description": "Direction générale",
+    },
+}
+
+
+def _corporate_key_for_rh_channel(uid: str) -> str:
+    """Legacy Service RH canal id used across the codebase (payslips, onboarding)."""
+    return f"rh-{uid}"
+
+
+def _corporate_channel_id(canal_key: str, uid: str) -> str:
+    if canal_key == "service-rh":
+        return _corporate_key_for_rh_channel(uid)
+    return f"corp-{canal_key}-{uid}"
+
+
+async def _corporate_members(canal_key: str) -> list[str]:
+    """Return the employee IDs who *receive* (are staff for) a canal."""
+    emps = await db.employees.find({}, {"_id": 0}).to_list(500)
+    out: list[str] = []
+    for e in emps:
+        # Super admins are management-only accounts (no employee-facing UX),
+        # they should never receive DMs.
+        if e.get("is_super_admin"):
+            continue
+        role = (e.get("role") or "").lower()
+        dept = (e.get("department") or "").lower()
+        statuses = [s.lower() for s in (e.get("statuses") or [])]
+        admin_role = (e.get("admin_role") or "").lower()
+        is_admin = bool(e.get("is_admin"))
+        is_comm = bool(e.get("can_manage_communication"))
+        is_hr = bool(e.get("can_manage_hr"))
+        match = False
+        if canal_key == "service-rh":
+            match = (
+                is_hr
+                or "rh" in admin_role
+                or "rh" in statuses
+                or "ressources humaines" in role
+                or "responsable rh" in role
+                or "chargée rh" in role
+                or "assistant rh" in role
+                or "ressources humaines" in dept
+            )
+        elif canal_key == "communication":
+            match = (
+                is_comm
+                or "communication" in role
+                or "communication" in dept
+            )
+        elif canal_key == "managers-ops":
+            match = (
+                "manager" in statuses
+                or "manager" in role
+                or ("responsable" in role and ("op" in dept or "ops" in dept or "restauration" in dept))
+            )
+        elif canal_key == "dept-financier":
+            match = (
+                "finance" in statuses
+                or "finance" in role or "financier" in role or "financière" in role
+                or "compta" in role or "comptab" in role
+                or "finance" in dept or "compta" in dept or "comptab" in dept
+            )
+        elif canal_key == "direction":
+            match = (
+                "direction" in statuses
+                or "direction" in admin_role
+                or "directeur" in role or "directrice" in role
+                or "responsable opérationnel" in role
+                or (is_admin and "direction" in dept)
+            )
+        if match:
+            out.append(e["id"])
+    return out
+
+
+class CorporateCanalCreate(BaseModel):
+    canal_key: str
+
+
+@api.get("/channels/corporate/catalog")
+async def corporate_catalog():
+    """List the 5 corporate canals available to the current user."""
+    uid = current_user()
+    out = []
+    for key, meta in CORPORATE_CANALS.items():
+        recipients = await _corporate_members(key)
+        cid = _corporate_channel_id(key, uid)
+        ch = await db.channels.find_one({"id": cid}, {"_id": 0})
+        out.append({
+            "key": key,
+            "name": meta["name"],
+            "icon": meta["icon"],
+            "description": meta["description"],
+            "recipient_count": len([m for m in recipients if m != uid]),
+            "already_open": bool(ch),
+            "channel_id": cid if ch else None,
+        })
+    return out
+
+
+@api.post("/channels/corporate")
+async def open_corporate_canal(payload: CorporateCanalCreate):
+    """Open (create or reuse) a corporate canal thread between the caller
+    and the members of the target service. Idempotent per user."""
+    key = (payload.canal_key or "").strip()
+    if key not in CORPORATE_CANALS:
+        raise HTTPException(400, "Canal inconnu")
+    uid = current_user()
+    meta = CORPORATE_CANALS[key]
+    cid = _corporate_channel_id(key, uid)
+    recipients = await _corporate_members(key)
+    members = list({uid, *recipients})
+    ch = await db.channels.find_one({"id": cid}, {"_id": 0})
+    if ch:
+        # Refresh members list so newly-onboarded RH/Direction staff are included
+        merged = list({*(ch.get("members_ids") or []), *members})
+        if set(merged) != set(ch.get("members_ids") or []):
+            await db.channels.update_one(
+                {"id": cid},
+                {"$set": {"members_ids": merged, "members": len(merged)}},
+            )
+            ch["members_ids"] = merged
+            ch["members"] = len(merged)
+        return await _strip(ch)
+    ch = {
+        "id": cid,
+        "name": meta["name"],
+        "icon": meta["icon"],
+        "members": len(members),
+        "members_ids": members,
+        "unread": 0,
+        "is_dm": False,
+        "is_group": True,
+        "is_official": True,
+        "is_corporate": True,
+        "corporate_key": key,
+        "archived": False,
+        "avatar": None,
+        "created_at": _now(),
+    }
+    await db.channels.insert_one(ch.copy())
+    return await _strip(ch)
+
+
 # ─── DM channels (create or fetch a direct channel with an employee)
 class DMCreate(BaseModel):
     employee_id: str

@@ -14,7 +14,7 @@ Intranet ultra premium (glassmorphism, cartes arrondies) pour les employés de M
 - Auth simulée: header `X-Employee-Id`.
 - Uploads: dossier local `/app/backend/uploads`.
 
-## Fonctionnalités livrées (état actuel — 21 août 2026, iter 31)
+## Fonctionnalités livrées (état actuel — 22 août 2026, iter 32)
 - Authentification simulée + Onboarding: WelcomePopup première connexion.
 - Permissions granulaires (Super Admin / RH / Communication / Employé) appliquées back+front.
 - Dashboard temps réel (horloge Paris, planning du jour, carousel).
@@ -22,8 +22,14 @@ Intranet ultra premium (glassmorphism, cartes arrondies) pour les employés de M
 - Planning + Badgeage (statuts congés/RTT/OFF, next shift calculé même en congés).
 - Congés/RTT/absences + Documents RH (fiches de paie automatiques + DM auto depuis "Service RH" avec lien).
 - Actualités + Newsletters Pro (éditeur riche, blocs 4 colonnes, planification `publish_at`, ciblage par statut, publication verrouillée).
-- Messagerie temps réel isolée par utilisateur (pas de canaux globaux hérités pour les nouveaux comptes), édition dans 10 min avec indicateur "Modifié", like/unlike 👍, deep-link notifications avec auto-clear du badge.
-- Notifications: filtrage automatique des liens vers canaux supprimés/inaccessibles.
+- Messagerie:
+  - temps réel isolée par utilisateur (pas de canaux globaux hérités pour les nouveaux comptes)
+  - édition dans 10 min avec indicateur "Modifié"
+  - like/unlike 👍
+  - deep-link notifications avec auto-clear du badge
+  - filtrage auto des notifs vers canaux supprimés/inaccessibles
+  - **NEW iter32**: onglet "Canaux" dans la modale Nouveau message (Service RH, Communication, Managers OPS, Département financier, Direction) — 1 canal unique par utilisateur, membres calculés dynamiquement, non-membres bloqués (403)
+  - **NEW iter32**: sidebar limitée à ~10 conversations visibles avec scroll pour les plus anciennes
 - Contacts, Agenda, Formation, Galerie photos, Boîte à idées, CSE & Avantages (e-commerce partenaires).
 - Gestion utilisateurs (wizard admin, réinitialisation de mot de passe).
 
