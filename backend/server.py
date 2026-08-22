@@ -8987,9 +8987,16 @@ class MeetingRoomIn(BaseModel):
     name: str
     capacity: int
     floor: Optional[str] = ""
+    building: Optional[str] = ""
+    zone: Optional[str] = ""
+    room_number: Optional[str] = ""
     equipments: List[str] = []
+    services: List[str] = []
     photo_url: Optional[str] = ""
+    photos: List[str] = []
     description: Optional[str] = ""
+    min_duration_minutes: Optional[int] = 15
+    status: Optional[str] = "available"  # available | maintenance | unavailable
     is_active: Optional[bool] = True
     maintenance_note: Optional[str] = None
 
@@ -9317,6 +9324,62 @@ async def _assert_admin():
     me = await db.employees.find_one({"id": current_user()}, {"_id": 0}) or {}
     if not me.get("is_admin"):
         raise HTTPException(403, "Réservé aux administrateurs")
+
+
+@api.get("/admin/rooms/stats")
+async def admin_rooms_stats():
+    """Dashboard stats for the admin rooms page."""
+    await _assert_admin()
+    now_iso = _now()
+    now_paris = _now_paris()
+    today = now_paris.date().isoformat()
+    day_start = datetime.fromisoformat(today + "T00:00:00+00:00").isoformat()
+    day_end = datetime.fromisoformat(today + "T23:59:59+00:00").isoformat()
+
+    rooms = await db.meeting_rooms.find({}, {"_id": 0}).to_list(200)
+    busy_ids: set[str] = set()
+    for r in rooms:
+        live = await db.room_reservations.find_one({
+            "room_id": r["id"],
+            "status": {"$ne": "cancelled"},
+            "start_ts": {"$lte": now_iso},
+            "end_ts": {"$gt": now_iso},
+        })
+        if live:
+            busy_ids.add(r["id"])
+
+    total = len(rooms)
+    maintenance = sum(1 for r in rooms if r.get("status") == "maintenance" or (r.get("is_active") is False))
+    busy = len(busy_ids)
+    free = max(0, total - busy - maintenance)
+
+    today_reservations = await db.room_reservations.count_documents({
+        "start_ts": {"$gte": day_start, "$lt": day_end},
+        "status": {"$ne": "cancelled"},
+    })
+    upcoming = await db.room_reservations.find(
+        {"start_ts": {"$gt": now_iso}, "status": {"$ne": "cancelled"}},
+        {"_id": 0},
+    ).sort("start_ts", 1).limit(5).to_list(5)
+    cancelled_today = await db.room_reservations.count_documents({
+        "status": "cancelled",
+        "cancelled_at": {"$gte": day_start, "$lt": day_end},
+    })
+
+    # Attach room name to upcoming
+    room_by_id = {r["id"]: r for r in rooms}
+    for u in upcoming:
+        u["room_name"] = room_by_id.get(u["room_id"], {}).get("name")
+
+    return {
+        "total_rooms": total,
+        "busy_rooms": busy,
+        "free_rooms": free,
+        "maintenance_rooms": maintenance,
+        "today_reservations": today_reservations,
+        "cancelled_today": cancelled_today,
+        "upcoming": upcoming,
+    }
 
 
 @api.post("/admin/rooms")
