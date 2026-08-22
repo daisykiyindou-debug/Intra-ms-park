@@ -2745,30 +2745,6 @@ function EventEditor({ event, news, onClose, onSaved }) {
             />
           </div>
 
-          <div>
-            <label className="ms-overline">Groupes cibles</label>
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mt-2">
-              {GROUP_OPTIONS.map((g) => {
-                const active = form.group_targets.includes(g.v);
-                return (
-                  <button
-                    key={g.v}
-                    type="button"
-                    onClick={() => toggleGroup(g.v)}
-                    data-testid={`event-group-${g.v}`}
-                    className={`text-[11px] font-semibold rounded-lg py-2 px-2 transition-colors ${
-                      active
-                        ? "bg-[#071B34] text-white"
-                        : "bg-[#F4F7FA] text-[#475569] hover:bg-[#071B34]/5"
-                    }`}
-                  >
-                    {g.label}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
           <details className="rounded-xl bg-[#F4F7FA] p-3">
             <summary className="cursor-pointer text-xs font-semibold text-[#475569] flex items-center gap-1.5">
               <UsersIcon className="h-3.5 w-3.5" />
