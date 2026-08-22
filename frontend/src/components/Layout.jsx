@@ -3,6 +3,7 @@ import { Outlet } from "react-router-dom";
 import Sidebar from "@/components/Sidebar";
 import Header from "@/components/Header";
 import NotificationsDrawer from "@/components/NotificationsDrawer";
+import MeetingInviteBanner from "@/components/MeetingInviteBanner";
 
 export default function Layout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -12,6 +13,7 @@ export default function Layout() {
     <div className="min-h-screen bg-[#F4F7FA]">
       <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
       <NotificationsDrawer open={notifOpen} onClose={() => setNotifOpen(false)} />
+      <MeetingInviteBanner />
       <div className="md:pl-72">
         <Header
           onMenuClick={() => setSidebarOpen(true)}

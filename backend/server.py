@@ -9205,6 +9205,11 @@ async def create_reservation(payload: MeetingReservationIn):
         "equipments_needed": payload.equipments_needed or [],
         "special_request": (payload.special_request or "").strip(),
         "status": "confirmed",
+        # Track RSVP: organizer is auto-confirmed, all invitees start as pending
+        "participant_responses": {
+            pid: ("confirmed" if pid == organizer_id else "pending")
+            for pid in list({*(payload.participants_ids or []), organizer_id})
+        },
         "created_at": _now(),
         "created_by": uid,
     }
@@ -9313,6 +9318,74 @@ async def cancel_reservation(res_id: str, payload: CancelIn):
     updated = await db.room_reservations.find_one({"id": res_id}, {"_id": 0})
     await _notify_participants(updated, "cancelled")
     return updated
+
+
+class RespondIn(BaseModel):
+    response: str  # "confirmed" | "declined"
+
+
+@api.post("/reservations/{res_id}/respond")
+async def respond_to_reservation(res_id: str, payload: RespondIn):
+    r = await db.room_reservations.find_one({"id": res_id}, {"_id": 0})
+    if not r:
+        raise HTTPException(404, "Réservation introuvable")
+    uid = current_user()
+    if uid not in (r.get("participants_ids") or []):
+        raise HTTPException(403, "Vous n'êtes pas invité(e) à cette réunion.")
+    resp = (payload.response or "").strip().lower()
+    if resp not in ("confirmed", "declined"):
+        raise HTTPException(400, "Réponse invalide")
+
+    responses = dict(r.get("participant_responses") or {})
+    responses[uid] = resp
+    await db.room_reservations.update_one(
+        {"id": res_id}, {"$set": {"participant_responses": responses}}
+    )
+
+    # Agenda sync: add an event visible only to the current employee if
+    # confirmed, remove any previous personal event if declined.
+    agenda_event_id = f"meeting-{res_id}-{uid}"
+    if resp == "confirmed":
+        room = await db.meeting_rooms.find_one({"id": r["room_id"]}, {"_id": 0}) or {}
+        organizer = await db.employees.find_one({"id": r.get("organizer_id")}, {"_id": 0}) or {}
+        start_dt = _parse_iso(r["start_ts"]).astimezone(PARIS_TZ)
+        end_dt = _parse_iso(r["end_ts"]).astimezone(PARIS_TZ)
+        await db.events.update_one(
+            {"id": agenda_event_id},
+            {"$set": {
+                "id": agenda_event_id,
+                "title": r.get("title") or "Réunion",
+                "date": start_dt.date().isoformat(),
+                "start_time": start_dt.strftime("%H:%M"),
+                "end_time": end_dt.strftime("%H:%M"),
+                "location": f"{room.get('name', 'Salle')} · {room.get('floor') or ''}".strip(" ·"),
+                "summary": r.get("description") or f"Réunion invitée par {organizer.get('first_name', '')} {organizer.get('last_name', '')}".strip(),
+                "category": "meeting",
+                "icon": "calendar",
+                "group_targets": ["employee-only"],
+                "employee_targets": [uid],
+                "linked_reservation_id": res_id,
+                "created_at": _now(),
+            }},
+            upsert=True,
+        )
+    else:
+        await db.events.delete_one({"id": agenda_event_id})
+
+    # Notify the organizer of the response (skip if organizer responded)
+    if uid != r.get("organizer_id"):
+        me = await db.employees.find_one({"id": uid}, {"_id": 0}) or {}
+        who = f"{me.get('first_name', '')} {me.get('last_name', '')}".strip() or "Un(e) collègue"
+        action_label = "a confirmé sa présence" if resp == "confirmed" else "a décliné l'invitation"
+        await _push_notification(
+            employee_id=r["organizer_id"],
+            type="meeting-response",
+            title=f"Réponse · {r.get('title')}",
+            content=f"{who} {action_label}.",
+            icon="calendar",
+            link=f"/salles/mes-reservations",
+        )
+    return {"ok": True, "response": resp, "participant_responses": responses}
 
 
 # ── Admin — rooms CRUD + view all reservations
