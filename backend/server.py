@@ -8845,7 +8845,7 @@ MEETING_ROOM_SEEDS = [
         "capacity": 6,
         "floor": "1ᵉʳ étage",
         "equipments": ["screen", "video", "whiteboard", "power", "wifi"],
-        "photo_url": "https://images.unsplash.com/photo-1600494603989-9650cf6dad51?w=1200&q=80",
+        "photo_url": "https://images.unsplash.com/photo-1568992687947-868a62a9f521?w=1200&q=80",
         "description": "Petit format cosy pour entretiens et réunions rapprochées.",
     },
     {
@@ -8854,7 +8854,7 @@ MEETING_ROOM_SEEDS = [
         "capacity": 4,
         "floor": "1ᵉʳ étage",
         "equipments": ["screen", "video", "power", "wifi"],
-        "photo_url": "https://images.unsplash.com/photo-1631049307264-da0ec9d70304?w=1200&q=80",
+        "photo_url": "https://images.unsplash.com/photo-1577412647305-991150c7d163?w=1200&q=80",
         "description": "Salle de visio dédiée aux appels externes et aux 1-à-1.",
     },
 ]

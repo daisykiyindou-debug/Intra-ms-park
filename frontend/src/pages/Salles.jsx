@@ -155,7 +155,12 @@ function RoomCard({ room, onOpen }) {
     >
       <div className="relative aspect-[16/10] bg-[#F4F7FA]">
         {room.photo_url ? (
-          <img src={room.photo_url} alt={room.name} className="w-full h-full object-cover" />
+          <img
+            src={room.photo_url}
+            alt={room.name}
+            className="w-full h-full object-cover"
+            onError={(e) => { e.currentTarget.src = "https://images.unsplash.com/photo-1524758631624-e2822e304c36?w=1200&q=80"; }}
+          />
         ) : (
           <div className="w-full h-full flex items-center justify-center text-[#94A3B8]">
             <DoorOpen className="h-10 w-10" />
@@ -194,11 +199,13 @@ function RoomCard({ room, onOpen }) {
   );
 }
 
-// Room detail with day planning + booking form
+// Room detail with duration picker + compatible start slots
 function RoomDetail({ room, onClose, onBooked }) {
   const [date, setDate] = useState(todayISODate());
   const [availability, setAvailability] = useState({ reservations: [] });
-  const [bookingSlot, setBookingSlot] = useState(null); // { start, end }
+  const [duration, setDuration] = useState(60); // minutes
+  const [customDuration, setCustomDuration] = useState("");
+  const [bookingSlot, setBookingSlot] = useState(null);
 
   const load = () => {
     api.get(`/rooms/${room.id}/availability`, { params: { date } })
@@ -207,30 +214,44 @@ function RoomDetail({ room, onClose, onBooked }) {
   };
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [date, room.id]);
 
-  // Build 30-min slots from 08:00 to 20:00
-  const slots = useMemo(() => {
+  const durOptions = [15, 30, 45, 60, 90, 120, 180, 240];
+
+  // Compute start slots every 15 min from 08:00 to 20:00 - duration
+  const startSlots = useMemo(() => {
     const rows = [];
+    const dayEnd = new Date(`${date}T20:00:00`);
     for (let h = 8; h < 20; h++) {
-      for (let m = 0; m < 60; m += 30) {
+      for (let m = 0; m < 60; m += 15) {
         const start = new Date(`${date}T${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:00`);
-        const end = new Date(start.getTime() + 30 * 60000);
-        const res = (availability.reservations || []).find(r => {
+        const end = new Date(start.getTime() + duration * 60000);
+        if (end > dayEnd) continue;
+        // Overlap check against all reservations
+        const conflict = (availability.reservations || []).find(r => {
           const rs = new Date(r.start_ts).getTime();
           const re = new Date(r.end_ts).getTime();
           return start.getTime() < re && end.getTime() > rs;
         });
-        rows.push({ start, end, res });
+        const mine = conflict?.is_mine;
+        rows.push({ start, end, conflict, mine });
       }
     }
     return rows;
-  }, [date, availability]);
+  }, [date, availability, duration]);
+
+  const freeSlots = startSlots.filter(s => !s.conflict);
+  const busyReservations = availability.reservations || [];
 
   return (
     <div onClick={onClose} className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-start justify-center p-4 overflow-y-auto">
-      <div onClick={(e) => e.stopPropagation()} className="bg-white rounded-3xl w-full max-w-5xl my-8 overflow-hidden" data-testid="room-detail-modal">
+      <div onClick={(e) => e.stopPropagation()} className="bg-white rounded-3xl w-full max-w-4xl my-8 overflow-hidden" data-testid="room-detail-modal">
         {/* Header */}
         <div className="relative">
-          <img src={room.photo_url} alt="" className="w-full h-40 object-cover" />
+          <img
+            src={room.photo_url}
+            alt=""
+            className="w-full h-40 object-cover bg-[#F4F7FA]"
+            onError={(e) => { e.currentTarget.src = "https://images.unsplash.com/photo-1524758631624-e2822e304c36?w=1200&q=80"; }}
+          />
           <button onClick={onClose} className="absolute top-3 right-3 h-9 w-9 rounded-full bg-white/90 hover:bg-white inline-flex items-center justify-center shadow" data-testid="room-detail-close">
             <X className="h-4 w-4" />
           </button>
@@ -243,45 +264,104 @@ function RoomDetail({ room, onClose, onBooked }) {
           </div>
         </div>
 
-        <div className="p-6">
-          {/* Date navigation */}
-          <div className="flex items-center gap-2 mb-4">
-            <input
-              type="date"
-              value={date}
-              onChange={(e) => setDate(e.target.value)}
-              data-testid="room-planning-date"
-              className="ms-input"
-            />
-            <div className="ml-auto flex items-center gap-2 text-xs">
-              <span className="inline-flex items-center gap-1"><span className="h-3 w-3 rounded-sm bg-emerald-200"></span> Libre</span>
-              <span className="inline-flex items-center gap-1"><span className="h-3 w-3 rounded-sm bg-amber-200"></span> Occupé</span>
-              <span className="inline-flex items-center gap-1"><span className="h-3 w-3 rounded-sm bg-[#3BA4FF]/40"></span> Votre réservation</span>
+        <div className="p-6 space-y-5">
+          {/* Step 1 — Duration */}
+          <div>
+            <div className="text-xs uppercase tracking-widest font-semibold text-[#475569] mb-2">
+              1. Durée de votre réunion
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {durOptions.map((d) => {
+                const on = duration === d;
+                const label = d < 60 ? `${d} min` : d % 60 === 0 ? `${d / 60}h` : `${Math.floor(d / 60)}h${String(d % 60).padStart(2, "0")}`;
+                return (
+                  <button
+                    key={d}
+                    onClick={() => { setDuration(d); setCustomDuration(""); }}
+                    data-testid={`dur-${d}`}
+                    className={`px-3 py-1.5 rounded-full text-sm font-semibold transition ${on ? "bg-[#3BA4FF] text-white" : "bg-[#F4F7FA] hover:bg-[#071B34]/5 text-[#475569]"}`}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+              <div className="inline-flex items-center gap-1">
+                <input
+                  type="number"
+                  min={15}
+                  max={480}
+                  step={15}
+                  placeholder="Autre (min)"
+                  value={customDuration}
+                  onChange={(e) => {
+                    setCustomDuration(e.target.value);
+                    const v = parseInt(e.target.value, 10);
+                    if (!Number.isNaN(v) && v >= 15) setDuration(v);
+                  }}
+                  data-testid="dur-custom"
+                  className="w-28 h-9 px-3 rounded-full bg-white ring-1 ring-[#071B34]/10 text-sm outline-none focus:ring-[#3BA4FF]/40"
+                />
+                <span className="text-xs text-[#94A3B8]">min</span>
+              </div>
             </div>
           </div>
 
-          {/* Slots list */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-1.5 max-h-[400px] overflow-y-auto pr-1">
-            {slots.map((s, i) => {
-              const busy = !!s.res;
-              const mine = s.res?.is_mine;
-              const cls = busy
-                ? (mine ? "bg-[#3BA4FF]/25 text-[#1D70B8]" : "bg-amber-100 text-amber-800 cursor-not-allowed")
-                : "bg-emerald-50 hover:bg-emerald-100 text-emerald-800 cursor-pointer";
-              return (
-                <button
-                  key={i}
-                  onClick={() => { if (!busy) setBookingSlot({ start: s.start.toISOString(), end: s.end.toISOString() }); }}
-                  disabled={busy && !mine}
-                  data-testid={`slot-${i}`}
-                  className={`text-left px-3 py-2 rounded-lg text-xs font-semibold transition ${cls}`}
-                >
-                  <span className="tabular-nums">{s.start.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })} – {s.end.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}</span>
-                  <span className="ml-2 opacity-80">{busy ? (mine ? "· Votre réservation" : `· ${s.res.title || "Occupé"}`) : "· Libre"}</span>
-                </button>
-              );
-            })}
+          {/* Step 2 — Date + free start slots */}
+          <div>
+            <div className="text-xs uppercase tracking-widest font-semibold text-[#475569] mb-2 flex items-center gap-3">
+              <span>2. Sélectionnez un horaire de début</span>
+              <input
+                type="date"
+                value={date}
+                onChange={(e) => setDate(e.target.value)}
+                data-testid="room-planning-date"
+                className="ms-input py-1 h-8 text-xs"
+              />
+              <span className="ml-auto text-[10px] text-[#94A3B8]">
+                {freeSlots.length} créneau{freeSlots.length > 1 ? "x" : ""} disponible{freeSlots.length > 1 ? "s" : ""}
+              </span>
+            </div>
+            {freeSlots.length === 0 ? (
+              <div className="rounded-xl bg-amber-50 text-amber-800 text-sm p-4 text-center">
+                Aucun créneau de <b>{duration >= 60 ? `${Math.floor(duration / 60)}h${duration % 60 ? String(duration % 60).padStart(2, "0") : ""}` : `${duration} min`}</b> disponible ce jour. Essayez une autre date ou raccourcissez la durée.
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-1.5 max-h-[280px] overflow-y-auto pr-1">
+                {freeSlots.map((s, i) => (
+                  <button
+                    key={i}
+                    onClick={() => setBookingSlot({ start: s.start.toISOString(), end: s.end.toISOString() })}
+                    data-testid={`start-${i}`}
+                    className="text-left px-3 py-2 rounded-lg text-xs font-semibold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 transition"
+                  >
+                    <span className="tabular-nums">{s.start.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}</span>
+                    <span className="ml-1 text-emerald-600 font-normal">→ {s.end.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}</span>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
+
+          {/* Existing reservations of the day (compact) */}
+          {busyReservations.length > 0 && (
+            <div>
+              <div className="text-xs uppercase tracking-widest font-semibold text-[#475569] mb-2">
+                Créneaux déjà réservés
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {busyReservations.map((r) => (
+                  <span
+                    key={r.id}
+                    className={`text-[11px] px-2 py-1 rounded-full ${r.is_mine ? "bg-[#3BA4FF]/15 text-[#1D70B8]" : "bg-amber-100 text-amber-800"}`}
+                    data-testid={`busy-${r.id}`}
+                  >
+                    {new Date(r.start_ts).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })} – {new Date(r.end_ts).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}
+                    {r.is_mine ? " · Votre réservation" : ` · ${r.title || "Occupé"}`}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         {bookingSlot && (
