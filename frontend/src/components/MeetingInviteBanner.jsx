@@ -9,7 +9,7 @@ import { useApp } from "@/contexts/AppContext";
 // centered confirmation popup. Once responded (or postponed), the popup
 // closes and the next pending invite (if any) is shown.
 export default function MeetingInviteBanner() {
-  const { me } = useApp();
+  const { me, employees } = useApp();
   const [pending, setPending] = useState(null);
   // Locally remember invites the user has dismissed (postponed) so they
   // don't reopen on every poll cycle in the same session.
@@ -62,6 +62,12 @@ export default function MeetingInviteBanner() {
 
   if (!pending) return null;
 
+  // Organizer info for the "De la part de …" line
+  const organizerEmp = (employees || []).find((e) => e.id === pending.organizer_id);
+  const organizerName = organizerEmp
+    ? `${organizerEmp.first_name || ""} ${organizerEmp.last_name || ""}`.trim()
+    : "Un(e) collègue";
+
   const start = new Date(pending.start_ts);
   const end = new Date(pending.end_ts);
   const dateLabel = start.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" });
@@ -83,6 +89,12 @@ export default function MeetingInviteBanner() {
             <Calendar className="h-3.5 w-3.5" /> Nouvelle invitation
           </div>
           <h3 className="text-xl font-bold" data-testid="meeting-invite-title">{pending.title}</h3>
+          <div className="mt-2 text-xs opacity-90 flex items-center gap-2" data-testid="meeting-invite-from">
+            {organizerEmp?.avatar && (
+              <img src={organizerEmp.avatar} alt="" className="h-6 w-6 rounded-full object-cover ring-2 ring-white/40" />
+            )}
+            <span>De la part de <b>{organizerName}</b>{organizerEmp?.role ? ` · ${organizerEmp.role}` : ""}</span>
+          </div>
         </div>
 
         <div className="p-5 space-y-3">

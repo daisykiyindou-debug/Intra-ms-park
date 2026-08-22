@@ -10,6 +10,8 @@ const typeColor = {
   birthday: { bg: "#FCE7F3", color: "#BE185D", label: "Anniversaire" },
   maintenance: { bg: "#F1F5F9", color: "#475569", label: "Maintenance" },
 };
+const DEFAULT_TYPE = { bg: "#F1F5F9", color: "#475569", label: "Événement" };
+const getTypeMeta = (t) => typeColor[t] || DEFAULT_TYPE;
 
 export default function Agenda() {
   const today = new Date();
@@ -117,7 +119,7 @@ export default function Agenda() {
                   </div>
                   <div className="mt-1 space-y-1">
                     {ev.slice(0, 2).map((e) => {
-                      const m = typeColor[e.type];
+                      const m = getTypeMeta(e.type);
                       return (
                         <button
                           key={e.id}
@@ -148,7 +150,7 @@ export default function Agenda() {
               .filter((e) => new Date(e.date) >= today)
               .slice(0, 8)
               .map((e) => {
-                const m = typeColor[e.type];
+                const m = getTypeMeta(e.type);
                 return (
                   <button
                     key={e.id}
@@ -203,11 +205,11 @@ export default function Agenda() {
                   <span
                     className="ms-chip"
                     style={{
-                      background: typeColor[selected.type].bg,
-                      color: typeColor[selected.type].color,
+                      background: getTypeMeta(selected.type).bg,
+                      color: getTypeMeta(selected.type).color,
                     }}
                   >
-                    {typeColor[selected.type].label}
+                    {getTypeMeta(selected.type).label}
                   </span>
                   <h3 className="mt-2 text-2xl font-bold text-[#071B34]">{selected.title}</h3>
                   {selected.intro_text && (

@@ -9158,7 +9158,7 @@ async def _notify_participants(res: dict, action: str):
             title=titles[action],
             content=contents[action],
             icon="calendar",
-            link=f"/salles/reservation/{res['id']}",
+            link="/salles/mes-reservations",
         )
 
 
@@ -9360,6 +9360,7 @@ async def respond_to_reservation(res_id: str, payload: RespondIn):
                 "end_time": end_dt.strftime("%H:%M"),
                 "location": f"{room.get('name', 'Salle')} · {room.get('floor') or ''}".strip(" ·"),
                 "summary": r.get("description") or f"Réunion invitée par {organizer.get('first_name', '')} {organizer.get('last_name', '')}".strip(),
+                "type": "meeting",
                 "category": "meeting",
                 "icon": "calendar",
                 "group_targets": ["employee-only"],
