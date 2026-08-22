@@ -14,6 +14,9 @@ Intranet ultra premium (glassmorphism, cartes arrondies) pour les employés de M
 - Auth simulée: header `X-Employee-Id`.
 - Uploads: dossier local `/app/backend/uploads`.
 
+## Changelog récent
+- **iter 32 (22 août 2026)** — Bugfix `UserManager.jsx` wizard : la validation "Suivant" exigeait `f.email` (Email pro) alors que le champ n'est pas requis (label sans `*`). Désormais seul `personal_email` est requis, et `email` pro est uniquement format-checké si non-vide. Validé bout-en-bout : création → reset password → login via email pro OU perso (backend 100%, frontend 100%).
+
 ## Fonctionnalités livrées (état actuel — 22 août 2026, iter 34)
 - Authentification simulée + Onboarding: WelcomePopup première connexion.
 - Permissions granulaires (Super Admin / RH / Communication / Employé) appliquées back+front.

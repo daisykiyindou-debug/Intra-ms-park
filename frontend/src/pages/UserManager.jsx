@@ -878,8 +878,17 @@ function UserEditor({ user, employees, onClose, onSaved }) {
                 toast.error("Prénom et nom obligatoires");
                 return false;
               }
-              if (!f.email?.trim() || !/^\S+@\S+\.\S+$/.test(f.email.trim())) {
-                toast.error("Adresse e-mail valide requise");
+              const emailRe = /^\S+@\S+\.\S+$/;
+              if (!f.personal_email?.trim() || !emailRe.test(f.personal_email.trim())) {
+                toast.error("Email perso valide requis");
+                return false;
+              }
+              if (f.email?.trim() && !emailRe.test(f.email.trim())) {
+                toast.error("Email pro invalide");
+                return false;
+              }
+              if (!f.personal_phone?.trim()) {
+                toast.error("Téléphone perso obligatoire");
                 return false;
               }
             }

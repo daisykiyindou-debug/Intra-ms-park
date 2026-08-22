@@ -1,0 +1,40 @@
+{
+  "summary": "Iteration 32 — verified the UserManager wizard email-validation fix plus the create → reset-password → login E2E chain. Backend: 12/12 pytest cases pass (create user with only personal_email, email fallback, temp password, reset-password, login via pro email + personal email, wrong password 401, case-insensitive email, 4 seed accounts regression, admin RBAC 403). Frontend: all 4 requested wizard validation cases pass — empty Email pro advances to the HR step with NO 'Adresse e-mail valide requise' toast; invalid Email pro -> 'Email pro invalide'; invalid Email perso -> 'Email perso valide requis'; all valid -> advances. Full wizard save created the user and displayed the temp-password modal; row-menu 'Réinit. mot de passe' returned a fresh password and login with the new password via the PERSONAL email reached /dashboard with the onboarding welcome modal. Bug reported by the user is fixed; no functional regressions found.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/admin/users", "issue": "weekly_hours is typed as str in UserCreate, so a numeric JSON value (24) returns 422. Frontend always sends a string so UI is unaffected, but the API contract is brittle — consider Union[str,int] coercion."},
+      {"endpoint": "POST /api/admin/users/{uid}/reset-password", "issue": "Returns the temp password in plaintext (expected for this mocked MVP); passwords are also stored plaintext in the employees collection."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "UserManager — wizard step 2 (RH)", "issues": ["Date d'embauche / Date fin contrat / Expiration du badge use the native browser date input (placeholder shown as mm/dd/yyyy, US order) instead of a shadcn calendar — inconsistent with a French UI", "Département/Manager/Type de contrat use native <select> elements rather than the shadcn Select used elsewhere"]},
+      {"screen": "UserManager — list row actions", "issues": ["Password reset and delete use native window.confirm() instead of an in-app confirm dialog (also blocks automation and looks unbranded)", "The reset temp password is echoed both in a 15s toast and in the modal — the toast leaks the credential onto the screen longer than necessary"]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter32_user_create_reset_login.py",
+    "/app/test_reports/pytest/iter32.xml"
+  ],
+  "action_items": [
+    "Optional: accept numeric weekly_hours in UserCreate (currently str-only → 422 on numeric payloads)",
+    "Optional polish: replace native window.confirm for reset/delete with an in-app dialog; replace native date/select inputs in the wizard with the shadcn components",
+    "Optional: drop the plaintext password from the reset toast (modal already shows it with a copy button)"
+  ],
+  "critical_code_review_comments": [
+    "validateStep in UserManager.jsx (l.875-907) is now correct: personal_email required + format-checked, email pro format-checked only when non-empty — matches backend behaviour (server.py l.5698: email falls back to personal_email).",
+    "auth_login stores/compares passwords in plaintext (server.py l.5498). Acceptable for the mocked MVP but must be hashed (bcrypt) before any real deployment; there is also no brute-force lockout.",
+    "server.py is ~9.6k lines — should be split into routers (auth, admin_users, planning, messagerie...) for maintainability."
+  ],
+  "updated_files": ["/app/backend/tests/test_iter32_user_create_reset_login.py"],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "seed_data_creation": "Created TESTE2E User363635 (testui363635@gmail.com) via the UI wizard and a TEST Wizard* user via API; both deleted after testing (verified admin/users list clean).",
+  "should_call_test_agent_after_fix": false,
+  "should_main_agent_self_test": true,
+  "test_credentials": "Admin marcus.simeo@mspark.fr / MSPark@Admin2026! (X-Employee-Id: emp-marcus-simeo); employee idriss.malonga@gmail.com / Idriss2026!; lea.dubois@mspark.fr / MSPark@Comm2026!; superadmin@mspark.fr / MSPark@Super2026! — all verified working.",
+  "context_for_next_testing_agent": "Playwright note: reset-password and delete in UserManager use native window.confirm — you MUST register a page.on('dialog', accept) handler or the action is silently dismissed. Wizard flow: user-create → fields (first_name, last_name, personal_email, personal_phone) → user-next → HR step requires weekly_hours + Poste → user-next x3 → user-save; temp password shown at [data-testid=temp-password-value]. Backend regression suite for this area: /app/backend/tests/test_iter32_user_create_reset_login.py (weekly_hours must be sent as a STRING).",
+  "rca_of_the_issue": "Original bug: validateStep required f.email (Email pro) even though the label had no asterisk and the backend defaults email to personal_email. The fix makes personal_email the only required email and format-checks email pro only when provided — confirmed by UI test (empty Email pro now advances to the HR step with no toast)."
+}
