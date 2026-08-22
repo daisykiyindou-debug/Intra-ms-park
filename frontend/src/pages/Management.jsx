@@ -39,6 +39,7 @@ import RestaurationManager from "@/pages/RestaurationManager";
 import PayslipsManager from "@/pages/PayslipsManager";
 import IdeasAdmin from "@/pages/IdeasAdmin";
 import PartnersManager from "@/pages/PartnersManager";
+import AdminSalles from "@/pages/AdminSalles";
 import ImageUpload from "@/components/ImageUpload";
 
 const subNav = [
@@ -196,6 +197,7 @@ export default function ManagementShell() {
         {isAdmin && <Route path="restauration" element={<RestaurationManager />} />}
         {(isAdmin || has("view_payslips", "manage_documents")) && <Route path="fiches-de-paie" element={<PayslipsManager />} />}
         {isAdmin && <Route path="idees" element={<IdeasAdmin />} />}
+        {isAdmin && <Route path="salles" element={<AdminSalles />} />}
         {isAdmin && <Route path="avantages" element={<PartnersManager />} />}
         {(isAdmin || has("view_tickets", "reply_tickets")) && <Route path="support" element={<SupportITList />} />}
         {(isAdmin || has("manage_documents", "publish_documents")) && <Route path="documents-editor" element={<HRDocsManager />} />}

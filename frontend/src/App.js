@@ -28,6 +28,7 @@ import Payslip from "@/pages/Payslip";
 import NewsDetail, { EventDetail } from "@/pages/NewsDetail";
 import PublicForm from "@/pages/PublicForm";
 import NewslettersList, { NewsletterDetail, NewsletterEditor } from "@/pages/Newsletters";
+import Salles from "@/pages/Salles";
 import GalerieList, { GalerieAlbum } from "@/pages/Galerie";
 import NotesDeFrais from "@/pages/NotesDeFrais";
 import { HRDocView } from "@/pages/HRDocs";
@@ -158,6 +159,7 @@ function App() {
               <Route path="/support/tickets/:id" element={<TicketDetail />} />
               <Route path="/aide" element={<CentreAide />} />
               <Route path="/avantages" element={<Avantages />} />
+              <Route path="/salles" element={<Salles />} />
               <Route path="/avantages/checkout" element={<AvantagesCheckout />} />
               <Route path="/avantages/commandes" element={<AvantagesOrders />} />
               <Route path="/avantages/commandes/:oid/billet/:tid" element={<AvantagesTicket />} />

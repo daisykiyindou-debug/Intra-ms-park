@@ -30,6 +30,7 @@ import {
   GraduationCap,
   LifeBuoy,
   HelpCircle,
+  DoorOpen,
 } from "lucide-react";
 import { useApp, hasPermission } from "@/contexts/AppContext";
 
@@ -55,6 +56,7 @@ const employeeNav = [
   { to: "/restaurant", label: "Restauration", icon: ShoppingBag, key: "restaurant" },
 
   { divider: "Vie de l'entreprise" },
+  { to: "/salles", label: "Salles de réunion", icon: DoorOpen, key: "meeting-rooms" },
   { to: "/avantages", label: "CSE & Avantages", icon: Gift, key: "cse" },
   { to: "/agenda", label: "Agenda", icon: Calendar, key: "agenda" },
   { to: "/formations", label: "Formation", icon: GraduationCap, key: "formations" },
@@ -85,6 +87,7 @@ const adminNav = [
   { to: "/management/utilisateurs", label: "Utilisateurs", icon: Users, key: "mgmt-users", perm: ["manage_users"] },
   { to: "/management/fiches-de-paie", label: "Fiches de paie", icon: FileText, key: "mgmt-payslips", perm: ["view_payslips"] },
   { to: "/management/idees", label: "Boîte à idées", icon: Lightbulb, key: "mgmt-ideas" },
+  { to: "/management/salles", label: "Salles de réunion", icon: DoorOpen, key: "mgmt-rooms" },
   { to: "/management/documents-editor", label: "Rédiger documents", icon: Edit3, key: "mgmt-hrdocs", perm: ["manage_documents", "publish_documents"] },
   { to: "/newsletters", label: "Newsletters", icon: Mail, key: "mgmt-newsletters", perm: ["manage_newsletter"] },
   { to: "/actualites", label: "Actualités (rédaction)", icon: Newspaper, key: "mgmt-news", perm: ["publish_news", "edit_news"] },

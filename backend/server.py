@@ -6895,6 +6895,10 @@ async def on_start():
         await _seed_formations()
     except Exception as e:
         print(f"[seed_formations] error: {e}")
+    try:
+        await _seed_meeting_rooms()
+    except Exception as e:
+        print(f"[seed_meeting_rooms] error: {e}")
     # Idempotent super admin (may not exist if seed ran on older version)
     if not await db.employees.find_one({"id": "emp-super-admin"}):
         await db.employees.insert_one({
@@ -8811,6 +8815,459 @@ async def _seed_formations():
          "is_open": True, "created_at": _now()},
     ]
     await db.formations.insert_many(demos)
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Meeting rooms (Salles de réunion) — reservations module
+# ═══════════════════════════════════════════════════════════════════
+MEETING_ROOM_SEEDS = [
+    {
+        "id": "room-horizon",
+        "name": "Salle Horizon",
+        "capacity": 12,
+        "floor": "2ᵉ étage",
+        "equipments": ["screen", "video", "whiteboard", "power", "wifi", "audio"],
+        "photo_url": "https://images.unsplash.com/photo-1497366216548-37526070297c?w=1200&q=80",
+        "description": "Grande salle claire avec vue dégagée, idéale pour les points d'équipe.",
+    },
+    {
+        "id": "room-galaxie",
+        "name": "Salle Galaxie",
+        "capacity": 25,
+        "floor": "2ᵉ étage",
+        "equipments": ["screen", "video", "whiteboard", "power", "wifi", "audio", "hdmi"],
+        "photo_url": "https://images.unsplash.com/photo-1517502884422-41eaead166d4?w=1200&q=80",
+        "description": "Grand espace pour formations, séminaires et présentations plénières.",
+    },
+    {
+        "id": "room-nova",
+        "name": "Salle Nova",
+        "capacity": 6,
+        "floor": "1ᵉʳ étage",
+        "equipments": ["screen", "video", "whiteboard", "power", "wifi"],
+        "photo_url": "https://images.unsplash.com/photo-1600494603989-9650cf6dad51?w=1200&q=80",
+        "description": "Petit format cosy pour entretiens et réunions rapprochées.",
+    },
+    {
+        "id": "room-eclipse",
+        "name": "Salle Éclipse",
+        "capacity": 4,
+        "floor": "1ᵉʳ étage",
+        "equipments": ["screen", "video", "power", "wifi"],
+        "photo_url": "https://images.unsplash.com/photo-1631049307264-da0ec9d70304?w=1200&q=80",
+        "description": "Salle de visio dédiée aux appels externes et aux 1-à-1.",
+    },
+]
+
+
+EQUIPMENT_LABELS = {
+    "screen": "Écran de présentation",
+    "video": "Visioconférence",
+    "whiteboard": "Tableau blanc",
+    "power": "Prises électriques",
+    "wifi": "Connexion Wi-Fi",
+    "audio": "Système audio",
+    "hdmi": "Câble HDMI",
+    "paperboard": "Paperboard",
+    "computer": "Ordinateur",
+    "adapter": "Adaptateur",
+    "water": "Bouteilles d'eau",
+    "coffee": "Café",
+    "microphone": "Micro",
+}
+
+
+async def _seed_meeting_rooms():
+    if await db.meeting_rooms.count_documents({}) > 0:
+        return
+    now = _now()
+    for r in MEETING_ROOM_SEEDS:
+        await db.meeting_rooms.insert_one({
+            **r,
+            "is_active": True,
+            "maintenance_note": None,
+            "created_at": now,
+        })
+
+
+class MeetingRoomIn(BaseModel):
+    name: str
+    capacity: int
+    floor: Optional[str] = ""
+    equipments: List[str] = []
+    photo_url: Optional[str] = ""
+    description: Optional[str] = ""
+    is_active: Optional[bool] = True
+    maintenance_note: Optional[str] = None
+
+
+class MeetingReservationIn(BaseModel):
+    room_id: str
+    title: str
+    meeting_type: str = "team"  # team | interview | training | video | external | direction | workshop | other
+    start_ts: str  # ISO
+    end_ts: str    # ISO
+    participants_ids: List[str] = []
+    external_participants: List[str] = []
+    participants_count: Optional[int] = None
+    description: Optional[str] = ""
+    equipments_needed: List[str] = []
+    special_request: Optional[str] = ""
+    organizer_id: Optional[str] = None  # admin can book on behalf
+
+
+def _parse_iso(s: str) -> datetime:
+    return datetime.fromisoformat(str(s).replace("Z", "+00:00"))
+
+
+async def _room_conflicts(room_id: str, start_iso: str, end_iso: str, exclude_id: Optional[str] = None) -> list[dict]:
+    q: dict = {
+        "room_id": room_id,
+        "status": {"$ne": "cancelled"},
+        "start_ts": {"$lt": end_iso},
+        "end_ts": {"$gt": start_iso},
+    }
+    if exclude_id:
+        q["id"] = {"$ne": exclude_id}
+    return await db.room_reservations.find(q, {"_id": 0}).to_list(50)
+
+
+async def _room_current_status(room: dict) -> dict:
+    """Return a friendly current status + next slot for a given room."""
+    if not room.get("is_active"):
+        return {"status_key": "maintenance", "status_label": "Indisponible pour maintenance", "next_slot": None}
+    now_iso = _now()
+    # Live reservation covering now?
+    live = await db.room_reservations.find_one({
+        "room_id": room["id"],
+        "status": {"$ne": "cancelled"},
+        "start_ts": {"$lte": now_iso},
+        "end_ts": {"$gt": now_iso},
+    }, {"_id": 0})
+    if live:
+        end_dt = _parse_iso(live["end_ts"]).astimezone(PARIS_TZ)
+        return {
+            "status_key": "busy",
+            "status_label": f"Occupée jusqu'à {end_dt.strftime('%Hh%M')}",
+            "next_slot": live["end_ts"],
+        }
+    # Next reservation today?
+    today_start = _now_paris().replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc).isoformat()
+    today_end = (_now_paris().replace(hour=23, minute=59, second=59, microsecond=0)).astimezone(timezone.utc).isoformat()
+    next_res = await db.room_reservations.find_one({
+        "room_id": room["id"],
+        "status": {"$ne": "cancelled"},
+        "start_ts": {"$gt": now_iso, "$lte": today_end},
+    }, {"_id": 0}, sort=[("start_ts", 1)])
+    if next_res:
+        start_dt = _parse_iso(next_res["start_ts"]).astimezone(PARIS_TZ)
+        return {
+            "status_key": "free",
+            "status_label": f"Disponible — prochain créneau à {start_dt.strftime('%Hh%M')}",
+            "next_slot": next_res["start_ts"],
+        }
+    # Any reservations today at all?
+    day_count = await db.room_reservations.count_documents({
+        "room_id": room["id"],
+        "status": {"$ne": "cancelled"},
+        "start_ts": {"$gte": today_start, "$lt": today_end},
+    })
+    if day_count == 0:
+        return {"status_key": "free", "status_label": "Disponible maintenant", "next_slot": None}
+    return {"status_key": "free", "status_label": "Disponible", "next_slot": None}
+
+
+async def _enrich_room(room: dict) -> dict:
+    status = await _room_current_status(room)
+    return {**room, **status}
+
+
+@api.get("/rooms")
+async def list_rooms():
+    items = await db.meeting_rooms.find({}, {"_id": 0}).to_list(200)
+    return [await _enrich_room(r) for r in items]
+
+
+@api.get("/rooms/{rid}")
+async def get_room(rid: str):
+    room = await db.meeting_rooms.find_one({"id": rid}, {"_id": 0})
+    if not room:
+        raise HTTPException(404, "Salle introuvable")
+    return await _enrich_room(room)
+
+
+@api.get("/rooms/{rid}/availability")
+async def room_availability(rid: str, date: Optional[str] = None):
+    room = await db.meeting_rooms.find_one({"id": rid}, {"_id": 0})
+    if not room:
+        raise HTTPException(404, "Salle introuvable")
+    day = date or _now_paris().date().isoformat()
+    # Reservations that overlap this day
+    day_start = datetime.fromisoformat(day + "T00:00:00+00:00").isoformat()
+    day_end = datetime.fromisoformat(day + "T23:59:59+00:00").isoformat()
+    items = await db.room_reservations.find({
+        "room_id": rid,
+        "status": {"$ne": "cancelled"},
+        "start_ts": {"$lt": day_end},
+        "end_ts": {"$gt": day_start},
+    }, {"_id": 0}).sort("start_ts", 1).to_list(200)
+    uid = current_user()
+    out = []
+    for r in items:
+        item = {
+            "id": r["id"],
+            "start_ts": r["start_ts"],
+            "end_ts": r["end_ts"],
+            "is_mine": r.get("organizer_id") == uid or uid in (r.get("participants_ids") or []),
+            "status": r.get("status", "confirmed"),
+        }
+        # Privacy: show title only to organizer / participants
+        if item["is_mine"]:
+            item["title"] = r.get("title")
+            item["organizer_id"] = r.get("organizer_id")
+        else:
+            item["title"] = "Réservé"
+        out.append(item)
+    return {"date": day, "reservations": out, "room": room}
+
+
+async def _notify_participants(res: dict, action: str):
+    """Notify participants of a reservation about creation / update / cancellation."""
+    organizer = await db.employees.find_one({"id": res.get("organizer_id")}, {"_id": 0})
+    org_name = f"{organizer.get('first_name', '')} {organizer.get('last_name', '')}".strip() if organizer else "Un collègue"
+    room = await db.meeting_rooms.find_one({"id": res["room_id"]}, {"_id": 0})
+    room_name = (room or {}).get("name") or "Salle"
+    start_dt = _parse_iso(res["start_ts"]).astimezone(PARIS_TZ)
+    when = start_dt.strftime("%d/%m %Hh%M")
+    titles = {
+        "created": f"Nouvelle réunion · {room_name}",
+        "updated": f"Réunion modifiée · {room_name}",
+        "cancelled": f"Réunion annulée · {room_name}",
+    }
+    contents = {
+        "created": f"{org_name} vous a invité(e) à \"{res.get('title')}\" — {when}",
+        "updated": f"{org_name} a modifié \"{res.get('title')}\" — {when}",
+        "cancelled": f"{org_name} a annulé \"{res.get('title')}\" — {when}",
+    }
+    for pid in (res.get("participants_ids") or []):
+        if pid == res.get("organizer_id"):
+            continue
+        await _push_notification(
+            employee_id=pid,
+            type="meeting",
+            title=titles[action],
+            content=contents[action],
+            icon="calendar",
+            link=f"/salles/reservation/{res['id']}",
+        )
+
+
+@api.post("/reservations")
+async def create_reservation(payload: MeetingReservationIn):
+    room = await db.meeting_rooms.find_one({"id": payload.room_id}, {"_id": 0})
+    if not room:
+        raise HTTPException(404, "Salle introuvable")
+    if not room.get("is_active"):
+        raise HTTPException(400, "Cette salle est actuellement indisponible.")
+    try:
+        s = _parse_iso(payload.start_ts)
+        e = _parse_iso(payload.end_ts)
+    except Exception:
+        raise HTTPException(400, "Horaires invalides")
+    if e <= s:
+        raise HTTPException(400, "L'heure de fin doit être après l'heure de début.")
+    if (e - s).total_seconds() < 15 * 60:
+        raise HTTPException(400, "Durée minimum : 15 minutes.")
+    if not payload.title.strip():
+        raise HTTPException(400, "Titre requis")
+    # Conflict check
+    conflicts = await _room_conflicts(payload.room_id, payload.start_ts, payload.end_ts)
+    if conflicts:
+        c = conflicts[0]
+        cs = _parse_iso(c["start_ts"]).astimezone(PARIS_TZ).strftime("%Hh%M")
+        ce = _parse_iso(c["end_ts"]).astimezone(PARIS_TZ).strftime("%Hh%M")
+        raise HTTPException(409, f"La salle n'est pas disponible entre {cs} et {ce}. Veuillez modifier votre horaire ou choisir une autre salle.")
+    uid = current_user()
+    organizer_id = payload.organizer_id or uid
+    res_id = _id()
+    doc = {
+        "id": res_id,
+        "room_id": payload.room_id,
+        "organizer_id": organizer_id,
+        "title": payload.title.strip(),
+        "meeting_type": payload.meeting_type,
+        "start_ts": payload.start_ts,
+        "end_ts": payload.end_ts,
+        "participants_ids": list({*(payload.participants_ids or []), organizer_id}),
+        "external_participants": payload.external_participants or [],
+        "participants_count": payload.participants_count or (len(payload.participants_ids or []) + len(payload.external_participants or []) + 1),
+        "description": (payload.description or "").strip(),
+        "equipments_needed": payload.equipments_needed or [],
+        "special_request": (payload.special_request or "").strip(),
+        "status": "confirmed",
+        "created_at": _now(),
+        "created_by": uid,
+    }
+    await db.room_reservations.insert_one(doc.copy())
+    await _notify_participants(doc, "created")
+    return doc
+
+
+@api.get("/reservations")
+async def list_my_reservations(scope: str = "upcoming"):
+    """scope: upcoming | history | all"""
+    uid = current_user()
+    now_iso = _now()
+    base = {"$or": [{"organizer_id": uid}, {"participants_ids": uid}]}
+    if scope == "upcoming":
+        base["end_ts"] = {"$gte": now_iso}
+        base["status"] = {"$ne": "cancelled"}
+    elif scope == "history":
+        base["$or"] = [
+            {"end_ts": {"$lt": now_iso}},
+            {"status": "cancelled"},
+        ]
+        base["$and"] = [{"$or": [{"organizer_id": uid}, {"participants_ids": uid}]}]
+        base.pop("$or", None)
+    items = await db.room_reservations.find(base, {"_id": 0}).sort("start_ts", 1 if scope == "upcoming" else -1).to_list(200)
+    # Attach room name for convenience
+    rooms = {r["id"]: r async for r in db.meeting_rooms.find({}, {"_id": 0})}
+    for it in items:
+        room = rooms.get(it["room_id"], {})
+        it["room_name"] = room.get("name")
+        it["room_floor"] = room.get("floor")
+        it["room_photo"] = room.get("photo_url")
+    return items
+
+
+@api.get("/reservations/{res_id}")
+async def get_reservation(res_id: str):
+    r = await db.room_reservations.find_one({"id": res_id}, {"_id": 0})
+    if not r:
+        raise HTTPException(404, "Réservation introuvable")
+    room = await db.meeting_rooms.find_one({"id": r["room_id"]}, {"_id": 0}) or {}
+    r["room"] = room
+    return r
+
+
+@api.put("/reservations/{res_id}")
+async def update_reservation(res_id: str, payload: MeetingReservationIn):
+    r = await db.room_reservations.find_one({"id": res_id}, {"_id": 0})
+    if not r:
+        raise HTTPException(404, "Réservation introuvable")
+    uid = current_user()
+    me = await db.employees.find_one({"id": uid}, {"_id": 0}) or {}
+    if r.get("organizer_id") != uid and not me.get("is_admin"):
+        raise HTTPException(403, "Seul l'organisateur peut modifier cette réservation.")
+    try:
+        s = _parse_iso(payload.start_ts)
+        e = _parse_iso(payload.end_ts)
+    except Exception:
+        raise HTTPException(400, "Horaires invalides")
+    if e <= s:
+        raise HTTPException(400, "L'heure de fin doit être après l'heure de début.")
+    conflicts = await _room_conflicts(payload.room_id, payload.start_ts, payload.end_ts, exclude_id=res_id)
+    if conflicts:
+        c = conflicts[0]
+        cs = _parse_iso(c["start_ts"]).astimezone(PARIS_TZ).strftime("%Hh%M")
+        ce = _parse_iso(c["end_ts"]).astimezone(PARIS_TZ).strftime("%Hh%M")
+        raise HTTPException(409, f"La salle n'est pas disponible entre {cs} et {ce}.")
+    updates = {
+        "room_id": payload.room_id,
+        "title": payload.title.strip(),
+        "meeting_type": payload.meeting_type,
+        "start_ts": payload.start_ts,
+        "end_ts": payload.end_ts,
+        "participants_ids": list({*(payload.participants_ids or []), r["organizer_id"]}),
+        "external_participants": payload.external_participants or [],
+        "participants_count": payload.participants_count or r.get("participants_count"),
+        "description": (payload.description or "").strip(),
+        "equipments_needed": payload.equipments_needed or [],
+        "special_request": (payload.special_request or "").strip(),
+        "updated_at": _now(),
+    }
+    await db.room_reservations.update_one({"id": res_id}, {"$set": updates})
+    updated = await db.room_reservations.find_one({"id": res_id}, {"_id": 0})
+    await _notify_participants(updated, "updated")
+    return updated
+
+
+class CancelIn(BaseModel):
+    reason: Optional[str] = None
+
+
+@api.post("/reservations/{res_id}/cancel")
+async def cancel_reservation(res_id: str, payload: CancelIn):
+    r = await db.room_reservations.find_one({"id": res_id}, {"_id": 0})
+    if not r:
+        raise HTTPException(404, "Réservation introuvable")
+    uid = current_user()
+    me = await db.employees.find_one({"id": uid}, {"_id": 0}) or {}
+    if r.get("organizer_id") != uid and not me.get("is_admin"):
+        raise HTTPException(403, "Seul l'organisateur peut annuler cette réservation.")
+    await db.room_reservations.update_one({"id": res_id}, {"$set": {
+        "status": "cancelled",
+        "cancelled_at": _now(),
+        "cancel_reason": payload.reason or "",
+    }})
+    updated = await db.room_reservations.find_one({"id": res_id}, {"_id": 0})
+    await _notify_participants(updated, "cancelled")
+    return updated
+
+
+# ── Admin — rooms CRUD + view all reservations
+def _require_admin() -> str:
+    return current_user()  # gate below via employee.is_admin
+
+
+async def _assert_admin():
+    me = await db.employees.find_one({"id": current_user()}, {"_id": 0}) or {}
+    if not me.get("is_admin"):
+        raise HTTPException(403, "Réservé aux administrateurs")
+
+
+@api.post("/admin/rooms")
+async def admin_create_room(payload: MeetingRoomIn):
+    await _assert_admin()
+    doc = payload.model_dump()
+    doc["id"] = f"room-{_id()[:8]}"
+    doc["created_at"] = _now()
+    await db.meeting_rooms.insert_one(doc.copy())
+    return doc
+
+
+@api.put("/admin/rooms/{rid}")
+async def admin_update_room(rid: str, payload: MeetingRoomIn):
+    await _assert_admin()
+    await db.meeting_rooms.update_one({"id": rid}, {"$set": payload.model_dump()})
+    r = await db.meeting_rooms.find_one({"id": rid}, {"_id": 0})
+    if not r:
+        raise HTTPException(404, "Salle introuvable")
+    return r
+
+
+@api.delete("/admin/rooms/{rid}")
+async def admin_delete_room(rid: str):
+    await _assert_admin()
+    await db.meeting_rooms.delete_one({"id": rid})
+    return {"ok": True}
+
+
+@api.get("/admin/reservations")
+async def admin_list_reservations(scope: str = "upcoming"):
+    await _assert_admin()
+    now_iso = _now()
+    q: dict = {}
+    if scope == "upcoming":
+        q = {"end_ts": {"$gte": now_iso}, "status": {"$ne": "cancelled"}}
+    elif scope == "history":
+        q = {"$or": [{"end_ts": {"$lt": now_iso}}, {"status": "cancelled"}]}
+    items = await db.room_reservations.find(q, {"_id": 0}).sort("start_ts", -1 if scope == "history" else 1).to_list(500)
+    rooms = {r["id"]: r async for r in db.meeting_rooms.find({}, {"_id": 0})}
+    for it in items:
+        room = rooms.get(it["room_id"], {})
+        it["room_name"] = room.get("name")
+    return items
 
 
 

@@ -14,27 +14,27 @@ Intranet ultra premium (glassmorphism, cartes arrondies) pour les employés de M
 - Auth simulée: header `X-Employee-Id`.
 - Uploads: dossier local `/app/backend/uploads`.
 
-## Fonctionnalités livrées (état actuel — 22 août 2026, iter 33)
+## Fonctionnalités livrées (état actuel — 22 août 2026, iter 34)
 - Authentification simulée + Onboarding: WelcomePopup première connexion.
 - Permissions granulaires (Super Admin / RH / Communication / Employé) appliquées back+front.
 - Dashboard temps réel (horloge Paris, planning du jour, carousel).
 - Points Repas + Menu restauration + Notes de frais.
-- Planning + Badgeage (statuts congés/RTT/OFF, next shift calculé même en congés).
-- Congés/RTT/absences + Documents RH (fiches de paie automatiques + DM auto depuis "Service RH" avec lien).
-- Actualités + Newsletters Pro (éditeur riche, blocs 4 colonnes, planification `publish_at`, ciblage par statut, publication verrouillée).
-- Messagerie:
-  - temps réel isolée par utilisateur (pas de canaux globaux hérités pour les nouveaux comptes)
-  - édition dans 10 min avec indicateur "Modifié"
-  - like/unlike 👍
-  - deep-link notifications avec auto-clear du badge
-  - filtrage auto des notifs vers canaux supprimés/inaccessibles
-  - onglet "Canaux" dans la modale Nouveau message (Service RH, Communication, Managers OPS, Département financier, Direction) — 1 canal unique par utilisateur, membres calculés dynamiquement, non-membres bloqués (403)
-  - sidebar remplit toute la hauteur avec scroll interne indépendant (aside + section, `min-h-0` sur flex containers)
-  - **NEW iter33**: statut de présence dynamique (heartbeat 60s, "En ligne" / "Dernière connexion il y a X min / aujourd'hui à HHhMM / le JJ/MM/YYYY à HHhMM")
-  - **NEW iter33**: read receipts DM ("Vu à HHhMM" sous le dernier message envoyé lu, calculé depuis `channel_reads`)
-  - **NEW iter33**: message d'absence automatique paramétrable depuis la messagerie (icône cloche barrée) — auto (congés validés + jour OFF) + toggle manuel avec dates + message personnalisé, debounce 1h par contact
-- Contacts, Agenda, Formation, Galerie photos, Boîte à idées, CSE & Avantages (e-commerce partenaires).
+- Planning + Badgeage.
+- Congés/RTT/absences + Documents RH.
+- Actualités + Newsletters Pro.
+- Messagerie complète (édition 10 min, likes subtils, canaux corporate, présence temps réel, read receipts DM, absence auto-reply, multi-sélection archive/suppression).
+- Contacts, Agenda, Formation, Galerie photos, Boîte à idées, CSE & Avantages.
 - Gestion utilisateurs (wizard admin, réinitialisation de mot de passe).
+- **NEW iter34**: Module Salles de réunion
+  - 4 salles seedées (Horizon, Galaxie, Nova, Éclipse) avec photos, capacité, étage, équipements
+  - Page /salles avec statuts temps réel ("Disponible maintenant / Occupée jusqu'à HHhMM / Indisponible pour maintenance")
+  - Bannière "Vos prochaines réservations"
+  - Modale planning journalier par salle (créneaux 30 min de 8h à 20h, code couleur libre/occupé/mine)
+  - Formulaire de réservation (durée libre par pas de 15 min, participants internes, équipements, demande particulière, warning capacité)
+  - Détection de conflit avec message d'erreur (409)
+  - Notifications automatiques aux participants (création/modification/annulation)
+  - Modale "Mes réservations" (À venir + Historique + modification + annulation avec motif)
+  - Admin /management/salles : CRUD salles + vue toutes réservations à venir
 
 ## Backlog (P2 / V2)
 - Signature électronique PDF
