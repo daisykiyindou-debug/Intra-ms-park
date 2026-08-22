@@ -1,0 +1,495 @@
+import { useEffect, useMemo, useState } from "react";
+import { useNavigate, useParams, Link } from "react-router-dom";
+import {
+  DoorOpen, Users, MapPin, Monitor, Video, Wifi, Zap, Volume2, Presentation,
+  Calendar, ChevronLeft, ChevronRight, Search, Check, ArrowLeft, Clock,
+} from "lucide-react";
+import { toast } from "sonner";
+import { api } from "@/lib/api";
+import { useApp } from "@/contexts/AppContext";
+
+const EQUIP_LABEL = {
+  screen: "Écran de présentation", video: "Visioconférence",
+  whiteboard: "Tableau blanc", power: "Prises électriques",
+  wifi: "Connexion Wi-Fi", audio: "Système audio", hdmi: "Câble HDMI",
+  paperboard: "Paperboard", computer: "Ordinateur", adapter: "Adaptateur",
+  water: "Bouteilles d'eau", coffee: "Café", microphone: "Micro",
+};
+const MEETING_TYPES = [
+  { k: "team", l: "Réunion d'équipe" },
+  { k: "interview", l: "Entretien" },
+  { k: "training", l: "Formation" },
+  { k: "video", l: "Visioconférence" },
+  { k: "external", l: "Rendez-vous externe" },
+  { k: "direction", l: "Réunion de direction" },
+  { k: "workshop", l: "Atelier" },
+  { k: "other", l: "Autre" },
+];
+const DEFAULT_PHOTO = "https://images.unsplash.com/photo-1524758631624-e2822e304c36?w=1200&q=80";
+
+function todayISODate() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+function formatTime(iso) {
+  return new Date(iso).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }).replace(":", "h");
+}
+function formatDate(iso) {
+  const d = new Date(iso);
+  const s = d.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+function durationLabel(min) {
+  return min < 60 ? `${min} min` : min % 60 === 0 ? `${min / 60}h` : `${Math.floor(min / 60)}h${String(min % 60).padStart(2, "0")}`;
+}
+
+export default function SalleReserver() {
+  const { rid } = useParams();
+  const nav = useNavigate();
+  const { employees, me } = useApp();
+
+  const [room, setRoom] = useState(null);
+  const [availability, setAvailability] = useState({ reservations: [] });
+  const [step, setStep] = useState(1);
+
+  // Step 1
+  const [date, setDate] = useState(todayISODate());
+  const [duration, setDuration] = useState(60);
+  const [customDuration, setCustomDuration] = useState("");
+  const [selectedSlot, setSelectedSlot] = useState(null); // { start, end }
+
+  // Step 2
+  const [title, setTitle] = useState("");
+  const [meetingType, setMeetingType] = useState("team");
+  const [participants, setParticipants] = useState([]);
+  const [participantsCount, setParticipantsCount] = useState(1);
+  const [description, setDescription] = useState("");
+  const [equipments, setEquipments] = useState([]);
+  const [specialRequest, setSpecialRequest] = useState("");
+  const [empQ, setEmpQ] = useState("");
+
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    api.get(`/rooms/${rid}`).then((r) => setRoom(r.data)).catch(() => nav("/salles"));
+  }, [rid, nav]);
+
+  useEffect(() => {
+    if (!rid) return;
+    api.get(`/rooms/${rid}/availability`, { params: { date } })
+      .then((r) => setAvailability(r.data))
+      .catch(() => setAvailability({ reservations: [] }));
+  }, [rid, date]);
+
+  const durOptions = [15, 30, 45, 60, 90, 120, 180, 240];
+
+  const startSlots = useMemo(() => {
+    const rows = [];
+    const dayEnd = new Date(`${date}T20:00:00`);
+    for (let h = 8; h < 20; h++) {
+      for (let m = 0; m < 60; m += 15) {
+        const start = new Date(`${date}T${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:00`);
+        const end = new Date(start.getTime() + duration * 60000);
+        if (end > dayEnd) continue;
+        const conflict = (availability.reservations || []).find(r => {
+          const rs = new Date(r.start_ts).getTime();
+          const re = new Date(r.end_ts).getTime();
+          return start.getTime() < re && end.getTime() > rs;
+        });
+        rows.push({ start, end, conflict });
+      }
+    }
+    return rows;
+  }, [date, availability, duration]);
+  const freeSlots = startSlots.filter(s => !s.conflict);
+
+  // Whenever the user changes date/duration, drop the previously picked slot
+  useEffect(() => { setSelectedSlot(null); }, [date, duration]);
+
+  const filteredEmps = (employees || []).filter(
+    (e) => e.id !== me?.id && !e.is_super_admin && `${e.first_name} ${e.last_name}`.toLowerCase().includes(empQ.toLowerCase())
+  );
+  const capacityWarning = room && participantsCount > room.capacity;
+
+  const canNext1 = !!selectedSlot;
+  const canNext2 = title.trim().length > 0;
+
+  const confirm = async () => {
+    if (!selectedSlot) return;
+    setSaving(true);
+    try {
+      await api.post("/reservations", {
+        room_id: rid,
+        title: title.trim(),
+        meeting_type: meetingType,
+        start_ts: selectedSlot.start,
+        end_ts: selectedSlot.end,
+        participants_ids: participants,
+        participants_count: Number(participantsCount) || participants.length + 1,
+        description,
+        equipments_needed: equipments,
+        special_request: specialRequest,
+      });
+      toast.success("Réservation confirmée");
+      nav("/salles");
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Impossible de réserver");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!room) return <div className="p-8 text-center text-[#475569]">Chargement…</div>;
+
+  const STEPS = [
+    { k: 1, l: "Créneau" },
+    { k: 2, l: "Détails" },
+    { k: 3, l: "Confirmation" },
+  ];
+
+  return (
+    <div className="ms-fade-up">
+      {/* Header with breadcrumb + room banner */}
+      <div className="mb-5 flex items-center gap-3">
+        <Link to="/salles" className="ms-btn-secondary" data-testid="reserve-back">
+          <ArrowLeft className="h-4 w-4" /> Retour
+        </Link>
+        <div>
+          <div className="text-[11px] uppercase tracking-widest text-[#94A3B8]">Salles de réunion</div>
+          <h1 className="text-2xl font-bold text-[#071B34]">Réserver — {room.name}</h1>
+        </div>
+      </div>
+
+      {/* Steps indicator */}
+      <div className="flex items-center gap-2 mb-6" data-testid="reserve-steps">
+        {STEPS.map((s, i) => {
+          const done = step > s.k;
+          const active = step === s.k;
+          return (
+            <div key={s.k} className="flex items-center gap-2">
+              <div className={`h-8 w-8 rounded-full inline-flex items-center justify-center text-xs font-bold ${
+                active ? "bg-[#3BA4FF] text-white" : done ? "bg-emerald-500 text-white" : "bg-white ring-1 ring-[#071B34]/10 text-[#94A3B8]"
+              }`}>
+                {done ? <Check className="h-4 w-4" /> : s.k}
+              </div>
+              <span className={`text-sm font-semibold ${active ? "text-[#071B34]" : "text-[#94A3B8]"}`}>{s.l}</span>
+              {i < STEPS.length - 1 && <ChevronRight className="h-4 w-4 text-[#CBD5E1] mx-1" />}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Room banner (compact) */}
+      <div className="ms-card overflow-hidden mb-5 flex items-center gap-4">
+        <img
+          src={room.photo_url || DEFAULT_PHOTO}
+          alt=""
+          onError={(e) => { e.currentTarget.src = DEFAULT_PHOTO; }}
+          className="h-24 w-40 object-cover shrink-0"
+        />
+        <div className="p-3 flex-1">
+          <div className="text-base font-bold text-[#071B34]">{room.name}</div>
+          <div className="text-xs text-[#475569] flex items-center gap-3 mt-1 flex-wrap">
+            <span className="inline-flex items-center gap-1"><Users className="h-3.5 w-3.5" /> {room.capacity} personnes</span>
+            {room.floor && <span className="inline-flex items-center gap-1"><MapPin className="h-3.5 w-3.5" /> {room.floor}</span>}
+            <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-widest ${
+              room.status_key === "busy" ? "bg-amber-100 text-amber-800" :
+              room.status_key === "maintenance" ? "bg-red-100 text-red-800" :
+              "bg-emerald-100 text-emerald-800"
+            }`}>{room.status_label}</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Step content */}
+      {step === 1 && (
+        <div className="ms-card p-6 space-y-6" data-testid="reserve-step-1">
+          {/* Duration */}
+          <div>
+            <div className="text-xs uppercase tracking-widest font-semibold text-[#475569] mb-3">Durée de votre réunion</div>
+            <div className="flex flex-wrap gap-2">
+              {durOptions.map((d) => (
+                <button
+                  key={d}
+                  onClick={() => { setDuration(d); setCustomDuration(""); }}
+                  data-testid={`dur-${d}`}
+                  className={`px-4 py-2 rounded-full text-sm font-semibold transition ${duration === d ? "bg-[#3BA4FF] text-white shadow" : "bg-white ring-1 ring-[#071B34]/10 hover:bg-[#F4F7FA] text-[#475569]"}`}
+                >
+                  {durationLabel(d)}
+                </button>
+              ))}
+              <div className="inline-flex items-center gap-1">
+                <input
+                  type="number"
+                  min={15}
+                  max={480}
+                  step={15}
+                  placeholder="Autre"
+                  value={customDuration}
+                  onChange={(e) => {
+                    setCustomDuration(e.target.value);
+                    const v = parseInt(e.target.value, 10);
+                    if (!Number.isNaN(v) && v >= 15) setDuration(v);
+                  }}
+                  data-testid="dur-custom"
+                  className="w-24 h-10 px-3 rounded-full bg-white ring-1 ring-[#071B34]/10 text-sm outline-none focus:ring-[#3BA4FF]/40"
+                />
+                <span className="text-xs text-[#94A3B8]">min</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Date */}
+          <div>
+            <div className="text-xs uppercase tracking-widest font-semibold text-[#475569] mb-3">Date</div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => {
+                  const d = new Date(date); d.setDate(d.getDate() - 1);
+                  setDate(d.toISOString().slice(0, 10));
+                }}
+                className="h-10 w-10 rounded-full bg-white ring-1 ring-[#071B34]/10 hover:bg-[#F4F7FA] inline-flex items-center justify-center"
+                data-testid="date-prev"
+              ><ChevronLeft className="h-4 w-4" /></button>
+              <input
+                type="date"
+                value={date}
+                onChange={(e) => setDate(e.target.value)}
+                className="ms-input"
+                data-testid="reserve-date"
+              />
+              <button
+                onClick={() => {
+                  const d = new Date(date); d.setDate(d.getDate() + 1);
+                  setDate(d.toISOString().slice(0, 10));
+                }}
+                className="h-10 w-10 rounded-full bg-white ring-1 ring-[#071B34]/10 hover:bg-[#F4F7FA] inline-flex items-center justify-center"
+                data-testid="date-next"
+              ><ChevronRight className="h-4 w-4" /></button>
+              <span className="ml-3 text-sm text-[#475569]">{formatDate(date)}</span>
+            </div>
+          </div>
+
+          {/* Slots */}
+          <div>
+            <div className="text-xs uppercase tracking-widest font-semibold text-[#475569] mb-3 flex items-center gap-2">
+              <span>Créneaux disponibles ({freeSlots.length})</span>
+              <span className="ml-auto text-[10px] text-[#94A3B8]">Cliquez pour sélectionner</span>
+            </div>
+            {freeSlots.length === 0 ? (
+              <div className="rounded-xl bg-amber-50 text-amber-800 text-sm p-4 text-center">
+                Aucun créneau de <b>{durationLabel(duration)}</b> disponible ce jour. Essayez une autre date ou raccourcissez la durée.
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2 max-h-[360px] overflow-y-auto pr-1">
+                {freeSlots.map((s, i) => {
+                  const startIso = s.start.toISOString();
+                  const endIso = s.end.toISOString();
+                  const isSel = selectedSlot?.start === startIso;
+                  return (
+                    <button
+                      key={i}
+                      onClick={() => setSelectedSlot({ start: startIso, end: endIso })}
+                      data-testid={`slot-${i}`}
+                      className={`text-left px-3 py-3 rounded-xl text-sm font-semibold transition relative ${
+                        isSel
+                          ? "bg-[#3BA4FF] text-white shadow-lg ring-2 ring-[#3BA4FF]/40"
+                          : "bg-emerald-50 hover:bg-emerald-100 text-emerald-800"
+                      }`}
+                    >
+                      <div className="tabular-nums text-base">{formatTime(startIso)}</div>
+                      <div className={`text-[11px] font-normal ${isSel ? "text-white/80" : "text-emerald-700"}`}>→ {formatTime(endIso)}</div>
+                      {isSel && <Check className="absolute top-2 right-2 h-4 w-4" />}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {availability.reservations?.length > 0 && (
+            <div>
+              <div className="text-[11px] text-[#94A3B8] mb-1">Créneaux déjà réservés</div>
+              <div className="flex flex-wrap gap-1.5">
+                {availability.reservations.map((r) => (
+                  <span key={r.id} className={`text-[11px] px-2 py-1 rounded-full ${r.is_mine ? "bg-[#3BA4FF]/15 text-[#1D70B8]" : "bg-amber-100 text-amber-800"}`}>
+                    {formatTime(r.start_ts)} – {formatTime(r.end_ts)}
+                    {r.is_mine ? " · Votre réservation" : ` · ${r.title || "Occupé"}`}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="flex items-center justify-end gap-2 pt-4 border-t border-[#071B34]/5">
+            <Link to="/salles" className="px-4 py-2 rounded-xl text-sm text-[#475569] hover:bg-[#F4F7FA]" data-testid="reserve-cancel">Annuler</Link>
+            <button
+              onClick={() => setStep(2)}
+              disabled={!canNext1}
+              data-testid="reserve-next-1"
+              className="ms-btn-primary disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              Suivant <ChevronRight className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {step === 2 && (
+        <div className="ms-card p-6 space-y-4" data-testid="reserve-step-2">
+          <div className="text-xs uppercase tracking-widest font-semibold text-[#475569]">Informations sur la réunion</div>
+
+          <div>
+            <label className="ms-overline">Titre de la réunion *</label>
+            <input value={title} onChange={(e) => setTitle(e.target.value)} className="ms-input mt-1" placeholder="Ex : Point équipe hebdo" data-testid="reserve-title" />
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="ms-overline">Type de réunion</label>
+              <select value={meetingType} onChange={(e) => setMeetingType(e.target.value)} className="ms-input mt-1" data-testid="reserve-type">
+                {MEETING_TYPES.map((t) => <option key={t.k} value={t.k}>{t.l}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="ms-overline">Nombre de participants</label>
+              <input type="number" min={1} value={participantsCount} onChange={(e) => setParticipantsCount(e.target.value)} className="ms-input mt-1" data-testid="reserve-count" />
+              {capacityWarning && (
+                <div className="mt-1 text-[11px] text-amber-700 font-semibold" data-testid="reserve-capacity-warning">
+                  ⚠ La salle est limitée à {room.capacity} personnes.
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div>
+            <label className="ms-overline">Description / ordre du jour</label>
+            <textarea rows={3} value={description} onChange={(e) => setDescription(e.target.value)} className="ms-input mt-1 resize-y" data-testid="reserve-desc" />
+          </div>
+
+          <div>
+            <label className="ms-overline">Participants internes</label>
+            <div className="relative mt-1">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[#94A3B8]" />
+              <input value={empQ} onChange={(e) => setEmpQ(e.target.value)} placeholder="Rechercher un collègue…" className="w-full h-10 pl-9 pr-3 rounded-xl bg-white ring-1 ring-[#071B34]/10 outline-none text-sm" data-testid="reserve-part-search" />
+            </div>
+            <div className="mt-2 max-h-52 overflow-y-auto space-y-1 pr-1 rounded-xl bg-[#F8FAFC] p-2">
+              {filteredEmps.slice(0, 30).map((e) => {
+                const on = participants.includes(e.id);
+                return (
+                  <button key={e.id} onClick={() => setParticipants((p) => on ? p.filter(x => x !== e.id) : [...p, e.id])} className={`w-full flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm ${on ? "bg-[#3BA4FF]/10 text-[#1D70B8] font-semibold" : "hover:bg-white text-[#334155]"}`} data-testid={`reserve-part-${e.id}`}>
+                    <span className="flex-1 text-left truncate">{e.first_name} {e.last_name} <span className="text-[10px] text-[#94A3B8]">· {e.role || "—"}</span></span>
+                    {on && <Check className="h-4 w-4" />}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div>
+            <label className="ms-overline">Équipements nécessaires</label>
+            <div className="mt-1 flex flex-wrap gap-1.5">
+              {Object.entries(EQUIP_LABEL).map(([k, l]) => {
+                const on = equipments.includes(k);
+                return (
+                  <button key={k} onClick={() => setEquipments((s) => on ? s.filter(x => x !== k) : [...s, k])} className={`px-3 py-1.5 rounded-full text-[12px] font-semibold ${on ? "bg-[#3BA4FF] text-white" : "bg-white ring-1 ring-[#071B34]/10 text-[#475569]"}`} data-testid={`reserve-eq-${k}`}>
+                    {l}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div>
+            <label className="ms-overline">Demande particulière</label>
+            <textarea rows={2} value={specialRequest} onChange={(e) => setSpecialRequest(e.target.value)} className="ms-input mt-1 resize-y" data-testid="reserve-special" placeholder="Ex : disposition en U, café pour 8 personnes…" />
+          </div>
+
+          <div className="flex items-center justify-between pt-4 border-t border-[#071B34]/5">
+            <button onClick={() => setStep(1)} className="ms-btn-secondary" data-testid="reserve-prev-2">
+              <ChevronLeft className="h-4 w-4" /> Précédent
+            </button>
+            <button
+              onClick={() => setStep(3)}
+              disabled={!canNext2}
+              data-testid="reserve-next-2"
+              className="ms-btn-primary disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              Suivant <ChevronRight className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {step === 3 && selectedSlot && (
+        <div className="ms-card p-6 space-y-4" data-testid="reserve-step-3">
+          <div className="text-xs uppercase tracking-widest font-semibold text-[#475569]">Récapitulatif de la réservation</div>
+          <div className="rounded-2xl bg-gradient-to-br from-[#3BA4FF]/10 to-[#3BA4FF]/5 p-5 space-y-3">
+            <div className="text-2xl font-bold text-[#071B34]">{title}</div>
+            <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
+              <RecapRow label="Salle" value={room.name} />
+              <RecapRow label="Étage" value={room.floor || "—"} />
+              <RecapRow label="Date" value={formatDate(selectedSlot.start)} />
+              <RecapRow label="Horaire" value={`${formatTime(selectedSlot.start)} – ${formatTime(selectedSlot.end)}`} />
+              <RecapRow label="Durée" value={durationLabel(duration)} />
+              <RecapRow label="Type" value={MEETING_TYPES.find(t => t.k === meetingType)?.l} />
+              <RecapRow label="Participants" value={`${participantsCount} personne${participantsCount > 1 ? "s" : ""}`} />
+              <RecapRow label="Équipements" value={(equipments.length ? equipments.map(e => EQUIP_LABEL[e]).join(", ") : "—")} />
+            </div>
+            {description && (
+              <div className="text-sm">
+                <div className="ms-overline">Ordre du jour</div>
+                <div className="mt-1 text-[#334155] whitespace-pre-wrap">{description}</div>
+              </div>
+            )}
+            {participants.length > 0 && (
+              <div className="text-sm">
+                <div className="ms-overline">Participants invités</div>
+                <div className="mt-1 flex flex-wrap gap-1.5">
+                  {participants.map((pid) => {
+                    const e = (employees || []).find(x => x.id === pid);
+                    if (!e) return null;
+                    return (
+                      <span key={pid} className="inline-flex items-center gap-1 rounded-full bg-white ring-1 ring-[#071B34]/10 px-2 py-1 text-xs">
+                        {e.first_name} {e.last_name}
+                      </span>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+            {specialRequest && (
+              <div className="text-sm">
+                <div className="ms-overline">Demande particulière</div>
+                <div className="mt-1 text-[#334155] whitespace-pre-wrap">{specialRequest}</div>
+              </div>
+            )}
+          </div>
+
+          <div className="flex items-center justify-between pt-4 border-t border-[#071B34]/5">
+            <button onClick={() => setStep(2)} className="ms-btn-secondary" data-testid="reserve-prev-3">
+              <ChevronLeft className="h-4 w-4" /> Modifier
+            </button>
+            <button
+              onClick={confirm}
+              disabled={saving}
+              data-testid="reserve-confirm"
+              className="ms-btn-primary disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              <Check className="h-4 w-4" /> {saving ? "Confirmation…" : "Confirmer la réservation"}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function RecapRow({ label, value }) {
+  return (
+    <div>
+      <div className="ms-overline">{label}</div>
+      <div className="mt-0.5 text-sm font-semibold text-[#071B34]">{value}</div>
+    </div>
+  );
+}

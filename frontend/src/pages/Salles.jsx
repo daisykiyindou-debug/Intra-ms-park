@@ -57,8 +57,6 @@ function todayISODate() {
 export default function Salles() {
   const [rooms, setRooms] = useState([]);
   const [myReservations, setMyReservations] = useState([]);
-  const [selectedRoom, setSelectedRoom] = useState(null);
-  const [showMine, setShowMine] = useState(false);
   const nav = useNavigate();
 
   const load = () => {
@@ -81,18 +79,14 @@ export default function Salles() {
           </p>
         </div>
         <div className="flex gap-2">
-          <button
-            onClick={() => setShowMine(true)}
-            data-testid="rooms-my-btn"
-            className="ms-btn-secondary"
-          >
+          <Link to="/salles/mes-reservations" data-testid="rooms-my-btn" className="ms-btn-secondary">
             <Calendar className="h-4 w-4" /> Mes réservations
             {myReservations.length > 0 && (
               <span className="ml-1 inline-flex items-center justify-center h-5 min-w-[20px] px-1.5 rounded-full bg-[#3BA4FF] text-white text-[10px] font-bold">
                 {myReservations.length}
               </span>
             )}
-          </button>
+          </Link>
         </div>
       </div>
 
@@ -104,18 +98,18 @@ export default function Salles() {
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
             {myReservations.slice(0, 3).map((r) => (
-              <button
+              <Link
                 key={r.id}
-                onClick={() => setShowMine(true)}
+                to="/salles/mes-reservations"
                 data-testid={`rooms-upcoming-${r.id}`}
-                className="text-left rounded-xl bg-gradient-to-br from-[#3BA4FF]/10 to-[#3BA4FF]/5 hover:from-[#3BA4FF]/20 hover:to-[#3BA4FF]/10 p-3 transition"
+                className="block rounded-xl bg-gradient-to-br from-[#3BA4FF]/10 to-[#3BA4FF]/5 hover:from-[#3BA4FF]/20 hover:to-[#3BA4FF]/10 p-3 transition"
               >
                 <div className="text-xs text-[#1D70B8] font-semibold">{r.room_name}</div>
                 <div className="text-sm font-bold text-[#071B34] truncate">{r.title}</div>
                 <div className="text-xs text-[#475569] mt-1">
                   {formatDT(r.start_ts)} — {formatTime(r.end_ts)}
                 </div>
-              </button>
+              </Link>
             ))}
           </div>
         </div>
@@ -124,23 +118,9 @@ export default function Salles() {
       {/* Rooms grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-5">
         {rooms.map((room) => (
-          <RoomCard key={room.id} room={room} onOpen={() => setSelectedRoom(room)} />
+          <RoomCard key={room.id} room={room} onOpen={() => nav(`/salles/${room.id}/reserver`)} />
         ))}
       </div>
-
-      {selectedRoom && (
-        <RoomDetail
-          room={selectedRoom}
-          onClose={() => setSelectedRoom(null)}
-          onBooked={() => { setSelectedRoom(null); load(); }}
-        />
-      )}
-      {showMine && (
-        <MyReservationsPanel
-          onClose={() => setShowMine(false)}
-          onChanged={load}
-        />
-      )}
     </div>
   );
 }
