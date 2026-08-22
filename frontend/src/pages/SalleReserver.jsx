@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams, Link } from "react-router-dom";
 import {
   DoorOpen, Users, MapPin, Monitor, Video, Wifi, Zap, Volume2, Presentation,
-  Calendar, ChevronLeft, ChevronRight, Search, Check, ArrowLeft, Clock,
+  Calendar, ChevronLeft, ChevronRight, Search, Check, ArrowLeft, Clock, Sun,
 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
@@ -56,6 +56,7 @@ export default function SalleReserver() {
   const [date, setDate] = useState(todayISODate());
   const [duration, setDuration] = useState(60);
   const [customDuration, setCustomDuration] = useState("");
+  const [allDay, setAllDay] = useState(false); // Toute la journée (08h → 20h)
   const [selectedSlot, setSelectedSlot] = useState(null); // { start, end }
 
   // Step 2
@@ -83,7 +84,21 @@ export default function SalleReserver() {
 
   const durOptions = [15, 30, 45, 60, 90, 120, 180, 240];
 
+  // Compute the "Toute la journée" candidate slot (08:00 → 20:00) and check
+  // whether the day is entirely free.
+  const allDaySlot = useMemo(() => {
+    const start = new Date(`${date}T08:00:00`);
+    const end = new Date(`${date}T20:00:00`);
+    const conflict = (availability.reservations || []).find(r => {
+      const rs = new Date(r.start_ts).getTime();
+      const re = new Date(r.end_ts).getTime();
+      return start.getTime() < re && end.getTime() > rs;
+    });
+    return { start, end, conflict };
+  }, [date, availability]);
+
   const startSlots = useMemo(() => {
+    if (allDay) return []; // hide the granular grid in all-day mode
     const rows = [];
     const dayEnd = new Date(`${date}T20:00:00`);
     for (let h = 8; h < 20; h++) {
@@ -100,11 +115,11 @@ export default function SalleReserver() {
       }
     }
     return rows;
-  }, [date, availability, duration]);
+  }, [date, availability, duration, allDay]);
   const freeSlots = startSlots.filter(s => !s.conflict);
 
-  // Whenever the user changes date/duration, drop the previously picked slot
-  useEffect(() => { setSelectedSlot(null); }, [date, duration]);
+  // Whenever the user changes date/duration/mode, drop the previously picked slot
+  useEffect(() => { setSelectedSlot(null); }, [date, duration, allDay]);
 
   const filteredEmps = (employees || []).filter(
     (e) => e.id !== me?.id && !e.is_super_admin && `${e.first_name} ${e.last_name}`.toLowerCase().includes(empQ.toLowerCase())
@@ -179,15 +194,10 @@ export default function SalleReserver() {
         })}
       </div>
 
-      {/* Room banner (compact) */}
-      <div className="ms-card overflow-hidden mb-5 flex items-center gap-4">
-        <img
-          src={room.photo_url || DEFAULT_PHOTO}
-          alt=""
-          onError={(e) => { e.currentTarget.src = DEFAULT_PHOTO; }}
-          className="h-24 w-40 object-cover shrink-0"
-        />
-        <div className="p-3 flex-1">
+      {/* Room banner (compact) with carousel */}
+      <div className="ms-card overflow-hidden mb-5 grid grid-cols-1 sm:grid-cols-[280px_1fr] gap-0">
+        <RoomCarousel photos={room.photos || [room.photo_url]} alt={room.name} />
+        <div className="p-4 sm:p-5">
           <div className="text-base font-bold text-[#071B34]">{room.name}</div>
           <div className="text-xs text-[#475569] flex items-center gap-3 mt-1 flex-wrap">
             <span className="inline-flex items-center gap-1"><Users className="h-3.5 w-3.5" /> {room.capacity} personnes</span>
@@ -198,6 +208,9 @@ export default function SalleReserver() {
               "bg-emerald-100 text-emerald-800"
             }`}>{room.status_label}</span>
           </div>
+          {room.description && (
+            <p className="text-sm text-[#475569] mt-3">{room.description}</p>
+          )}
         </div>
       </div>
 
@@ -211,9 +224,9 @@ export default function SalleReserver() {
               {durOptions.map((d) => (
                 <button
                   key={d}
-                  onClick={() => { setDuration(d); setCustomDuration(""); }}
+                  onClick={() => { setAllDay(false); setDuration(d); setCustomDuration(""); }}
                   data-testid={`dur-${d}`}
-                  className={`px-4 py-2 rounded-full text-sm font-semibold transition ${duration === d ? "bg-[#3BA4FF] text-white shadow" : "bg-white ring-1 ring-[#071B34]/10 hover:bg-[#F4F7FA] text-[#475569]"}`}
+                  className={`px-4 py-2 rounded-full text-sm font-semibold transition ${!allDay && duration === d ? "bg-[#3BA4FF] text-white shadow" : "bg-white ring-1 ring-[#071B34]/10 hover:bg-[#F4F7FA] text-[#475569]"}`}
                 >
                   {durationLabel(d)}
                 </button>
@@ -227,6 +240,7 @@ export default function SalleReserver() {
                   placeholder="Autre"
                   value={customDuration}
                   onChange={(e) => {
+                    setAllDay(false);
                     setCustomDuration(e.target.value);
                     const v = parseInt(e.target.value, 10);
                     if (!Number.isNaN(v) && v >= 15) setDuration(v);
@@ -236,6 +250,13 @@ export default function SalleReserver() {
                 />
                 <span className="text-xs text-[#94A3B8]">min</span>
               </div>
+              <button
+                onClick={() => setAllDay(true)}
+                data-testid="dur-allday"
+                className={`px-4 py-2 rounded-full text-sm font-semibold transition inline-flex items-center gap-1.5 ${allDay ? "bg-[#F59E0B] text-white shadow" : "bg-white ring-1 ring-[#F59E0B]/40 hover:bg-[#FEF3C7] text-[#B45309]"}`}
+              >
+                <Sun className="h-4 w-4" /> Toute la journée
+              </button>
             </div>
           </div>
 
@@ -273,32 +294,76 @@ export default function SalleReserver() {
           {/* Slots */}
           <div>
             <div className="text-xs uppercase tracking-widest font-semibold text-[#475569] mb-3 flex items-center gap-2">
-              <span>Créneaux disponibles ({freeSlots.length})</span>
-              <span className="ml-auto text-[10px] text-[#94A3B8]">Cliquez pour sélectionner</span>
+              <span>{allDay ? "Journée complète" : `Créneaux (${startSlots.length})`}</span>
+              <span className="ml-auto text-[10px] text-[#94A3B8] flex items-center gap-3">
+                <span className="inline-flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-emerald-200"></span> Libre</span>
+                <span className="inline-flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-amber-200"></span> Réservé</span>
+                <span className="inline-flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-[#3BA4FF]"></span> Sélectionné</span>
+              </span>
             </div>
-            {freeSlots.length === 0 ? (
+            {allDay ? (
+              (() => {
+                const conflict = allDaySlot.conflict;
+                const startIso = allDaySlot.start.toISOString();
+                const endIso = allDaySlot.end.toISOString();
+                const isSel = selectedSlot?.start === startIso;
+                if (conflict) {
+                  return (
+                    <div className="rounded-xl bg-amber-50 text-amber-800 text-sm p-4 text-center" data-testid="allday-conflict">
+                      La journée ne peut pas être réservée en totalité : au moins un créneau est déjà occupé. Essayez une autre date ou choisissez une durée plus courte.
+                    </div>
+                  );
+                }
+                return (
+                  <button
+                    onClick={() => setSelectedSlot({ start: startIso, end: endIso })}
+                    data-testid="slot-allday"
+                    className={`w-full text-left px-5 py-6 rounded-2xl transition ${
+                      isSel
+                        ? "bg-[#F59E0B] text-white shadow-lg ring-2 ring-[#F59E0B]/40"
+                        : "bg-amber-50 hover:bg-amber-100 text-amber-900"
+                    }`}
+                  >
+                    <div className="text-xl font-bold flex items-center gap-2">
+                      <Sun className="h-5 w-5" /> Toute la journée
+                      {isSel && <Check className="h-5 w-5 ml-auto" />}
+                    </div>
+                    <div className={`text-sm mt-1 ${isSel ? "text-white/90" : "text-amber-800"}`}>
+                      08h00 → 20h00 · 12 heures
+                    </div>
+                  </button>
+                );
+              })()
+            ) : startSlots.length === 0 ? (
               <div className="rounded-xl bg-amber-50 text-amber-800 text-sm p-4 text-center">
-                Aucun créneau de <b>{durationLabel(duration)}</b> disponible ce jour. Essayez une autre date ou raccourcissez la durée.
+                Aucun créneau ne rentre dans la plage 08h–20h avec cette durée.
               </div>
             ) : (
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2 max-h-[360px] overflow-y-auto pr-1">
-                {freeSlots.map((s, i) => {
+                {startSlots.map((s, i) => {
                   const startIso = s.start.toISOString();
                   const endIso = s.end.toISOString();
                   const isSel = selectedSlot?.start === startIso;
+                  const busy = !!s.conflict;
                   return (
                     <button
                       key={i}
-                      onClick={() => setSelectedSlot({ start: startIso, end: endIso })}
+                      onClick={() => { if (!busy) setSelectedSlot({ start: startIso, end: endIso }); }}
+                      disabled={busy}
+                      title={busy ? `Occupé — ${s.conflict?.title || "Réservé"}` : ""}
                       data-testid={`slot-${i}`}
                       className={`text-left px-3 py-3 rounded-xl text-sm font-semibold transition relative ${
-                        isSel
+                        busy
+                          ? "bg-amber-100 text-amber-800 cursor-not-allowed opacity-70"
+                          : isSel
                           ? "bg-[#3BA4FF] text-white shadow-lg ring-2 ring-[#3BA4FF]/40"
                           : "bg-emerald-50 hover:bg-emerald-100 text-emerald-800"
                       }`}
                     >
                       <div className="tabular-nums text-base">{formatTime(startIso)}</div>
-                      <div className={`text-[11px] font-normal ${isSel ? "text-white/80" : "text-emerald-700"}`}>→ {formatTime(endIso)}</div>
+                      <div className={`text-[11px] font-normal ${busy ? "text-amber-700" : isSel ? "text-white/80" : "text-emerald-700"}`}>
+                        → {formatTime(endIso)}{busy ? " · Réservé" : ""}
+                      </div>
                       {isSel && <Check className="absolute top-2 right-2 h-4 w-4" />}
                     </button>
                   );
@@ -430,8 +495,8 @@ export default function SalleReserver() {
               <RecapRow label="Salle" value={room.name} />
               <RecapRow label="Étage" value={room.floor || "—"} />
               <RecapRow label="Date" value={formatDate(selectedSlot.start)} />
-              <RecapRow label="Horaire" value={`${formatTime(selectedSlot.start)} – ${formatTime(selectedSlot.end)}`} />
-              <RecapRow label="Durée" value={durationLabel(duration)} />
+              <RecapRow label="Horaire" value={allDay ? "Toute la journée (08h – 20h)" : `${formatTime(selectedSlot.start)} – ${formatTime(selectedSlot.end)}`} />
+              <RecapRow label="Durée" value={allDay ? "Journée complète" : durationLabel(duration)} />
               <RecapRow label="Type" value={MEETING_TYPES.find(t => t.k === meetingType)?.l} />
               <RecapRow label="Participants" value={`${participantsCount} personne${participantsCount > 1 ? "s" : ""}`} />
               <RecapRow label="Équipements" value={(equipments.length ? equipments.map(e => EQUIP_LABEL[e]).join(", ") : "—")} />
@@ -490,6 +555,64 @@ function RecapRow({ label, value }) {
     <div>
       <div className="ms-overline">{label}</div>
       <div className="mt-0.5 text-sm font-semibold text-[#071B34]">{value}</div>
+    </div>
+  );
+}
+
+// Simple photo carousel with prev/next buttons + dots + arrow keys
+function RoomCarousel({ photos, alt }) {
+  const [idx, setIdx] = useState(0);
+  const list = photos && photos.length > 0 ? photos : [DEFAULT_PHOTO];
+  const prev = () => setIdx((i) => (i - 1 + list.length) % list.length);
+  const next = () => setIdx((i) => (i + 1) % list.length);
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === "ArrowRight") next();
+      else if (e.key === "ArrowLeft") prev();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [list.length]);
+  return (
+    <div className="relative h-40 sm:h-52 shrink-0 rounded-2xl overflow-hidden bg-[#F4F7FA]" data-testid="room-carousel">
+      <img
+        src={list[idx]}
+        alt={alt}
+        onError={(e) => { e.currentTarget.src = DEFAULT_PHOTO; }}
+        className="w-full h-full object-cover transition-opacity duration-300"
+      />
+      {list.length > 1 && (
+        <>
+          <button
+            onClick={prev}
+            data-testid="room-carousel-prev"
+            aria-label="Photo précédente"
+            className="absolute left-2 top-1/2 -translate-y-1/2 h-9 w-9 rounded-full bg-white/90 hover:bg-white shadow inline-flex items-center justify-center text-[#334155]"
+          >
+            <ChevronLeft className="h-4 w-4" />
+          </button>
+          <button
+            onClick={next}
+            data-testid="room-carousel-next"
+            aria-label="Photo suivante"
+            className="absolute right-2 top-1/2 -translate-y-1/2 h-9 w-9 rounded-full bg-white/90 hover:bg-white shadow inline-flex items-center justify-center text-[#334155]"
+          >
+            <ChevronRight className="h-4 w-4" />
+          </button>
+          <div className="absolute bottom-2 left-0 right-0 flex justify-center gap-1.5">
+            {list.map((_, i) => (
+              <button
+                key={i}
+                onClick={() => setIdx(i)}
+                aria-label={`Photo ${i + 1}`}
+                data-testid={`room-carousel-dot-${i}`}
+                className={`h-1.5 rounded-full transition-all ${i === idx ? "w-6 bg-white" : "w-1.5 bg-white/60"}`}
+              />
+            ))}
+          </div>
+        </>
+      )}
     </div>
   );
 }

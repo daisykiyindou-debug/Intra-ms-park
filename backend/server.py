@@ -8828,6 +8828,12 @@ MEETING_ROOM_SEEDS = [
         "floor": "2ᵉ étage",
         "equipments": ["screen", "video", "whiteboard", "power", "wifi", "audio"],
         "photo_url": "https://images.unsplash.com/photo-1497366216548-37526070297c?w=1200&q=80",
+        "photos": [
+            "https://images.unsplash.com/photo-1497366216548-37526070297c?w=1200&q=80",
+            "https://images.unsplash.com/photo-1517502884422-41eaead166d4?w=1200&q=80",
+            "https://images.unsplash.com/photo-1497366754035-f200968a6e72?w=1200&q=80",
+            "https://images.unsplash.com/photo-1524758631624-e2822e304c36?w=1200&q=80",
+        ],
         "description": "Grande salle claire avec vue dégagée, idéale pour les points d'équipe.",
     },
     {
@@ -8837,6 +8843,12 @@ MEETING_ROOM_SEEDS = [
         "floor": "2ᵉ étage",
         "equipments": ["screen", "video", "whiteboard", "power", "wifi", "audio", "hdmi"],
         "photo_url": "https://images.unsplash.com/photo-1517502884422-41eaead166d4?w=1200&q=80",
+        "photos": [
+            "https://images.unsplash.com/photo-1517502884422-41eaead166d4?w=1200&q=80",
+            "https://images.unsplash.com/photo-1431540015161-0bf868a2d407?w=1200&q=80",
+            "https://images.unsplash.com/photo-1587560699334-cc4ff634909a?w=1200&q=80",
+            "https://images.unsplash.com/photo-1552664730-d307ca884978?w=1200&q=80",
+        ],
         "description": "Grand espace pour formations, séminaires et présentations plénières.",
     },
     {
@@ -8846,6 +8858,11 @@ MEETING_ROOM_SEEDS = [
         "floor": "1ᵉʳ étage",
         "equipments": ["screen", "video", "whiteboard", "power", "wifi"],
         "photo_url": "https://images.unsplash.com/photo-1568992687947-868a62a9f521?w=1200&q=80",
+        "photos": [
+            "https://images.unsplash.com/photo-1568992687947-868a62a9f521?w=1200&q=80",
+            "https://images.unsplash.com/photo-1573164713988-8665fc963095?w=1200&q=80",
+            "https://images.unsplash.com/photo-1520607162513-77705c0f0d4a?w=1200&q=80",
+        ],
         "description": "Petit format cosy pour entretiens et réunions rapprochées.",
     },
     {
@@ -8855,6 +8872,11 @@ MEETING_ROOM_SEEDS = [
         "floor": "1ᵉʳ étage",
         "equipments": ["screen", "video", "power", "wifi"],
         "photo_url": "https://images.unsplash.com/photo-1577412647305-991150c7d163?w=1200&q=80",
+        "photos": [
+            "https://images.unsplash.com/photo-1577412647305-991150c7d163?w=1200&q=80",
+            "https://images.unsplash.com/photo-1543269664-56d93c1b41a6?w=1200&q=80",
+            "https://images.unsplash.com/photo-1497366858526-0766cadbe8fa?w=1200&q=80",
+        ],
         "description": "Salle de visio dédiée aux appels externes et aux 1-à-1.",
     },
 ]
@@ -8878,15 +8900,86 @@ EQUIPMENT_LABELS = {
 
 
 async def _seed_meeting_rooms():
-    if await db.meeting_rooms.count_documents({}) > 0:
-        return
-    now = _now()
+    if await db.meeting_rooms.count_documents({}) == 0:
+        now = _now()
+        for r in MEETING_ROOM_SEEDS:
+            await db.meeting_rooms.insert_one({
+                **r,
+                "is_active": True,
+                "maintenance_note": None,
+                "created_at": now,
+            })
+    # Idempotent backfill: add photos[] to existing rooms lacking it
     for r in MEETING_ROOM_SEEDS:
-        await db.meeting_rooms.insert_one({
-            **r,
-            "is_active": True,
-            "maintenance_note": None,
-            "created_at": now,
+        await db.meeting_rooms.update_one(
+            {"id": r["id"], "$or": [{"photos": {"$exists": False}}, {"photos": []}]},
+            {"$set": {"photos": r["photos"]}},
+        )
+    # Demo reservations to showcase busy slots (idempotent: skip if any already
+    # exists for these salle+day combos).
+    await _seed_demo_reservations()
+
+
+async def _seed_demo_reservations():
+    """Populate a handful of demo reservations over the next 3 days so the
+    planning UI immediately shows realistic busy slots."""
+    # Pick a small set of demo employees to act as organizers
+    emps = await db.employees.find(
+        {"is_super_admin": {"$ne": True}}, {"_id": 0, "id": 1, "first_name": 1, "last_name": 1}
+    ).to_list(20)
+    if not emps:
+        return
+    # Prefer non-Idriss organizers so the current demo user sees "Occupé" cells
+    others = [e for e in emps if e["id"] != "emp-idriss-malonga"] or emps
+    from datetime import datetime, timedelta, timezone as _tz
+    today = _now_paris().date()
+    demo_plan = [
+        # (room_id, day_offset, start_hh, start_mm, dur_min, title)
+        ("room-horizon", 0, 9, 0, 60, "Point RH mensuel"),
+        ("room-horizon", 0, 14, 0, 90, "Comité opérationnel"),
+        ("room-galaxie", 0, 10, 30, 120, "Formation SST"),
+        ("room-galaxie", 0, 15, 0, 60, "Briefing équipes"),
+        ("room-nova", 0, 11, 0, 45, "Entretien candidat"),
+        ("room-nova", 0, 16, 0, 30, "Point 1-à-1"),
+        ("room-eclipse", 0, 9, 30, 60, "Visio partenaire"),
+        ("room-horizon", 1, 10, 0, 120, "Atelier planification"),
+        ("room-galaxie", 1, 14, 0, 180, "Comité de direction"),
+        ("room-nova", 1, 15, 30, 45, "Debrief mission"),
+        ("room-horizon", 2, 9, 30, 90, "Réunion Communication"),
+        ("room-eclipse", 2, 11, 0, 30, "Point CSE"),
+    ]
+    for i, (rid, off, hh, mm, dur, title) in enumerate(demo_plan):
+        # Skip if any reservation already exists for this room+day at this time
+        day = today + timedelta(days=off)
+        start_dt = datetime.combine(day, datetime.min.time()).replace(hour=hh, minute=mm)
+        start_dt = start_dt.replace(tzinfo=PARIS_TZ).astimezone(_tz.utc)
+        end_dt = start_dt + timedelta(minutes=dur)
+        exists = await db.room_reservations.find_one({
+            "room_id": rid,
+            "start_ts": start_dt.isoformat(),
+            "status": {"$ne": "cancelled"},
+        })
+        if exists:
+            continue
+        org = others[i % len(others)]
+        await db.room_reservations.insert_one({
+            "id": _id(),
+            "room_id": rid,
+            "organizer_id": org["id"],
+            "title": title,
+            "meeting_type": "team",
+            "start_ts": start_dt.isoformat(),
+            "end_ts": end_dt.isoformat(),
+            "participants_ids": [org["id"]],
+            "external_participants": [],
+            "participants_count": 4,
+            "description": "",
+            "equipments_needed": [],
+            "special_request": "",
+            "status": "confirmed",
+            "created_at": _now(),
+            "created_by": org["id"],
+            "is_demo": True,
         })
 
 
