@@ -300,6 +300,7 @@ class FormPayload(BaseModel):
     active: Optional[bool] = True
     submit_label: Optional[str] = "Envoyer"
     success_message: Optional[str] = "Merci ! Votre formulaire a bien été envoyé."
+    audience_status_targets: Optional[List[str]] = []  # empty = all employees
 
 
 class FormResponse(BaseModel):
@@ -3085,6 +3086,28 @@ async def _newsletter_recipients(n: dict) -> list[str]:
     return [e["id"] for e in emps]
 
 
+def _user_matches_audience(user: dict, targets: list | None) -> bool:
+    """Single source of truth for audience-targeting checks used across every
+    module (carousel, news, events, forms, newsletters, documents, benefits).
+
+    Rules:
+    - Empty `targets` (or None) → visible to everyone (unrestricted).
+    - `targets` contains "all" → visible to everyone.
+    - Otherwise: the user must have at least one of their `statuses` in the
+      targets list. Author of the content is always allowed to see it.
+    - NO admin bypass — an admin who isn't in the target group cannot view
+      the content on public endpoints. Admins manage restricted content
+      through the Administration space (which uses admin endpoints without
+      the audience filter).
+    """
+    if not targets:
+        return True
+    if "all" in targets:
+        return True
+    user_statuses = set(user.get("statuses") or [])
+    return bool(user_statuses & set(targets))
+
+
 async def _dispatch_scheduled_newsletters():
     """Send scheduled newsletters whose publish_at is reached.
     Only notifies employees matching the recipient_statuses filter."""
@@ -3128,7 +3151,6 @@ async def list_posts():
     # except for the author (so they see their own drafts) and admins.
     now_iso = _now()
     is_admin = me.get("is_admin") or me.get("can_manage_communication")
-    my_statuses = set(me.get("statuses") or [])
     visible: list[dict] = []
     for p in items:
         pub = p.get("publish_at")
@@ -3138,12 +3160,9 @@ async def list_posts():
             p["is_scheduled"] = True
         else:
             p["is_scheduled"] = False
-        # Audience filtering: if targets are set, only show to matching
-        # employees (author + admins always see their own posts).
-        targets = p.get("audience_status_targets") or []
-        if targets and not is_admin and p.get("author_id") != me.get("id"):
-            if not (my_statuses & set(targets)):
-                continue
+        # Audience filtering — strict, no admin bypass. Author sees their own.
+        if p.get("author_id") != me.get("id") and not _user_matches_audience(me, p.get("audience_status_targets")):
+            continue
         visible.append(p)
     return visible[:50]
 
@@ -3213,7 +3232,9 @@ async def create_post(payload: PostCreate):
 
 @api.get("/posts/{post_id}")
 async def get_post(post_id: str):
-    """Public read of a single post — used by `/actualites/:id` detail page."""
+    """Public read of a single post — used by `/actualites/:id` detail page.
+    Strict audience filtering: 404 if the current user isn't in the target
+    groups (returned as 404 instead of 403 to avoid leaking existence)."""
     me = await db.employees.find_one({"id": current_user()}, {"_id": 0}) or {}
     p = await db.posts.find_one({"id": post_id}, {"_id": 0})
     if not p:
@@ -3226,6 +3247,9 @@ async def get_post(post_id: str):
         p["is_scheduled"] = True
     else:
         p["is_scheduled"] = False
+    # Audience gate — 404 for non-matching users (also blocks direct-URL access)
+    if p.get("author_id") != me.get("id") and not _user_matches_audience(me, p.get("audience_status_targets")):
+        raise HTTPException(404, "Publication introuvable")
     return p
 
 
@@ -3390,6 +3414,7 @@ async def cancel_request(rid: str):
 # ─── Documents
 @api.get("/documents")
 async def list_documents(category: Optional[str] = None):
+    me = await db.employees.find_one({"id": current_user()}, {"_id": 0}) or {}
     q = {"category": category} if category else {}
     # Filter: docs assigned to me OR global (target_employee_id null/all)
     q["$or"] = [
@@ -3398,8 +3423,10 @@ async def list_documents(category: Optional[str] = None):
         {"target_employee_id": "all"},
         {"target_employee_id": {"$exists": False}},
     ]
-    items = await db.documents.find(q, {"_id": 0}).sort("issued_at", -1).to_list(100)
-    return items
+    items = await db.documents.find(q, {"_id": 0}).sort("issued_at", -1).to_list(200)
+    # Audience gate — strict (no admin bypass) so a doc restricted to a status
+    # group is truly invisible to everyone else.
+    return [d for d in items if _user_matches_audience(me, d.get("audience_status_targets"))]
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -4644,46 +4671,41 @@ async def toggle_message_like(mid: str):
 # ─── Events
 @api.get("/events")
 async def list_events():
-    """Return events visible to the current user based on group_targets."""
-    emp = await db.employees.find_one({"id": current_user()}, {"_id": 0})
-    role_category = emp.get("role_category") if emp else "employe"
-    is_admin = bool(emp and emp.get("is_admin"))
-    dept = emp.get("department") if emp else None
+    """Return events visible to the current user. Strict audience filter — if
+    `audience_status_targets` is set, only matching statuses see the event
+    (no admin bypass). Falls back to legacy `group_targets` / `employee_targets`
+    when the new audience field is empty."""
+    emp = await db.employees.find_one({"id": current_user()}, {"_id": 0}) or {}
+    role_category = emp.get("role_category", "employe")
+    is_admin = bool(emp.get("is_admin"))
+    dept = emp.get("department")
 
     items = await db.events.find({}, {"_id": 0}).sort("date", 1).to_list(200)
-    my_statuses = set(emp.get("statuses") or []) if emp else set()
     visible = []
     for e in items:
-        # New audience filter — if `audience_status_targets` is set, the
-        # event is visible only to employees whose statuses match.
+        # New audience filter takes precedence — strict, no admin bypass.
         aud = e.get("audience_status_targets") or []
-        if aud and not is_admin and not (my_statuses & set(aud)):
+        if aud:
+            if _user_matches_audience(emp, aud):
+                visible.append(e)
             continue
+        # Legacy fallbacks (group_targets / employee_targets)
         groups = e.get("group_targets") or ["all"]
         emp_ids = e.get("employee_targets") or []
-        # Broad group targeting
         if "all" in groups:
-            visible.append(e)
-            continue
+            visible.append(e); continue
         if is_admin and "admin" in groups:
-            visible.append(e)
-            continue
+            visible.append(e); continue
         if role_category == "encadrement" and ("managers" in groups or "encadrement" in groups):
-            visible.append(e)
-            continue
+            visible.append(e); continue
         if role_category == "employe" and "ops" in groups:
-            visible.append(e)
-            continue
+            visible.append(e); continue
         if role_category == "restauration" and "restauration" in groups:
-            visible.append(e)
-            continue
+            visible.append(e); continue
         if dept and dept in groups:
-            visible.append(e)
-            continue
-        # Fine-grained targeting
+            visible.append(e); continue
         if current_user() in emp_ids:
-            visible.append(e)
-            continue
+            visible.append(e); continue
     return visible
 
 
@@ -4871,11 +4893,15 @@ async def admin_list_forms():
 async def get_form(fid: str):
     """Public — logged employees can fetch a form to fill it in.
     Also returns whether the caller has already answered (`already_answered`)
-    and the submission timestamp so the UI can hide the form."""
+    and the submission timestamp so the UI can hide the form.
+    Audience gate: 404 for users not in the target statuses."""
     f = await db.forms.find_one({"id": fid, "active": True}, {"_id": 0})
     if not f:
         raise HTTPException(404, "Formulaire introuvable ou désactivé")
     uid = current_user()
+    me = await db.employees.find_one({"id": uid}, {"_id": 0}) or {}
+    if f.get("created_by") != uid and not _user_matches_audience(me, f.get("audience_status_targets")):
+        raise HTTPException(404, "Formulaire introuvable ou désactivé")
     existing = await db.form_responses.find_one({"form_id": fid, "employee_id": uid}, {"_id": 0})
     f["already_answered"] = bool(existing)
     f["my_response_at"] = existing.get("submitted_at") if existing else None
@@ -4893,6 +4919,7 @@ async def admin_create_form(payload: FormPayload):
         "active": bool(payload.active),
         "submit_label": payload.submit_label or "Envoyer",
         "success_message": payload.success_message or "Merci ! Votre formulaire a bien été envoyé.",
+        "audience_status_targets": payload.audience_status_targets or [],
         "created_by": me["id"],
         "created_by_name": f"{me['first_name']} {me['last_name']}",
         "created_at": _now(),
@@ -4927,6 +4954,9 @@ async def submit_form(fid: str, payload: FormSubmitPayload):
     if not f:
         raise HTTPException(404, "Formulaire introuvable ou désactivé")
     uid = current_user()
+    me = await db.employees.find_one({"id": uid}, {"_id": 0}) or {}
+    if not _user_matches_audience(me, f.get("audience_status_targets")):
+        raise HTTPException(403, "Vous n'êtes pas autorisé à répondre à ce formulaire.")
     # Server-side idempotency: reject any second submission from the same user
     # regardless of double-click, refresh or another browser/device.
     existing = await db.form_responses.find_one({"form_id": fid, "employee_id": uid}, {"_id": 0})
@@ -5093,21 +5123,30 @@ async def admin_form_stats(fid: str):
 # ─── News
 @api.get("/news")
 async def list_news():
-    return await db.news.find({}, {"_id": 0}).sort("date", -1).to_list(20)
+    me = await db.employees.find_one({"id": current_user()}, {"_id": 0}) or {}
+    items = await db.news.find({}, {"_id": 0}).sort("date", -1).to_list(50)
+    return [n for n in items if _user_matches_audience(me, n.get("audience_status_targets"))][:20]
 
 
 @api.get("/news/{nid}")
 async def get_news(nid: str):
+    me = await db.employees.find_one({"id": current_user()}, {"_id": 0}) or {}
     item = await db.news.find_one({"id": nid}, {"_id": 0})
     if not item:
+        raise HTTPException(404, "Actualité introuvable")
+    if not _user_matches_audience(me, item.get("audience_status_targets")):
         raise HTTPException(404, "Actualité introuvable")
     return item
 
 
 @api.get("/events/{eid}")
 async def get_event(eid: str):
+    me = await db.employees.find_one({"id": current_user()}, {"_id": 0}) or {}
     item = await db.events.find_one({"id": eid}, {"_id": 0})
     if not item:
+        raise HTTPException(404, "Événement introuvable")
+    aud = item.get("audience_status_targets") or []
+    if aud and not _user_matches_audience(me, aud):
         raise HTTPException(404, "Événement introuvable")
     return item
 
@@ -7112,19 +7151,13 @@ async def admin_reorder_news(payload: ReorderPayload):
 @api.get("/carousel")
 async def get_carousel():
     """Public: news marked featured & active, sorted by order (asc). Filters
-    audience-restricted items based on the caller's statuses."""
+    audience-restricted items based on the caller's statuses (strict — no
+    admin bypass)."""
     items = await db.news.find(
         {"featured": True, "active": {"$ne": False}}, {"_id": 0},
     ).sort([("order", 1), ("date", -1)]).to_list(50)
     me = await db.employees.find_one({"id": current_user()}, {"_id": 0}) or {}
-    my_statuses = set(me.get("statuses") or [])
-    is_admin = me.get("is_admin") or me.get("can_manage_communication")
-    out: list[dict] = []
-    for it in items:
-        targets = it.get("audience_status_targets") or []
-        if targets and not is_admin and not (my_statuses & set(targets)):
-            continue
-        out.append(it)
+    out: list[dict] = [it for it in items if _user_matches_audience(me, it.get("audience_status_targets"))]
     return out[:20]
 
 
@@ -7537,7 +7570,11 @@ async def list_newsletters(archived: bool = False, category: Optional[str] = Non
         if pub_at and pub_at > now_iso:
             # scheduled — admins & author can see, others cannot
             return n.get("author_id") == me["id"] or is_admin
-        return True
+        # Audience gate — strict. `recipient_statuses` is the newsletter's
+        # visible-by list. Empty = everyone. Author always sees their own.
+        if n.get("author_id") == me["id"]:
+            return True
+        return _user_matches_audience(me, n.get("recipient_statuses"))
     items = [n for n in items if _visible(n)]
     for n in items:
         pub_at = n.get("publish_at")
@@ -7569,6 +7606,9 @@ async def get_newsletter(nid: str):
     me = await _me()
     n = await db.newsletters.find_one({"id": nid}, {"_id": 0})
     if not n:
+        raise HTTPException(404, "Newsletter introuvable")
+    # Audience gate — 404 for non-authorized users (also blocks direct URLs)
+    if n.get("published") and n.get("author_id") != me["id"] and not _user_matches_audience(me, n.get("recipient_statuses")):
         raise HTTPException(404, "Newsletter introuvable")
     # Auto-mark as read on detail fetch
     if n.get("published"):
