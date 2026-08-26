@@ -1394,12 +1394,18 @@ export default function Messagerie() {
                         // - Service inbox side: service replies on right with
                         //   service avatar; the employee's personal messages
                         //   on the left with the employee's avatar.
+                        // Auto-generated service messages (`author_id` starts
+                        // with `system-`) are treated as messages sent BY the
+                        // service — so they follow the same rules as signed
+                        // service replies.
                         const authoredByMe = m.author_id === me?.id;
+                        const isSystemMsg = typeof m.author_id === "string" && m.author_id.startsWith("system-");
+                        const isFromService = !!m.is_service_message || isSystemMsg;
                         const inServiceMode = mailboxMode !== "personal";
                         const mine = inServiceMode
-                          ? !!m.is_service_message
-                          : authoredByMe && !m.is_service_message;
-                        const showServiceAvatar = !!m.is_service_message;
+                          ? isFromService
+                          : authoredByMe && !isFromService;
+                        const showServiceAvatar = isFromService;
                         const isSystemRh = m.author_id === "system-rh";
                         const author = isSystemRh ? null : findEmployee(m.author_id);
                         const msgChecked = selectedMsgIds.has(m.id);
