@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Search, Mail, Phone, MessageSquare, Users, Briefcase, UserCog, Utensils, Shield, Wrench, Info, Landmark, Megaphone } from "lucide-react";
+import { Search, Mail, Phone, MessageSquare, Users, Briefcase, UserCog, Utensils, Shield, Wrench, Info, Landmark, Megaphone, ChevronLeft, ChevronRight } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
@@ -51,14 +51,31 @@ export default function Contacts() {
   };
 
   const filtered = useMemo(() => {
-    return employees.filter((e) => {
+    const list = employees.filter((e) => {
       if (q) {
         const s = `${e.first_name} ${e.last_name} ${e.role} ${e.department}`.toLowerCase();
         if (!s.includes(q.toLowerCase())) return false;
       }
       return true;
     });
+    // Alphabetical order by last name, then first name
+    return list.sort((a, b) => {
+      const la = (a.last_name || "").localeCompare(b.last_name || "", "fr", { sensitivity: "base" });
+      if (la !== 0) return la;
+      return (a.first_name || "").localeCompare(b.first_name || "", "fr", { sensitivity: "base" });
+    });
   }, [employees, q]);
+
+  // Pagination: 6 rows × 3 columns = 18 employees per page on desktop
+  const PAGE_SIZE = 18;
+  const [page, setPage] = useState(1);
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  useEffect(() => { setPage(1); }, [q, tab]);
+  useEffect(() => { if (page > totalPages) setPage(totalPages); }, [totalPages, page]);
+  const paginated = useMemo(
+    () => filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE),
+    [filtered, page]
+  );
 
   const startDM = async (employeeId) => {
     const { data } = await api.post("/channels/dm", { employee_id: employeeId });
@@ -175,7 +192,7 @@ export default function Contacts() {
             </div>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {filtered.map((e) => (
+            {paginated.map((e) => (
               <div
                 key={e.id}
                 className="ms-card ms-card-hover p-5 flex flex-col items-center text-center"
@@ -231,6 +248,46 @@ export default function Contacts() {
               </div>
             ))}
           </div>
+          {totalPages > 1 && (
+            <div className="ms-card p-3 flex items-center justify-between mt-4" data-testid="contacts-pagination">
+              <button
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={page === 1}
+                data-testid="contacts-prev"
+                className="ms-btn-outline text-xs disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <ChevronLeft className="h-3.5 w-3.5" /> Précédent
+              </button>
+              <div className="flex items-center gap-1.5">
+                {Array.from({ length: totalPages }, (_, i) => i + 1).map((p) => (
+                  <button
+                    key={p}
+                    onClick={() => setPage(p)}
+                    data-testid={`contacts-page-${p}`}
+                    className={`h-8 min-w-[32px] px-2 rounded-lg text-xs font-semibold transition-colors ${
+                      p === page
+                        ? "bg-[#071B34] text-white"
+                        : "bg-white text-[#475569] hover:bg-[#F4F7FA] border border-[#071B34]/8"
+                    }`}
+                  >
+                    {p}
+                  </button>
+                ))}
+              </div>
+              <button
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                disabled={page === totalPages}
+                data-testid="contacts-next"
+                className="ms-btn-outline text-xs disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                Suivant <ChevronRight className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          )}
+          <p className="text-center text-xs text-[#475569] mt-2">
+            {filtered.length} contact{filtered.length > 1 ? "s" : ""}
+            {totalPages > 1 ? ` — page ${page} / ${totalPages}` : ""}
+          </p>
         </>
       )}
     </div>
