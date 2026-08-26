@@ -311,6 +311,27 @@ export default function Messagerie() {
     const key = mailboxMode.replace(/^service-/, "");
     return conversations.filter((c) => String(c.id || "").startsWith(`corp-${key}-`));
   }, [conversations, mailboxMode]);
+  const mailboxUnread = useMemo(() => {
+    // Total unread per service canal (from the viewer=service-staff side)
+    const map = { personal: 0 };
+    for (const c of conversations) {
+      const u = c.unread_count || 0;
+      if (c._is_service_thread) {
+        // Extract canal key from `corp-{key}-{uid}`
+        const idStr = String(c.id || "");
+        let key = c.corporate_key || null;
+        if (!key) {
+          for (const k of ["service-rh", "communication", "managers-ops", "dept-financier", "direction"]) {
+            if (idStr.startsWith(`corp-${k}-`)) { key = k; break; }
+          }
+        }
+        if (key) map[key] = (map[key] || 0) + u;
+      } else {
+        map.personal += u;
+      }
+    }
+    return map;
+  }, [conversations]);
   const filtered = useMemo(() => {
     let list = conversations;
     // Mailbox split — personal excludes service threads (where user is staff),
@@ -754,28 +775,47 @@ export default function Messagerie() {
                 <button
                   onClick={() => { setMailboxMode("personal"); setActive(null); }}
                   data-testid="mailbox-personal"
-                  className={`text-[11px] font-semibold rounded-lg px-2.5 py-1.5 transition-colors ${
+                  className={`text-[11px] font-semibold rounded-lg px-2.5 py-1.5 transition-colors relative ${
                     mailboxMode === "personal"
                       ? "bg-[#3BA4FF] text-white shadow"
                       : "bg-white ring-1 ring-[#071B34]/10 text-[#334155] hover:bg-[#F4F7FA]"
                   }`}
                 >
                   Ma messagerie
+                  {mailboxUnread.personal > 0 && (
+                    <span
+                      className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full bg-[#EF4444] text-white text-[9px] font-bold flex items-center justify-center"
+                      data-testid="mailbox-personal-badge"
+                    >
+                      {mailboxUnread.personal > 99 ? "99+" : mailboxUnread.personal}
+                    </span>
+                  )}
                 </button>
-                {serviceAccess.map((k) => (
-                  <button
-                    key={k}
-                    onClick={() => { setMailboxMode(`service-${k}`); setActive(null); }}
-                    data-testid={`mailbox-svc-${k}`}
-                    className={`text-[11px] font-semibold rounded-lg px-2.5 py-1.5 transition-colors inline-flex items-center gap-1 ${
-                      mailboxMode === `service-${k}`
-                        ? "bg-[#7C3AED] text-white shadow"
-                        : "bg-white ring-1 ring-[#7C3AED]/20 text-[#7C3AED] hover:bg-[#A78BFA]/10"
-                    }`}
-                  >
-                    <Briefcase className="h-3 w-3" /> {corpNames[k] || k}
-                  </button>
-                ))}
+                {serviceAccess.map((k) => {
+                  const u = mailboxUnread[k] || 0;
+                  return (
+                    <button
+                      key={k}
+                      onClick={() => { setMailboxMode(`service-${k}`); setActive(null); }}
+                      data-testid={`mailbox-svc-${k}`}
+                      className={`text-[11px] font-semibold rounded-lg px-2.5 py-1.5 transition-colors inline-flex items-center gap-1 relative ${
+                        mailboxMode === `service-${k}`
+                          ? "bg-[#7C3AED] text-white shadow"
+                          : "bg-white ring-1 ring-[#7C3AED]/20 text-[#7C3AED] hover:bg-[#A78BFA]/10"
+                      }`}
+                    >
+                      <Briefcase className="h-3 w-3" /> {corpNames[k] || k}
+                      {u > 0 && (
+                        <span
+                          className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full bg-[#EF4444] text-white text-[9px] font-bold flex items-center justify-center"
+                          data-testid={`mailbox-svc-${k}-badge`}
+                        >
+                          {u > 99 ? "99+" : u}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
               </div>
             </div>
           )}
