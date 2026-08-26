@@ -2450,14 +2450,18 @@ async def list_birthdays(view: str = "upcoming", limit: int = 60):
     else:
         results.sort(key=lambda r: r["days_until"])
     results = results[:limit]
-    # Enrich with `already_wished` for the caller
+    # Enrich with `already_wished` for the caller. A wish can ONLY be sent on
+    # the day of the birthday itself (`send_birthday_wish` enforces
+    # `is_today`), so surfacing `already_wished=True` on a future or past
+    # birthday would be misleading. We only flag rows whose anniversary is
+    # today AND for which a wish is recorded in the current year.
     uid = current_user()
     wishes = await db.birthday_wishes.find(
         {"from_id": uid, "year": today.year}, {"_id": 0, "to_id": 1}
     ).to_list(500)
     wished_ids = {w["to_id"] for w in wishes}
     for r in results:
-        r["already_wished"] = r["id"] in wished_ids
+        r["already_wished"] = bool(r.get("is_today")) and r["id"] in wished_ids
     return results
 
 
@@ -8258,6 +8262,32 @@ async def on_start():
         )
     except Exception as e:
         print(f"[startup] rh-channel name normalization skipped: {e}")
+
+    # ─── Purge phantom birthday_wishes rows for the current year that target
+    # employees whose birthday is still UPCOMING (hasn't happened yet this
+    # year). Such rows are impossible under the current `is_today` guard and
+    # were likely leftover from seed / earlier code. Idempotent.
+    try:
+        marker = await db.system_flags.find_one({"key": "birthday_wishes_purge_future_v1"})
+        if not marker:
+            today = date.today()
+            employees = await db.employees.find(
+                {"birth_date": {"$ne": None}}, {"_id": 0, "id": 1, "birth_date": 1}
+            ).to_list(500)
+            future_ids = set()
+            for e in employees:
+                m = _birthday_meta(e.get("birth_date"), today)
+                if m and not m.get("is_today") and m.get("days_until", 0) < 275:
+                    # Upcoming birthday later this year → wishes for year=today.year are phantoms
+                    future_ids.add(e["id"])
+            if future_ids:
+                r = await db.birthday_wishes.delete_many(
+                    {"year": today.year, "to_id": {"$in": list(future_ids)}}
+                )
+                print(f"[startup] purged {r.deleted_count} phantom birthday_wishes for {len(future_ids)} upcoming birthdays")
+            await db.system_flags.insert_one({"key": "birthday_wishes_purge_future_v1", "at": _now()})
+    except Exception as e:
+        print(f"[startup] birthday_wishes phantom purge skipped: {e}")
 
     # Seed shared service-inbox channels (idempotent). Runs AFTER Marcus's
     # assignment so his Direction inbox already has him as member.
