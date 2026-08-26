@@ -4970,6 +4970,124 @@ async def admin_form_responses(fid: str):
     return await db.form_responses.find({"form_id": fid}, {"_id": 0}).sort("submitted_at", -1).to_list(1000)
 
 
+@api.get("/admin/forms/{fid}/stats")
+async def admin_form_stats(fid: str):
+    """Return per-question aggregated statistics for a form + a participation
+    summary (total recipients, respondents, participation rate, non-respondents
+    list)."""
+    await require_permission("create_forms")
+    form = await db.forms.find_one({"id": fid}, {"_id": 0})
+    if not form:
+        raise HTTPException(404, "Formulaire introuvable")
+    responses = await db.form_responses.find({"form_id": fid}, {"_id": 0}).to_list(10000)
+    # Recipients = every non-super-admin active employee (audience-agnostic for MVP)
+    employees = await db.employees.find({"active": {"$ne": False}}, {"_id": 0, "id": 1, "first_name": 1, "last_name": 1, "avatar": 1}).to_list(1000)
+    respondent_ids = {r["employee_id"] for r in responses if r.get("employee_id")}
+    non_respondents = [e for e in employees if e["id"] not in respondent_ids]
+    total_recipients = len(employees)
+    total_responses = len({r["employee_id"] for r in responses if r.get("employee_id")})
+    rate = round((total_responses / total_recipients * 100), 1) if total_recipients else 0.0
+
+    # Per-question aggregation
+    def _pct(n, tot): return round((n / tot * 100), 1) if tot else 0.0
+
+    questions_stats = []
+    for f in form.get("fields", []) or []:
+        if f.get("type") == "section":
+            continue
+        name = f.get("name")
+        typ = f.get("type")
+        values = [r["answers"].get(name) for r in responses if (r.get("answers") or {}).get(name) not in (None, "")]
+        answered = len(values)
+        q = {
+            "field_id": f.get("id"),
+            "name": name,
+            "label": f.get("label"),
+            "type": typ,
+            "answered_count": answered,
+            "skipped_count": total_responses - answered,
+        }
+        if typ in ("select", "radio"):
+            counts = {}
+            for opt in (f.get("options") or []):
+                counts[opt] = 0
+            for v in values:
+                if v in counts:
+                    counts[v] += 1
+                else:
+                    counts[v] = counts.get(v, 0) + 1
+            options = sorted(
+                [{"option": o, "count": c, "percent": _pct(c, answered)} for o, c in counts.items()],
+                key=lambda x: -x["count"],
+            )
+            q["options"] = options
+            q["top"] = options[0] if options and options[0]["count"] > 0 else None
+            q["bottom"] = options[-1] if len(options) > 1 else None
+        elif typ == "checkbox":
+            counts = {}
+            for opt in (f.get("options") or []):
+                counts[opt] = 0
+            for v in values:
+                if isinstance(v, list):
+                    for opt in v:
+                        counts[opt] = counts.get(opt, 0) + 1
+            options = sorted(
+                [{"option": o, "count": c, "percent": _pct(c, answered)} for o, c in counts.items()],
+                key=lambda x: -x["count"],
+            )
+            q["options"] = options
+            q["top"] = options[0] if options and options[0]["count"] > 0 else None
+        elif typ == "number":
+            nums = []
+            for v in values:
+                try:
+                    nums.append(float(v))
+                except Exception:
+                    pass
+            if nums:
+                q["average"] = round(sum(nums) / len(nums), 2)
+                q["min"] = min(nums)
+                q["max"] = max(nums)
+                # Distribution rounded to integers (natural rating scale)
+                dist = {}
+                for n in nums:
+                    k = int(round(n))
+                    dist[k] = dist.get(k, 0) + 1
+                q["distribution"] = sorted([{"value": k, "count": c, "percent": _pct(c, len(nums))} for k, c in dist.items()], key=lambda x: x["value"])
+                q["mode"] = max(q["distribution"], key=lambda x: x["count"])["value"]
+            else:
+                q["average"] = None
+                q["distribution"] = []
+        elif typ in ("text", "textarea", "email", "tel", "url", "file"):
+            samples = [str(v) for v in values]
+            q["samples"] = samples[:100]
+            # Very light word-frequency summary (excluding common stopwords)
+            stop = {"le","la","les","de","des","du","un","une","et","à","a","au","aux","en","dans","que","qui","pour","sur","est","je","tu","il","elle","on","nous","vous","ils","elles","ne","pas","plus","très","tres","avec","mais","ou","où","ce","ça","ca","cet","cette","ces","mon","ma","mes","ton","ta","tes","son","sa","ses","notre","votre","leur","leurs","être","etre","avoir","fait","faire","tout","tous","toute","toutes"}
+            wc = {}
+            for v in samples:
+                for w in [w.strip(".,;:!?()\"'").lower() for w in str(v).split()]:
+                    if len(w) < 3 or w in stop:
+                        continue
+                    wc[w] = wc.get(w, 0) + 1
+            q["top_words"] = sorted([{"word": w, "count": c} for w, c in wc.items()], key=lambda x: -x["count"])[:12]
+        elif typ == "date":
+            q["samples"] = [str(v) for v in values][:100]
+        else:
+            q["samples"] = [str(v) for v in values][:100]
+        questions_stats.append(q)
+
+    return {
+        "form": {"id": form["id"], "title": form.get("title"), "description": form.get("description")},
+        "summary": {
+            "total_recipients": total_recipients,
+            "total_responses": total_responses,
+            "participation_rate": rate,
+            "non_respondents": [{"id": e["id"], "first_name": e["first_name"], "last_name": e["last_name"], "avatar": e.get("avatar")} for e in non_respondents],
+        },
+        "questions": questions_stats,
+    }
+
+
 
 
 # ─── News

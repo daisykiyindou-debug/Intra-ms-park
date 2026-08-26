@@ -638,9 +638,12 @@ function FieldRow({ field, index, total, onChange, onRemove, onMove }) {
 
 // ────────────────────────────────────── Responses viewer
 function ResponsesModal({ form, onClose }) {
+  const [tab, setTab] = useState("stats"); // "stats" | "individual"
   const [responses, setResponses] = useState([]);
+  const [stats, setStats] = useState(null);
   useEffect(() => {
     api.get(`/admin/forms/${form.id}/responses`).then((r) => setResponses(r.data));
+    api.get(`/admin/forms/${form.id}/stats`).then((r) => setStats(r.data)).catch(() => setStats(null));
   }, [form.id]);
 
   const exportCsv = () => {
@@ -698,8 +701,29 @@ function ResponsesModal({ form, onClose }) {
           </div>
         </div>
 
+        {/* Tab switcher */}
+        <div className="px-5 pt-4 flex gap-1.5 border-b border-[#071B34]/5">
+          {[
+            { k: "stats", l: "Vue statistiques" },
+            { k: "individual", l: `Réponses individuelles (${responses.length})` },
+          ].map((t) => (
+            <button
+              key={t.k}
+              onClick={() => setTab(t.k)}
+              data-testid={`stats-tab-${t.k}`}
+              className={`px-4 py-2 text-xs font-bold rounded-t-lg transition-colors ${
+                tab === t.k ? "bg-[#3BA4FF]/10 text-[#1D70B8]" : "text-[#475569] hover:bg-[#F4F7FA]"
+              }`}
+            >
+              {t.l}
+            </button>
+          ))}
+        </div>
+
         <div className="flex-1 overflow-y-auto p-5 space-y-3">
-          {responses.length === 0 ? (
+          {tab === "stats" ? (
+            <StatsView stats={stats} form={form} />
+          ) : responses.length === 0 ? (
             <div className="text-center py-12 text-sm text-[#475569]">
               Aucune réponse pour le moment.
             </div>
@@ -733,4 +757,192 @@ function ResponsesModal({ form, onClose }) {
     </div>,
     document.body
   );
+}
+
+// ────────────────────────────────────── Stats view (aggregated results per question)
+function StatsView({ stats, form }) {
+  if (!stats) return <div className="text-center py-12 text-sm text-[#475569]">Chargement des statistiques…</div>;
+  const s = stats.summary;
+  return (
+    <div className="space-y-4" data-testid="form-stats-view">
+      {/* Summary card */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+        <SummaryCard label="Destinataires" value={s.total_recipients} />
+        <SummaryCard label="Réponses" value={s.total_responses} />
+        <SummaryCard label="Taux de participation" value={`${s.participation_rate}%`} accent />
+        <SummaryCard label="N'ont pas répondu" value={s.non_respondents.length} muted />
+      </div>
+
+      {/* Non-respondents */}
+      {s.non_respondents.length > 0 && (
+        <details className="rounded-xl bg-[#F8FAFC] p-3">
+          <summary className="cursor-pointer text-xs font-bold text-[#475569]">
+            👥 Voir les {s.non_respondents.length} personne{s.non_respondents.length > 1 ? "s" : ""} qui n'ont pas encore répondu
+          </summary>
+          <div className="mt-3 flex flex-wrap gap-1.5">
+            {s.non_respondents.map((e) => (
+              <span key={e.id} className="inline-flex items-center gap-1.5 rounded-full bg-white ring-1 ring-[#071B34]/10 px-2 py-1 text-[11px] text-[#334155]">
+                <img src={e.avatar} alt="" className="h-4 w-4 rounded-full object-cover" />
+                {e.first_name} {e.last_name}
+              </span>
+            ))}
+          </div>
+        </details>
+      )}
+
+      {/* Questions */}
+      {stats.questions.length === 0 && (
+        <div className="text-center py-8 text-sm text-[#475569]">Aucune question analysable dans ce formulaire.</div>
+      )}
+      {stats.questions.map((q) => (
+        <QuestionStats key={q.field_id} q={q} />
+      ))}
+    </div>
+  );
+}
+
+function SummaryCard({ label, value, accent, muted }) {
+  return (
+    <div className={`rounded-xl p-3 ${accent ? "bg-[#3BA4FF]/10 text-[#1D70B8]" : muted ? "bg-[#FEF3C7] text-[#B45309]" : "bg-[#F4F7FA] text-[#334155]"}`}>
+      <div className="text-[10px] uppercase tracking-widest font-bold opacity-80">{label}</div>
+      <div className="mt-1 text-2xl font-bold tabular-nums">{value}</div>
+    </div>
+  );
+}
+
+function QuestionStats({ q }) {
+  return (
+    <div className="rounded-2xl border border-[#071B34]/5 p-4">
+      <div className="flex items-start justify-between gap-2 mb-3">
+        <div>
+          <div className="text-[10px] uppercase tracking-widest font-bold text-[#475569]">{typeLabel(q.type)}</div>
+          <h3 className="text-sm font-bold text-[#071B34] mt-0.5">{q.label}</h3>
+        </div>
+        <span className="ms-chip bg-[#F4F7FA] text-[#475569] shrink-0">
+          {q.answered_count} réponse{q.answered_count > 1 ? "s" : ""}
+        </span>
+      </div>
+
+      {/* Choice / multi-choice */}
+      {(q.type === "radio" || q.type === "select" || q.type === "checkbox") && (
+        <>
+          {(q.options || []).length === 0 || q.answered_count === 0 ? (
+            <div className="text-xs text-[#94A3B8] italic">Aucune donnée à afficher.</div>
+          ) : (
+            <div className="space-y-2">
+              {q.options.map((opt) => (
+                <div key={opt.option}>
+                  <div className="flex items-center justify-between text-xs mb-1">
+                    <span className="font-semibold text-[#334155]">{opt.option}</span>
+                    <span className="tabular-nums text-[#475569]">
+                      <strong className="text-[#071B34]">{opt.percent}%</strong> — {opt.count} réponse{opt.count > 1 ? "s" : ""}
+                    </span>
+                  </div>
+                  <div className="h-2 rounded-full bg-[#F4F7FA] overflow-hidden">
+                    <div className="h-full bg-gradient-to-r from-[#3BA4FF] to-[#1D70B8] transition-all" style={{ width: `${opt.percent}%` }} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          {q.top && q.top.count > 0 && (
+            <div className="mt-3 flex flex-wrap gap-2 text-[11px]">
+              <span className="rounded-full bg-emerald-100 text-emerald-800 px-2 py-1 font-semibold">
+                ✨ Majoritaire : {q.top.option} — {q.top.percent}%
+              </span>
+              {q.bottom && q.bottom.count === 0 && q.type !== "checkbox" && (
+                <span className="rounded-full bg-amber-100 text-amber-800 px-2 py-1 font-semibold">
+                  Aucun choix pour : {q.bottom.option}
+                </span>
+              )}
+            </div>
+          )}
+        </>
+      )}
+
+      {/* Numeric / rating */}
+      {q.type === "number" && (
+        <>
+          {q.average == null ? (
+            <div className="text-xs text-[#94A3B8] italic">Aucune donnée numérique.</div>
+          ) : (
+            <>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-3">
+                <MiniStat label="Moyenne" value={q.average} accent />
+                <MiniStat label="Note la + donnée" value={q.mode} />
+                <MiniStat label="Min" value={q.min} />
+                <MiniStat label="Max" value={q.max} />
+              </div>
+              <div className="space-y-1">
+                {q.distribution.map((d) => (
+                  <div key={d.value} className="flex items-center gap-2 text-xs">
+                    <span className="w-8 text-right font-semibold tabular-nums text-[#334155]">{d.value}</span>
+                    <div className="flex-1 h-2 rounded-full bg-[#F4F7FA] overflow-hidden">
+                      <div className="h-full bg-[#3BA4FF]" style={{ width: `${d.percent}%` }} />
+                    </div>
+                    <span className="w-14 text-[#475569] tabular-nums">{d.count} · {d.percent}%</span>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </>
+      )}
+
+      {/* Text / textarea */}
+      {(q.type === "text" || q.type === "textarea" || q.type === "email" || q.type === "tel" || q.type === "url" || q.type === "file") && (
+        <>
+          {(q.top_words || []).length > 0 && (
+            <div className="mb-3">
+              <div className="text-[10px] uppercase tracking-widest font-bold text-[#475569] mb-1.5">Mots récurrents</div>
+              <div className="flex flex-wrap gap-1.5">
+                {q.top_words.map((w) => (
+                  <span key={w.word} className="rounded-full bg-[#3BA4FF]/10 text-[#1D70B8] px-2 py-0.5 text-[11px] font-semibold">
+                    {w.word} · {w.count}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+          <div className="text-[10px] uppercase tracking-widest font-bold text-[#475569] mb-1.5">Toutes les réponses</div>
+          <div className="space-y-1 max-h-52 overflow-y-auto pr-1">
+            {(q.samples || []).length === 0 ? (
+              <div className="text-xs text-[#94A3B8] italic">Aucune réponse.</div>
+            ) : (
+              q.samples.map((v, i) => (
+                <div key={i} className="text-xs bg-[#F8FAFC] rounded-lg px-2 py-1.5 text-[#334155]">{v}</div>
+              ))
+            )}
+          </div>
+        </>
+      )}
+
+      {/* Date */}
+      {q.type === "date" && (
+        <div className="flex flex-wrap gap-1.5">
+          {(q.samples || []).map((v, i) => (
+            <span key={i} className="rounded-full bg-[#F4F7FA] px-2 py-0.5 text-[11px] text-[#334155]">{v}</span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MiniStat({ label, value, accent }) {
+  return (
+    <div className={`rounded-lg p-2 ${accent ? "bg-emerald-50 text-emerald-800" : "bg-[#F4F7FA] text-[#334155]"}`}>
+      <div className="text-[9px] uppercase tracking-widest font-bold opacity-80">{label}</div>
+      <div className="text-lg font-bold tabular-nums">{value ?? "—"}</div>
+    </div>
+  );
+}
+
+function typeLabel(t) {
+  return {
+    text: "Texte court", textarea: "Texte long", email: "E-mail", tel: "Téléphone",
+    number: "Note / nombre", url: "URL", date: "Date",
+    select: "Choix unique", radio: "Choix unique", checkbox: "Choix multiple",
+    file: "Fichier",
+  }[t] || t;
 }
