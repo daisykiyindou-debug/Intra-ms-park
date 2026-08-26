@@ -72,6 +72,31 @@ export default function PublicForm() {
     );
   }
 
+  // ── Server-set flag: the deadline is in the past. Show a "closed" state
+  // instead of the interactive form.
+  if (form.is_closed && !submitted) {
+    return (
+      <div className="ms-fade-up max-w-2xl mx-auto space-y-4">
+        <Link to="/dashboard" className="inline-flex items-center gap-2 text-sm font-semibold text-[#475569] hover:text-[#071B34]">
+          <ArrowLeft className="h-4 w-4" /> Retour
+        </Link>
+        <div className="ms-card p-10 text-center" data-testid="form-closed">
+          <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-[#F59E0B]/15 text-[#B45309] mb-4">
+            <CheckCircle2 className="h-8 w-8" />
+          </div>
+          <h1 className="text-2xl font-bold text-[#071B34]">Ce formulaire est fermé.</h1>
+          <p className="mt-2 text-sm text-[#475569]">
+            La date limite de réponse est dépassée
+            {form.closes_at ? ` (${new Date(form.closes_at).toLocaleString("fr-FR", { dateStyle: "long", timeStyle: "short" })})` : ""}.
+          </p>
+          <div className="mt-6 flex justify-center gap-2">
+            <Link to="/dashboard" className="ms-btn-primary">Retour à l'accueil</Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   const setValue = (name, value) => setAnswers((a) => ({ ...a, [name]: value }));
 
   const toggleMulti = (name, opt) => {

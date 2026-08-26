@@ -307,6 +307,9 @@ class FormPayload(BaseModel):
     submit_label: Optional[str] = "Envoyer"
     success_message: Optional[str] = "Merci ! Votre formulaire a bien été envoyé."
     audience_status_targets: Optional[List[str]] = []  # empty = all employees
+    # Deadline (ISO datetime string). After this instant the form is closed
+    # (read-only for admins in stats, hidden/refused for employees).
+    closes_at: Optional[str] = None
 
 
 class FormResponse(BaseModel):
@@ -5002,7 +5005,8 @@ async def get_form(fid: str):
     """Public — logged employees can fetch a form to fill it in.
     Also returns whether the caller has already answered (`already_answered`)
     and the submission timestamp so the UI can hide the form.
-    Audience gate: 404 for users not in the target statuses."""
+    Audience gate: 404 for users not in the target statuses.
+    Deadline gate: 410 (Gone) when `closes_at` is in the past."""
     f = await db.forms.find_one({"id": fid, "active": True}, {"_id": 0})
     if not f:
         raise HTTPException(404, "Formulaire introuvable ou désactivé")
@@ -5010,10 +5014,26 @@ async def get_form(fid: str):
     me = await db.employees.find_one({"id": uid}, {"_id": 0}) or {}
     if f.get("created_by") != uid and not _user_matches_audience(me, f.get("audience_status_targets")):
         raise HTTPException(404, "Formulaire introuvable ou désactivé")
+    # Compute closed state without hiding the form entirely so the UI can
+    # display "Ce formulaire est fermé depuis le …"
+    f["is_closed"] = _form_is_closed(f)
     existing = await db.form_responses.find_one({"form_id": fid, "employee_id": uid}, {"_id": 0})
     f["already_answered"] = bool(existing)
     f["my_response_at"] = existing.get("submitted_at") if existing else None
     return f
+
+
+def _form_is_closed(f: dict) -> bool:
+    """True when a deadline is set and already in the past."""
+    ca = f.get("closes_at")
+    if not ca:
+        return False
+    try:
+        dt = datetime.fromisoformat(ca.replace("Z", "+00:00"))
+        now = datetime.now(timezone.utc)
+        return dt <= now
+    except Exception:
+        return False
 
 
 @api.post("/admin/forms")
@@ -5028,6 +5048,7 @@ async def admin_create_form(payload: FormPayload):
         "submit_label": payload.submit_label or "Envoyer",
         "success_message": payload.success_message or "Merci ! Votre formulaire a bien été envoyé.",
         "audience_status_targets": payload.audience_status_targets or [],
+        "closes_at": payload.closes_at,
         "created_by": me["id"],
         "created_by_name": f"{me['first_name']} {me['last_name']}",
         "created_at": _now(),
@@ -5056,11 +5077,46 @@ async def admin_delete_form(fid: str):
     return {"ok": True}
 
 
+@api.post("/admin/forms/{fid}/remind")
+async def admin_remind_form(fid: str):
+    """Push a notification to every targeted employee who hasn't answered
+    yet. Idempotent — running it twice pings the same non-responders again
+    (fine: the notification list is de-duplicated by title on the client)."""
+    await require_permission("create_forms")
+    f = await db.forms.find_one({"id": fid}, {"_id": 0})
+    if not f:
+        raise HTTPException(404, "Formulaire introuvable")
+    if _form_is_closed(f):
+        raise HTTPException(400, "Formulaire fermé — impossible de relancer.")
+    targets = f.get("audience_status_targets") or []
+    # Match audience
+    emps = await db.employees.find({}, {"_id": 0}).to_list(500)
+    matched = [e for e in emps if _user_matches_audience(e, targets) and e.get("account_status") != "deactivated"]
+    # Filter out those who already responded
+    responded = {
+        r["employee_id"]
+        for r in await db.form_responses.find({"form_id": fid}, {"_id": 0, "employee_id": 1}).to_list(2000)
+    }
+    non_responders = [e for e in matched if e["id"] not in responded]
+    for e in non_responders:
+        await _push_notification(
+            employee_id=e["id"],
+            type="form_reminder",
+            title=f"Relance — {f.get('title', 'Formulaire')}",
+            content=f"Merci de répondre au formulaire avant la clôture.",
+            icon="clipboard-list",
+            link=f"/formulaires/{fid}",
+        )
+    return {"ok": True, "sent": len(non_responders)}
+
+
 @api.post("/forms/{fid}/submit")
 async def submit_form(fid: str, payload: FormSubmitPayload):
     f = await db.forms.find_one({"id": fid, "active": True}, {"_id": 0})
     if not f:
         raise HTTPException(404, "Formulaire introuvable ou désactivé")
+    if _form_is_closed(f):
+        raise HTTPException(410, "Ce formulaire est fermé.")
     uid = current_user()
     me = await db.employees.find_one({"id": uid}, {"_id": 0}) or {}
     if not _user_matches_audience(me, f.get("audience_status_targets")):

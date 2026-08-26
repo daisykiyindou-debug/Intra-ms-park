@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { Link } from "react-router-dom";
 import {
   ClipboardList, Plus, Trash2, Save, X, GripVertical, ArrowUp, ArrowDown, Copy,
-  FileText, BarChart3, Eye, ExternalLink, Users,
+  FileText, BarChart3, Eye, ExternalLink, Users, BellRing,
 } from "lucide-react";
 import { toast } from "sonner";
 import { api, formatDateFr } from "@/lib/api";
@@ -302,6 +302,18 @@ function FormEditor({ form, onClose, onSaved }) {
   const [submitLabel, setSubmitLabel] = useState(form?.submit_label || "Envoyer");
   const [successMessage, setSuccessMessage] = useState(form?.success_message || "Merci ! Votre formulaire a bien été envoyé.");
   const [active, setActive] = useState(form?.active ?? true);
+  const [audienceTargets, setAudienceTargets] = useState(form?.audience_status_targets || []);
+  // closes_at is stored as full ISO on the server. In the UI we split it
+  // into a local `datetime-local` value (empty = no deadline).
+  const [closesAt, setClosesAt] = useState(() => {
+    if (!form?.closes_at) return "";
+    try {
+      const d = new Date(form.closes_at);
+      const pad = (n) => String(n).padStart(2, "0");
+      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    } catch { return ""; }
+  });
+  const [reminding, setReminding] = useState(false);
   const [fields, setFields] = useState(form?.fields ? [...form.fields] : [
     { ...newField("text"), label: "Prénom", name: "first_name", required: true, placeholder: "Auto-rempli si connecté" },
     { ...newField("text"), label: "Nom", name: "last_name", required: true, placeholder: "Auto-rempli si connecté" },
@@ -322,6 +334,20 @@ function FormEditor({ form, onClose, onSaved }) {
     });
   };
 
+  const sendReminder = async () => {
+    if (!form?.id) return;
+    if (!window.confirm("Envoyer une relance aux employés qui n'ont pas encore répondu ?")) return;
+    setReminding(true);
+    try {
+      const { data } = await api.post(`/admin/forms/${form.id}/remind`);
+      toast.success(`Relance envoyée à ${data.sent} employé${data.sent > 1 ? "s" : ""}`);
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Erreur");
+    } finally {
+      setReminding(false);
+    }
+  };
+
   const save = async () => {
     if (!title.trim()) return toast.error("Titre requis");
     if (fields.length === 0) return toast.error("Ajoutez au moins un champ");
@@ -339,6 +365,8 @@ function FormEditor({ form, onClose, onSaved }) {
         active,
         submit_label: submitLabel || "Envoyer",
         success_message: successMessage || "Merci !",
+        audience_status_targets: audienceTargets,
+        closes_at: closesAt ? new Date(closesAt).toISOString() : null,
       };
       if (isNew) {
         await api.post("/admin/forms", payload);
@@ -453,6 +481,84 @@ function FormEditor({ form, onClose, onSaved }) {
               />
               Formulaire actif (accessible aux employés)
             </label>
+
+            {/* Audience — statuses that can view + respond */}
+            <div className="pt-3 border-t border-[#071B34]/5">
+              <div className="ms-overline mb-2">Statuts destinataires</div>
+              <p className="text-[10px] text-[#475569] mb-2">
+                Aucune sélection = tous les employés. Sinon uniquement les statuts cochés peuvent voir et répondre.
+              </p>
+              <div className="grid grid-cols-2 gap-1">
+                {["ops", "management", "bureau", "direction", "alternant", "stage", "restauration", "securite", "nettoyage", "maintenance"].map((s) => {
+                  const on = audienceTargets.includes(s);
+                  const label = {
+                    ops: "Employé terrain (OPS)", management: "Management", bureau: "Employé Bureau",
+                    direction: "Direction", alternant: "Alternant", stage: "Stage",
+                    restauration: "Restauration", securite: "Sécurité", nettoyage: "Nettoyage",
+                    maintenance: "Maintenance",
+                  }[s];
+                  return (
+                    <label
+                      key={s}
+                      className={`flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-[11px] font-semibold cursor-pointer transition-colors ${
+                        on ? "bg-[#3BA4FF] text-white" : "bg-white ring-1 ring-[#071B34]/5 text-[#334155] hover:bg-[#3BA4FF]/10"
+                      }`}
+                      data-testid={`form-status-${s}`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={on}
+                        onChange={() => setAudienceTargets((prev) => on ? prev.filter((x) => x !== s) : [...prev, s])}
+                        className="h-3 w-3 accent-white"
+                      />
+                      {label}
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Deadline */}
+            <div className="pt-3 border-t border-[#071B34]/5">
+              <div className="ms-overline mb-1">Date & heure de clôture</div>
+              <p className="text-[10px] text-[#475569] mb-2">
+                Le formulaire sera automatiquement fermé après cette date. Vide = pas de limite.
+              </p>
+              <input
+                type="datetime-local"
+                value={closesAt}
+                onChange={(e) => setClosesAt(e.target.value)}
+                data-testid="form-closes-at"
+                className="ms-input text-xs"
+              />
+              {closesAt && (
+                <button
+                  type="button"
+                  onClick={() => setClosesAt("")}
+                  className="mt-1 text-[10px] text-[#B91C1C] font-semibold hover:underline"
+                >
+                  Retirer la date limite
+                </button>
+              )}
+            </div>
+
+            {/* Reminder */}
+            {!isNew && (
+              <div className="pt-3 border-t border-[#071B34]/5">
+                <button
+                  type="button"
+                  onClick={sendReminder}
+                  disabled={reminding}
+                  data-testid="form-remind"
+                  className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-[#F59E0B]/10 hover:bg-[#F59E0B]/20 ring-1 ring-[#F59E0B]/30 text-[#B45309] text-xs font-semibold transition-colors disabled:opacity-50"
+                >
+                  <BellRing className="h-3.5 w-3.5" /> Relancer les non-répondants
+                </button>
+                <p className="text-[10px] text-[#475569] mt-1 text-center">
+                  Envoie une notification aux employés ciblés qui n'ont pas encore répondu.
+                </p>
+              </div>
+            )}
 
             <div className="pt-3 border-t border-[#071B34]/5">
               <div className="ms-overline mb-2">Ajouter un champ</div>
