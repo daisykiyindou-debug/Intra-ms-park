@@ -4506,32 +4506,27 @@ async def mark_channel_read(cid: str):
 
 @api.post("/channels/{cid}/leave")
 async def leave_channel(cid: str):
-    """Employee-initiated leave from a team channel or a custom group chat.
-    Removes the user from `members_ids`, pulls the team key from their
-    `team_channel_ids` (team channels only), and posts a system message
-    "X a quitté le groupe." for remaining members. Only groups & team
-    channels can be self-left (DM / service / official channels can't)."""
+    """Employee-initiated leave from a CUSTOM group chat only (`grp-*` or
+    `is_group=true` with no admin flags). Team channels (`team-*`) and
+    service canals (`corp-*` / `rh-*`) are managed by admins — members
+    cannot leave them themselves. Posts "X a quitté le groupe." system
+    message for remaining members."""
     uid = current_user()
     ch = await db.channels.find_one({"id": cid}, {"_id": 0})
     if not ch:
         raise HTTPException(404, "Conversation introuvable")
     cid_str = str(ch.get("id", ""))
     is_team = bool(ch.get("is_team_channel") or cid_str.startswith("team-"))
-    is_custom_group = cid_str.startswith("grp-") or (ch.get("is_group") and not ch.get("is_official") and not ch.get("is_service_inbox") and not cid_str.startswith("corp-") and not cid_str.startswith("rh-"))
-    if not (is_team or is_custom_group):
-        raise HTTPException(400, "Impossible de quitter cette conversation")
+    is_service = cid_str.startswith("corp-") or cid_str.startswith("rh-") or ch.get("is_service_inbox") or ch.get("is_official")
+    is_dm = bool(ch.get("is_dm"))
+    is_custom_group = cid_str.startswith("grp-") or (ch.get("is_group") and not is_team and not is_service and not is_dm)
+    if not is_custom_group or is_team or is_service:
+        raise HTTPException(400, "Impossible de quitter cette conversation — contactez un administrateur")
     if uid not in (ch.get("members_ids") or []):
         raise HTTPException(400, "Vous n'êtes pas membre de ce canal")
     emp = await db.employees.find_one({"id": uid}, {"_id": 0}) or {}
     full_name = f"{emp.get('first_name', '')} {emp.get('last_name', '')}".strip() or "Un collègue"
-    # Pull the user from the channel members
     await db.channels.update_one({"id": cid}, {"$pull": {"members_ids": uid}})
-    # For team channels also purge the key from their profile
-    if is_team:
-        team_key = cid[len("team-"):] if cid.startswith("team-") else ch.get("team_key")
-        if team_key:
-            await db.employees.update_one({"id": uid}, {"$pull": {"team_channel_ids": team_key}})
-    # System message visible to remaining members
     await db.messages.insert_one({
         "id": _id(), "channel_id": cid, "author_id": "system",
         "text": f"{full_name} a quitté le groupe.", "type": "system",

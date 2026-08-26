@@ -1209,13 +1209,17 @@ export default function Messagerie() {
                           <Archive className="h-4 w-4" /> Archiver la conversation
                         </button>
                         {(() => {
-                          const idStr = String(currentDisplay?.id || "");
-                          const canLeave = !!currentDisplay && (currentDisplay.members_ids || []).includes(me?.id) && (
-                            currentDisplay.is_team_channel ||
-                            idStr.startsWith("team-") ||
-                            idStr.startsWith("grp-") ||
-                            (currentDisplay.is_group && !currentDisplay.is_official && !currentDisplay.is_service_inbox && !idStr.startsWith("corp-") && !idStr.startsWith("rh-"))
-                          );
+                          if (!currentDisplay) return null;
+                          const idStr = String(currentDisplay.id || "");
+                          const isTeam = currentDisplay.is_team_channel || idStr.startsWith("team-");
+                          const isService = idStr.startsWith("corp-") || idStr.startsWith("rh-") || currentDisplay.is_service_inbox || currentDisplay.is_official;
+                          const isDm = !!currentDisplay.is_dm;
+                          // Only CUSTOM group chats (`grp-*` or `is_group=true`
+                          // without any admin flag) can be self-left. Team &
+                          // service canals are admin-managed only.
+                          const isCustomGroup = idStr.startsWith("grp-") ||
+                            (currentDisplay.is_group && !isTeam && !isService && !isDm);
+                          const canLeave = isCustomGroup && (currentDisplay.members_ids || []).includes(me?.id);
                           if (!canLeave) return null;
                           return (
                             <button
@@ -1716,26 +1720,37 @@ export default function Messagerie() {
                   );
                 })}
               </div>
-              {currentChannel.is_team_channel && (currentChannel.members_ids || []).includes(me?.id) && (
-                <button
-                  onClick={async () => {
-                    if (!window.confirm(`Quitter le groupe "${currentChannel.name}" ?\n\nVous ne recevrez plus les messages de ce canal. Un admin devra vous ré-ajouter pour revenir.`)) return;
-                    try {
-                      await api.post(`/channels/${currentChannel.id}/leave`);
-                      toast.success(`Vous avez quitté "${currentChannel.name}"`);
-                      setShowMembers(false);
-                      setActive(null);
-                      loadChannels();
-                    } catch (err) {
-                      toast.error(err?.response?.data?.detail || "Impossible de quitter le canal");
-                    }
-                  }}
-                  data-testid="msg-leave-channel"
-                  className="mt-3 w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-[#FEF2F2] hover:bg-[#FEE2E2] ring-1 ring-[#B91C1C]/20 text-[#B91C1C] text-xs font-semibold transition-colors"
-                >
-                  <LogOut className="h-3.5 w-3.5" /> Quitter le groupe
-                </button>
-              )}
+              {(() => {
+                if (!currentChannel) return null;
+                const idStr = String(currentChannel.id || "");
+                const isTeam = currentChannel.is_team_channel || idStr.startsWith("team-");
+                const isService = idStr.startsWith("corp-") || idStr.startsWith("rh-") || currentChannel.is_service_inbox || currentChannel.is_official;
+                const isDm = !!currentChannel.is_dm;
+                const isCustomGroup = idStr.startsWith("grp-") ||
+                  (currentChannel.is_group && !isTeam && !isService && !isDm);
+                const canLeave = isCustomGroup && (currentChannel.members_ids || []).includes(me?.id);
+                if (!canLeave) return null;
+                return (
+                  <button
+                    onClick={async () => {
+                      if (!window.confirm(`Quitter le groupe "${currentChannel.name}" ?\n\nVous ne recevrez plus les messages de ce canal. Un admin devra vous ré-ajouter pour revenir.`)) return;
+                      try {
+                        await api.post(`/channels/${currentChannel.id}/leave`);
+                        toast.success(`Vous avez quitté "${currentChannel.name}"`);
+                        setShowMembers(false);
+                        setActive(null);
+                        loadChannels();
+                      } catch (err) {
+                        toast.error(err?.response?.data?.detail || "Impossible de quitter le canal");
+                      }
+                    }}
+                    data-testid="msg-leave-channel"
+                    className="mt-3 w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-[#FEF2F2] hover:bg-[#FEE2E2] ring-1 ring-[#B91C1C]/20 text-[#B91C1C] text-xs font-semibold transition-colors"
+                  >
+                    <LogOut className="h-3.5 w-3.5" /> Quitter le groupe
+                  </button>
+                );
+              })()}
             </div>
           </div>
         </div>
