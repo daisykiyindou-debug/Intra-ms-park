@@ -951,7 +951,7 @@ export default function Messagerie() {
               >
                 <span className="inline-flex items-center gap-1.5">
                   {t.l}
-                  {t.n > 0 && (
+                  {t.n > 0 && t.k !== "all" && (
                     <span className={`inline-flex items-center justify-center h-4 min-w-[16px] rounded-full text-[10px] font-bold px-1 ${tab === t.k ? "bg-[#3BA4FF] text-white" : "bg-[#3BA4FF]/15 text-[#1D70B8]"}`}>
                       {t.n}
                     </span>
