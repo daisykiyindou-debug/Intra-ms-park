@@ -208,22 +208,31 @@ export default function Messagerie() {
       .filter((c) => !c.archived)
       .map((c) => {
         const isDm = c.is_dm;
-        // Corporate (service) channels: `corp-{key}-{uid}` where uid is the employee
+        // Corporate (service) channels: `corp-{key}-{uid}` OR legacy `rh-{uid}`
+        // (Service RH auto-generated payslip thread). Where uid is the employee
         // who initiated the conversation. When the current viewer is a service
         // staff (has this canal in their access list), the sidebar row must show
         // the SENDER (the employee), not the service. When the viewer is the
         // employee side, the row shows the SERVICE identity.
         const idStr = String(c.id || "");
-        const isCorp = idStr.startsWith("corp-");
+        const isLegacyRh = idStr.startsWith("rh-") && !idStr.startsWith("rh-emp-legacy");
+        const isCorp = idStr.startsWith("corp-") || isLegacyRh;
         let corpKey = null, corpInitiatorId = null, viewerIsServiceStaff = false;
         if (isCorp) {
           corpKey = c.corporate_key || null;
           if (!corpKey) {
-            // Fallback parse. Employee ids may contain dashes so we detect by matching keys.
-            for (const k of ["service-rh", "communication", "managers-ops", "dept-financier", "direction"]) {
-              const prefix = `corp-${k}-`;
-              if (idStr.startsWith(prefix)) { corpKey = k; corpInitiatorId = idStr.slice(prefix.length); break; }
+            if (isLegacyRh) {
+              corpKey = "service-rh";
+              corpInitiatorId = idStr.slice(3); // strip "rh-"
+            } else {
+              // Fallback parse. Employee ids may contain dashes so we detect by matching keys.
+              for (const k of ["service-rh", "communication", "managers-ops", "dept-financier", "direction"]) {
+                const prefix = `corp-${k}-`;
+                if (idStr.startsWith(prefix)) { corpKey = k; corpInitiatorId = idStr.slice(prefix.length); break; }
+              }
             }
+          } else if (isLegacyRh) {
+            corpInitiatorId = idStr.slice(3);
           } else {
             corpInitiatorId = idStr.slice(`corp-${corpKey}-`.length);
           }

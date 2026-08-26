@@ -3863,26 +3863,37 @@ async def admin_send_payslip(pid: str):
 
     # ─── Send a DM in Messagerie from the "Service RH" identity to the employee
     # (a persistent RH channel per employee, so all payroll DMs land in the same
-    # thread over the months).
+    # thread over the months). All RH staff are added as members so they see
+    # the thread in their Service RH inbox (never in their personal messagerie).
     rh_channel_id = f"rh-{p['employee_id']}"
+    rh_staff = await _corporate_members("service-rh")
+    all_members = list({p["employee_id"], current_user(), *rh_staff})
     existing_ch = await db.channels.find_one({"id": rh_channel_id}, {"_id": 0})
     if not existing_ch:
         await db.channels.insert_one({
             "id": rh_channel_id,
             "name": "Service RH",
             "icon": "briefcase",
-            "members": 2,
-            "members_ids": [p["employee_id"], current_user()],
+            "members": len(all_members),
+            "members_ids": all_members,
             "unread": 1,
-            "is_dm": True,
-            "is_group": False,
+            "is_dm": False,
+            "is_group": True,
             "is_official": True,
+            "corporate_key": "service-rh",
             "archived": False,
             "avatar": None,
             "created_at": now_iso,
         })
     else:
-        await db.channels.update_one({"id": rh_channel_id}, {"$inc": {"unread": 1}})
+        await db.channels.update_one(
+            {"id": rh_channel_id},
+            {
+                "$inc": {"unread": 1},
+                "$set": {"corporate_key": "service-rh"},
+                "$addToSet": {"members_ids": {"$each": all_members}},
+            },
+        )
 
     payslip_link = f"/documents/payslip/{p['employee_id']}/{p['year']}/{p['month']}"
     msg_content = (
@@ -6089,18 +6100,22 @@ async def admin_create_user(payload: UserCreate):
 
     # ─── Onboarding: automatic welcome DM from the "Service RH" channel
     # with actionable links to the key intranet pages the new user needs.
+    # All RH staff are added so they see the thread in their Service RH inbox.
     rh_channel_id = f"rh-{data['id']}"
     admin_id = current_user()
+    rh_staff = await _corporate_members("service-rh")
+    all_members = list({data["id"], admin_id, *rh_staff})
     await db.channels.insert_one({
         "id": rh_channel_id,
         "name": "Service RH",
         "icon": "briefcase",
-        "members": 2,
-        "members_ids": [data["id"], admin_id],
+        "members": len(all_members),
+        "members_ids": all_members,
         "unread": 1,
-        "is_dm": True,
-        "is_group": False,
+        "is_dm": False,
+        "is_group": True,
         "is_official": True,
+        "corporate_key": "service-rh",
         "archived": False,
         "avatar": None,
         "created_at": _now(),
@@ -7595,6 +7610,41 @@ async def on_start():
         )
     except Exception:
         pass
+
+    # ─── Auto-grant `service-rh` access to every RH staff member (based on
+    # role / department heuristics). Idempotent thanks to $addToSet.
+    try:
+        rh_uids = await _corporate_members("service-rh")
+        for uid in rh_uids:
+            await db.employees.update_one(
+                {"id": uid},
+                {"$addToSet": {"service_channels_access": "service-rh"}},
+            )
+    except Exception as e:
+        print(f"[startup] rh access auto-grant skipped: {e}")
+
+    # ─── Migrate legacy `rh-{uid}` channels: add all current RH staff as
+    # members + set `corporate_key = service-rh` so the frontend can
+    # recognize them as Service RH threads (hidden from personal messagerie
+    # for staff, visible in the Service RH inbox switcher).
+    try:
+        rh_uids = await _corporate_members("service-rh")
+        legacy = await db.channels.find(
+            {"id": {"$regex": "^rh-"}}, {"_id": 0}
+        ).to_list(500)
+        for ch in legacy:
+            updates = {"corporate_key": "service-rh"}
+            await db.channels.update_one(
+                {"id": ch["id"]},
+                {
+                    "$set": updates,
+                    "$addToSet": {"members_ids": {"$each": rh_uids}},
+                },
+            )
+        if legacy:
+            print(f"[startup] migrated {len(legacy)} rh-{{uid}} channels for RH staff access")
+    except Exception as e:
+        print(f"[startup] rh-channel migration skipped: {e}")
 
     # Seed shared service-inbox channels (idempotent). Runs AFTER Marcus's
     # assignment so his Direction inbox already has him as member.

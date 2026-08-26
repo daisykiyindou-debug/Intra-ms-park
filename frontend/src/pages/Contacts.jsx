@@ -58,11 +58,11 @@ export default function Contacts() {
       }
       return true;
     });
-    // Alphabetical order by last name, then first name
+    // Alphabetical order by first name, then last name
     return list.sort((a, b) => {
-      const la = (a.last_name || "").localeCompare(b.last_name || "", "fr", { sensitivity: "base" });
+      const la = (a.first_name || "").localeCompare(b.first_name || "", "fr", { sensitivity: "base" });
       if (la !== 0) return la;
-      return (a.first_name || "").localeCompare(b.first_name || "", "fr", { sensitivity: "base" });
+      return (a.last_name || "").localeCompare(b.last_name || "", "fr", { sensitivity: "base" });
     });
   }, [employees, q]);
 
