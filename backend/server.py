@@ -1966,23 +1966,23 @@ async def availability(month: Optional[str] = None):
             status = "pending"
             selectable = False
             label = f"Demande en attente ({r['type'].upper()})"
+        elif iso in holidays:
+            # Public holidays take priority over shift/off styling so they are
+            # always visible in red on the calendar. They remain selectable so
+            # employees can still declare a CP/RTT on the holiday if needed.
+            status, selectable = "holiday", True
+            label = f"Férié — {holidays[iso]}"
         elif sched and sched.get("type") == "off":
             status, selectable = "off", False
             label = "Jour OFF"
-            if iso in holidays:
-                label = f"OFF · {holidays[iso]}"
-        elif sched and sched.get("type") == "shift":
+        elif sched and sched.get("type") in ("shift", "remote"):
             status, selectable = "worked", True
-            label = f"Travail {sched.get('start', '')}–{sched.get('end', '')}"
-            if iso in holidays:
-                label = f"{label} · Férié ({holidays[iso]})"
+            kind = "Télétravail" if sched.get("type") == "remote" else "Travail"
+            label = f"{kind} {sched.get('start', '')}–{sched.get('end', '')}"
         elif sched and sched.get("type") in ("cp", "rtt"):
             status = "cp_approved" if sched["type"] == "cp" else "rtt_approved"
             selectable = False
             label = "CP" if sched["type"] == "cp" else "RTT"
-        elif iso in holidays:
-            status, selectable = "holiday", False
-            label = f"Férié — {holidays[iso]}"
 
         days.append({
             "date": iso,
@@ -2052,22 +2052,22 @@ async def create_multi_day_request(payload: MultiDayRequest):
     for y in years_needed:
         holidays.update(_year_holidays(y))
 
-    # Validate each requested day
+    # Validate each requested day. Public holidays are allowed — employees
+    # can still declare a CP / RTT on a legal holiday if they wish.
     errors: list[str] = []
     for d in parsed:
         iso = d.isoformat()
         if d < today:
             errors.append(f"{iso} : jour passé")
             continue
-        if iso in holidays:
-            errors.append(f"{iso} : jour férié ({holidays[iso]})")
-            continue
         if iso in blocked_by_req:
             errors.append(f"{iso} : déjà en congé ou en attente")
             continue
         sched = sched_by_day.get(iso) or _entry_from_pattern(emp, d)
         st = sched.get("type") if sched else None
-        if st == "off":
+        # OFF days are allowed only if the day is a public holiday
+        # (the standard case: no leave on a rest day).
+        if st == "off" and iso not in holidays:
             errors.append(f"{iso} : jour OFF")
         elif st in ("cp", "rtt"):
             errors.append(f"{iso} : déjà en {st.upper()}")
