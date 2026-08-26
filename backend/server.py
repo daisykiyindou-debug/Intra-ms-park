@@ -7147,6 +7147,16 @@ async def on_start():
     await _seed_marcus_week()
     # Clean up any duplicate schedule rows for the same (employee_id, day)
     await _dedupe_schedules()
+    # Purge any expired room reservation (end_ts < now) so past slots
+    # never appear as "booked" and don't clutter the calendar.
+    try:
+        now_iso = _now()
+        gone = await db.room_reservations.delete_many({"end_ts": {"$lt": now_iso}})
+        if gone.deleted_count:
+            print(f"[startup] purged {gone.deleted_count} past room reservations")
+    except Exception as e:
+        print(f"[startup] past-reservations cleanup skipped: {e}")
+
     # ─── One-shot cleanup: remove legacy-schema schedule rows (shift_type/start_time)
     # so `_ensure_range()` re-materializes them with the current schema from the
     # employee's weekly_pattern. Idempotent.
@@ -9362,6 +9372,11 @@ async def room_availability(rid: str, date: Optional[str] = None):
         "start_ts": {"$lt": day_end},
         "end_ts": {"$gt": day_start},
     }, {"_id": 0}).sort("start_ts", 1).to_list(200)
+    # Also opportunistically purge past reservations so they never show up
+    # again as "occupied" once the meeting is over.
+    now_iso = _now()
+    await db.room_reservations.delete_many({"end_ts": {"$lt": now_iso}})
+    items = [r for r in items if r.get("end_ts", "") > now_iso]
     uid = current_user()
     out = []
     for r in items:
@@ -9429,6 +9444,10 @@ async def create_reservation(payload: MeetingReservationIn):
         raise HTTPException(400, "L'heure de fin doit être après l'heure de début.")
     if (e - s).total_seconds() < 15 * 60:
         raise HTTPException(400, "Durée minimum : 15 minutes.")
+    # Refuse any reservation whose start is in the past.
+    now_dt = datetime.fromisoformat(_now().replace("Z", "+00:00"))
+    if s < now_dt:
+        raise HTTPException(400, "Impossible de réserver un créneau dans le passé.")
     if not payload.title.strip():
         raise HTTPException(400, "Titre requis")
     # Conflict check (single or recurring occurrences below)

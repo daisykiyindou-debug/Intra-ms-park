@@ -104,22 +104,28 @@ export default function SalleReserver() {
     if (allDay) return []; // hide the granular grid in all-day mode
     const rows = [];
     const dayEnd = new Date(`${date}T20:00:00`);
+    const now = new Date();
     for (let h = 8; h < 20; h++) {
       for (let m = 0; m < 60; m += 15) {
         const start = new Date(`${date}T${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:00`);
         const end = new Date(start.getTime() + duration * 60000);
         if (end > dayEnd) continue;
+        // Skip past slots (start earlier than now)
+        if (start < now) continue;
         const conflict = (availability.reservations || []).find(r => {
           const rs = new Date(r.start_ts).getTime();
           const re = new Date(r.end_ts).getTime();
           return start.getTime() < re && end.getTime() > rs;
         });
-        rows.push({ start, end, conflict });
+        // Only keep free slots — reserved ones are hidden from the grid
+        // (they're still recapped below in the "Créneaux déjà réservés" pills).
+        if (conflict) continue;
+        rows.push({ start, end });
       }
     }
     return rows;
   }, [date, availability, duration, allDay]);
-  const freeSlots = startSlots.filter(s => !s.conflict);
+  const freeSlots = startSlots;
 
   // Whenever the user changes date/duration/mode, drop the previously picked slot
   useEffect(() => { setSelectedSlot(null); }, [date, duration, allDay]);
@@ -300,13 +306,12 @@ export default function SalleReserver() {
             </div>
           </div>
 
-          {/* Slots */}
+          {/* Slots — only available slots are listed */}
           <div>
             <div className="text-xs uppercase tracking-widest font-semibold text-[#475569] mb-3 flex items-center gap-2">
-              <span>{allDay ? "Journée complète" : `Créneaux (${startSlots.length})`}</span>
+              <span>{allDay ? "Journée complète" : `Créneaux disponibles (${startSlots.length})`}</span>
               <span className="ml-auto text-[10px] text-[#94A3B8] flex items-center gap-3">
                 <span className="inline-flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-emerald-200"></span> Libre</span>
-                <span className="inline-flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-amber-200"></span> Réservé</span>
                 <span className="inline-flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-[#3BA4FF]"></span> Sélectionné</span>
               </span>
             </div>
@@ -345,7 +350,7 @@ export default function SalleReserver() {
               })()
             ) : startSlots.length === 0 ? (
               <div className="rounded-xl bg-amber-50 text-amber-800 text-sm p-4 text-center">
-                Aucun créneau ne rentre dans la plage 08h–20h avec cette durée.
+                Aucun créneau disponible pour cette durée sur cette date. Essayez une autre date, une durée plus courte, ou une autre salle.
               </div>
             ) : (
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2 max-h-[360px] overflow-y-auto pr-1">
@@ -353,25 +358,20 @@ export default function SalleReserver() {
                   const startIso = s.start.toISOString();
                   const endIso = s.end.toISOString();
                   const isSel = selectedSlot?.start === startIso;
-                  const busy = !!s.conflict;
                   return (
                     <button
                       key={i}
-                      onClick={() => { if (!busy) setSelectedSlot({ start: startIso, end: endIso }); }}
-                      disabled={busy}
-                      title={busy ? `Occupé — ${s.conflict?.title || "Réservé"}` : ""}
+                      onClick={() => setSelectedSlot({ start: startIso, end: endIso })}
                       data-testid={`slot-${i}`}
                       className={`text-left px-3 py-3 rounded-xl text-sm font-semibold transition relative ${
-                        busy
-                          ? "bg-amber-100 text-amber-800 cursor-not-allowed opacity-70"
-                          : isSel
+                        isSel
                           ? "bg-[#3BA4FF] text-white shadow-lg ring-2 ring-[#3BA4FF]/40"
                           : "bg-emerald-50 hover:bg-emerald-100 text-emerald-800"
                       }`}
                     >
                       <div className="tabular-nums text-base">{formatTime(startIso)}</div>
-                      <div className={`text-[11px] font-normal ${busy ? "text-amber-700" : isSel ? "text-white/80" : "text-emerald-700"}`}>
-                        → {formatTime(endIso)}{busy ? " · Réservé" : ""}
+                      <div className={`text-[11px] font-normal ${isSel ? "text-white/80" : "text-emerald-700"}`}>
+                        → {formatTime(endIso)}
                       </div>
                       {isSel && <Check className="absolute top-2 right-2 h-4 w-4" />}
                     </button>
