@@ -15,6 +15,7 @@ Intranet ultra premium (glassmorphism, cartes arrondies) pour les employés de M
 - Uploads: dossier local `/app/backend/uploads`.
 
 ## Changelog récent
+- **iter 35 (26 août 2026)** — Contacts / Pôles : `/api/poles` limité à 5 services officiels (Service RH, Communication, Managers OPS, Département financier, Direction) avec `canal_key` mappé sur les canaux corporate de la messagerie. Onglet "Tous les employés" masqué pour les groupes opérationnels (OPS, Manager, Sécurité, Maintenance, Nettoyage) — les admins et employés non-restreints y accèdent avec les téléphones pros affichés. Clic sur "Ouvrir un chat" d'un pôle → ouvre le canal service correspondant (`/messagerie?ch=corp-...`). Testé par screenshots Idriss (OPS restreint) & Marcus (admin plein accès + navigation vers canal Service RH).
 - **iter 32 (22 août 2026)** — Bugfix `UserManager.jsx` wizard : la validation "Suivant" exigeait `f.email` (Email pro) alors que le champ n'est pas requis (label sans `*`). Désormais seul `personal_email` est requis, et `email` pro est uniquement format-checké si non-vide. Validé bout-en-bout : création → reset password → login via email pro OU perso (backend 100%, frontend 100%).
 
 ## Fonctionnalités livrées (état actuel — 22 août 2026, iter 34)

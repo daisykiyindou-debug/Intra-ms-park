@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Search, Mail, Phone, MessageSquare, Users, Briefcase, UserCog, Utensils, Shield, Wrench, Info } from "lucide-react";
+import { Search, Mail, Phone, MessageSquare, Users, Briefcase, UserCog, Utensils, Shield, Wrench, Info, Landmark, Megaphone } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
@@ -12,18 +12,43 @@ const iconMap = {
   utensils: Utensils,
   shield: Shield,
   wrench: Wrench,
+  landmark: Landmark,
+  megaphone: Megaphone,
 };
 
+// Employees with these statuses / role categories do NOT get access to the
+// "Tous les employés" directory tab.
+const RESTRICTED_STATUSES = new Set(["ops", "manager", "securite", "maintenance", "nettoyage"]);
+function canSeeAllEmployees(me) {
+  if (!me) return false;
+  if (me.is_admin || me.is_super_admin) return true;
+  const statuses = (me.statuses || []).map((s) => String(s).toLowerCase());
+  if (statuses.some((s) => RESTRICTED_STATUSES.has(s))) return false;
+  return true;
+}
+
 export default function Contacts() {
-  const { employees } = useApp();
+  const { me, employees } = useApp();
   const [poles, setPoles] = useState([]);
   const [q, setQ] = useState("");
+  const canDirectory = canSeeAllEmployees(me);
   const [tab, setTab] = useState("poles");
   const navigate = useNavigate();
+  // Force back to "poles" if a restricted user somehow lands on "employees"
+  useEffect(() => { if (!canDirectory && tab === "employees") setTab("poles"); }, [canDirectory, tab]);
 
   useEffect(() => {
     api.get("/poles").then((r) => setPoles(r.data));
   }, []);
+
+  const openServiceChat = async (canalKey) => {
+    try {
+      const { data } = await api.post("/channels/corporate", { canal_key: canalKey });
+      navigate(`/messagerie?ch=${data.id}`);
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Impossible d'ouvrir le canal");
+    }
+  };
 
   const filtered = useMemo(() => {
     return employees.filter((e) => {
@@ -74,15 +99,17 @@ export default function Contacts() {
         >
           Pôles
         </button>
-        <button
-          onClick={() => setTab("employees")}
-          data-testid="tab-employees"
-          className={`px-4 py-2 text-sm font-semibold rounded-lg ${
-            tab === "employees" ? "bg-[#071B34] text-white" : "text-[#475569]"
-          }`}
-        >
-          Tous les employés
-        </button>
+        {canDirectory && (
+          <button
+            onClick={() => setTab("employees")}
+            data-testid="tab-employees"
+            className={`px-4 py-2 text-sm font-semibold rounded-lg ${
+              tab === "employees" ? "bg-[#071B34] text-white" : "text-[#475569]"
+            }`}
+          >
+            Tous les employés
+          </button>
+        )}
       </div>
 
       {tab === "poles" ? (
@@ -120,7 +147,7 @@ export default function Contacts() {
                   </a>
                 </div>
                 <button
-                  onClick={() => navigate(`/messagerie?ch=ch-${p.id}`)}
+                  onClick={() => openServiceChat(p.canal_key || p.id)}
                   data-testid={`pole-chat-${p.id}`}
                   className="mt-3 ms-btn-outline w-full text-xs"
                 >
@@ -181,6 +208,16 @@ export default function Contacts() {
                     <Mail className="h-3.5 w-3.5 text-[#3BA4FF]" />
                     <span className="truncate">{e.email}</span>
                   </a>
+                  {(e.professional_phone || e.phone) && (
+                    <a
+                      href={`tel:${e.professional_phone || e.phone}`}
+                      data-testid={`phone-${e.id}`}
+                      className="flex items-center gap-2 rounded-lg bg-[#F4F7FA] hover:bg-[#071B34]/5 px-3 py-2 text-xs"
+                    >
+                      <Phone className="h-3.5 w-3.5 text-[#3BA4FF]" />
+                      <span className="text-[#071B34]">{e.professional_phone || e.phone}</span>
+                    </a>
+                  )}
                   {e.id !== "emp-idriss-malonga" && (
                     <button
                       onClick={() => startDM(e.id)}

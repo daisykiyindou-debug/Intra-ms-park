@@ -5286,25 +5286,25 @@ async def consumption_history():
 # ─── Poles (contacts grouped)
 @api.get("/poles")
 async def poles():
+    """Return the 5 official service poles aligned with the corporate canals.
+    Each pole maps to a `canal_key` used by the messagerie to open the
+    corresponding service inbox (`corp-{key}-{uid}`)."""
     return [
-        {"id": "managers", "name": "Pôle Managers", "email": "managers@mspark.fr",
-         "phone": "+33 1 23 45 67 80", "description": "Encadrement opérationnel du parc",
-         "icon": "users-round", "color": "#3BA4FF"},
-        {"id": "rh", "name": "Pôle RH", "email": "rh@mspark.fr",
-         "phone": "+33 1 23 45 67 81", "description": "Ressources humaines, paie, contrats, congés",
-         "icon": "user-cog", "color": "#10B981"},
-        {"id": "direction", "name": "Pôle Direction", "email": "direction@mspark.fr",
-         "phone": "+33 1 23 45 67 82", "description": "Direction générale et stratégie",
-         "icon": "briefcase", "color": "#A78BFA"},
-        {"id": "restauration", "name": "Pôle Restauration", "email": "restauration@mspark.fr",
-         "phone": "+33 1 23 45 67 83", "description": "Soccer Bar, Donut House, stands",
-         "icon": "utensils", "color": "#F59E0B"},
-        {"id": "securite", "name": "Pôle Sécurité", "email": "securite@mspark.fr",
-         "phone": "+33 1 23 45 67 84", "description": "Sûreté du parc 24/7",
-         "icon": "shield", "color": "#EF4444"},
-        {"id": "maintenance", "name": "Pôle Maintenance", "email": "maintenance@mspark.fr",
-         "phone": "+33 1 23 45 67 85", "description": "Karting, attractions, infrastructure",
-         "icon": "wrench", "color": "#64748B"},
+        {"id": "service-rh", "canal_key": "service-rh", "name": "Service RH",
+         "email": "rh@mspark.fr", "phone": "+33 1 23 45 67 81",
+         "description": "Contrats, paie, congés, formation.", "icon": "user-cog", "color": "#10B981"},
+        {"id": "communication", "canal_key": "communication", "name": "Communication",
+         "email": "communication@mspark.fr", "phone": "+33 1 23 45 67 86",
+         "description": "Actualités internes, événements, réseaux sociaux.", "icon": "megaphone", "color": "#3BA4FF"},
+        {"id": "managers-ops", "canal_key": "managers-ops", "name": "Managers OPS",
+         "email": "managers.ops@mspark.fr", "phone": "+33 1 23 45 67 80",
+         "description": "Encadrement opérationnel du parc.", "icon": "users-round", "color": "#F59E0B"},
+        {"id": "dept-financier", "canal_key": "dept-financier", "name": "Département financier",
+         "email": "finance@mspark.fr", "phone": "+33 1 23 45 67 87",
+         "description": "Comptabilité, budget, notes de frais.", "icon": "landmark", "color": "#0EA5E9"},
+        {"id": "direction", "canal_key": "direction", "name": "Direction",
+         "email": "direction@mspark.fr", "phone": "+33 1 23 45 67 82",
+         "description": "Direction générale et stratégie.", "icon": "briefcase", "color": "#A78BFA"},
     ]
 
 
