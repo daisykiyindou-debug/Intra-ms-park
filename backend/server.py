@@ -5543,7 +5543,9 @@ async def _sync_service_channel_membership(uid: str, before: list[str], after: l
 
 async def _sync_team_channel_membership(uid: str, before: list[str], after: list[str]) -> None:
     """Reconcile a user's team-channel membership. Posts a system message on
-    join & remove so members see who is coming & going."""
+    join & remove so members see who is coming & going. Membership is
+    checked against the DB channel_catalog (which may include admin-created
+    channels beyond the seed constants)."""
     before_set, after_set = set(before or []), set(after or [])
     added = after_set - before_set
     removed = before_set - after_set
@@ -5551,15 +5553,27 @@ async def _sync_team_channel_membership(uid: str, before: list[str], after: list
         return
     emp = await db.employees.find_one({"id": uid}, {"_id": 0}) or {}
     full_name = f"{emp.get('first_name', '')} {emp.get('last_name', '')}".strip() or "Un collègue"
+    # Build the set of valid team keys from the live catalog
+    valid_keys = {c["key"] for c in await _get_channel_catalog("team")} | set(TEAM_CANALS.keys())
     for key in added:
-        if key not in TEAM_CANALS:
+        if key not in valid_keys:
             continue
         cid = f"team-{key}"
         await _ensure_team_channels_seeded()
+        # Make sure the channel exists (for admin-created ones seeded lazily)
+        exists = await db.channels.find_one({"id": cid}, {"_id": 0})
+        if not exists:
+            meta = next((c for c in await _get_channel_catalog("team") if c["key"] == key), None)
+            if meta:
+                await db.channels.insert_one({
+                    "id": cid, "name": meta["name"], "icon": meta.get("icon"),
+                    "type": "team", "is_team_channel": True, "team_key": key,
+                    "members_ids": [], "created_at": _now(),
+                })
         await db.channels.update_one({"id": cid}, {"$addToSet": {"members_ids": uid}})
         await db.messages.insert_one({
             "id": _id(), "channel_id": cid, "author_id": "system",
-            "text": f"{full_name} a rejoint le canal.", "type": "system",
+            "text": f"{full_name} a été ajouté au canal.", "type": "system",
             "ts": _now(), "created_at": _now(),
         })
     for key in removed:
@@ -5567,7 +5581,7 @@ async def _sync_team_channel_membership(uid: str, before: list[str], after: list
         await db.channels.update_one({"id": cid}, {"$pull": {"members_ids": uid}})
         await db.messages.insert_one({
             "id": _id(), "channel_id": cid, "author_id": "system",
-            "text": f"{full_name} a quitté le canal.", "type": "system",
+            "text": f"{full_name} a été retiré du canal.", "type": "system",
             "ts": _now(), "created_at": _now(),
         })
 
