@@ -6380,6 +6380,13 @@ async def admin_create_user(payload: UserCreate):
     data.setdefault("leave_balance", {"cp_n_1": 0, "cp_n": 0, "rtt": 0})
     data.setdefault("weekly_pattern", {})
     data.setdefault("created_at", _now())
+    # ─── First-connection onboarding flags. Cleared as the user progresses
+    # through the WelcomePopup (welcomed_at) and the guided intranet tour
+    # (tour_completed_at). Ensures EVERY freshly-created employee gets the
+    # same experience on their very first login.
+    data["onboarding_pending"] = True
+    data.setdefault("welcomed_at", None)
+    data.setdefault("tour_completed_at", None)
     _apply_user_derivations(data)
     await db.employees.insert_one(data.copy())
 
@@ -6465,10 +6472,12 @@ async def _post_rh_welcome_dm(user: dict) -> None:
             "created_at": _now(),
         })
     else:
-        # Ensure RH staff membership stays in sync
+        # Ensure RH staff membership + canonical channel name stay in sync
+        # (older channels created with a different name are normalized here).
         await db.channels.update_one(
             {"id": rh_channel_id},
             {"$set": {"members_ids": all_members, "members": len(all_members),
+                       "name": "Service RH", "icon": "briefcase",
                        "corporate_key": "service-rh"}},
         )
     # Skip if a welcome message is already present in that thread
@@ -8197,6 +8206,17 @@ async def on_start():
     except Exception as e:
         print(f"[startup] rh-channel migration skipped: {e}")
 
+    # ─── Normalize rh-{uid} channel display name to "Service RH" so both
+    # RH staff (canal service view) and the recipient (personal messagerie)
+    # see the exact same, canonical label. Idempotent.
+    try:
+        await db.channels.update_many(
+            {"id": {"$regex": "^rh-"}, "name": {"$ne": "Service RH"}},
+            {"$set": {"name": "Service RH", "icon": "briefcase"}},
+        )
+    except Exception as e:
+        print(f"[startup] rh-channel name normalization skipped: {e}")
+
     # Seed shared service-inbox channels (idempotent). Runs AFTER Marcus's
     # assignment so his Direction inbox already has him as member.
     # (Kept as a no-op for backward-compat; deprecated shared-inbox concept.)
@@ -8217,7 +8237,7 @@ async def _seed_julien_bernard():
     `_post_rh_welcome_dm` so the exact same template (with actionable
     links) is used as for users created via the admin wizard. Fully
     idempotent: runs once (marker) + guards inside the helper."""
-    marker = await db.system_flags.find_one({"key": "onboarding_julien_v3"})
+    marker = await db.system_flags.find_one({"key": "onboarding_julien_v4"})
     if marker:
         return
 
@@ -8290,7 +8310,7 @@ async def _seed_julien_bernard():
     if julien:
         await _post_rh_welcome_dm(julien)
 
-    await db.system_flags.insert_one({"key": "onboarding_julien_v3", "at": _now()})
+    await db.system_flags.insert_one({"key": "onboarding_julien_v4", "at": _now()})
     print("[startup] Julien BERNARD onboarding seeded via shared Service RH helper")
 
 
