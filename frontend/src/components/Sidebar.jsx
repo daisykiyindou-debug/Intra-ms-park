@@ -223,8 +223,8 @@ export default function Sidebar({ open, onClose }) {
           open ? "translate-x-0" : "-translate-x-full"
         }`}
       >
-        <div className="flex h-24 items-center gap-3 px-5 border-b border-white/5">
-          <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-white/[0.06] border border-white/10 backdrop-blur-md p-2 shadow-lg shadow-[#3BA4FF]/15 shrink-0">
+        <div className="flex h-28 items-center gap-3 px-4 border-b border-white/5">
+          <div className="flex h-20 w-20 items-center justify-center rounded-2xl bg-white/[0.06] border border-white/10 backdrop-blur-md p-2 shadow-lg shadow-[#3BA4FF]/15 shrink-0">
             <img
               src="https://customer-assets-jt897jd0.emergentagent.net/job_mspark-employee-hub/artifacts/n4qg1w02_logo%20ms%20park%20transparent.png"
               alt="MS Park"
@@ -238,7 +238,7 @@ export default function Sidebar({ open, onClose }) {
           </div>
         </div>
 
-        <nav className="px-3 py-4 space-y-0.5 overflow-y-auto" style={{ height: "calc(100vh - 6rem - 5rem)" }}>
+        <nav className="px-3 py-4 space-y-0.5 overflow-y-auto" style={{ height: "calc(100vh - 7rem - 5rem)" }}>
           {sortedItems.map((item, i) =>
             item.divider ? (
               <div
