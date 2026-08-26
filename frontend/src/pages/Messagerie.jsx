@@ -1235,7 +1235,7 @@ export default function Messagerie() {
                           return (
                             <button
                               onClick={async () => {
-                                setMenuOpen(false);
+                                setShowActions(false);
                                 if (!window.confirm(`Quitter le groupe "${currentDisplay.name}" ?\n\nVous ne recevrez plus les messages de ce canal. Un admin devra vous ré-ajouter pour revenir.`)) return;
                                 try {
                                   await api.post(`/channels/${currentDisplay.id}/leave`);
@@ -2260,11 +2260,68 @@ const STATUS_OPTIONS = [
 function BroadcastModal({ canalKey, canalName, onClose, onSent }) {
   const [content, setContent] = useState("");
   const [statuses, setStatuses] = useState([]); // empty = all employees
-  const [link, setLink] = useState("");
+  const [linkItems, setLinkItems] = useState([]); // [{kind:"link", name, url, description}]
   const [attachments, setAttachments] = useState([]); // {name,url,type}
   const [uploading, setUploading] = useState(false);
   const [sending, setSending] = useState(false);
   const [allEmployees, setAllEmployees] = useState(true);
+  // Link picker state
+  const [linkMode, setLinkMode] = useState("custom"); // custom | page | news | form
+  const [linkTitle, setLinkTitle] = useState("");
+  const [linkUrl, setLinkUrl] = useState("");
+  const [newsList, setNewsList] = useState([]);
+  const [formsList, setFormsList] = useState([]);
+  const SITE_PAGES = [
+    { url: "/dashboard", label: "Tableau de bord" },
+    { url: "/actualites", label: "Actualités" },
+    { url: "/newsletters", label: "Newsletters" },
+    { url: "/rh/planning", label: "Planning" },
+    { url: "/rh/badgeage", label: "Badgeage" },
+    { url: "/rh/demandes", label: "Congés & absences" },
+    { url: "/notes-de-frais", label: "Notes de frais" },
+    { url: "/documents", label: "Documents" },
+    { url: "/restaurant", label: "Restauration" },
+    { url: "/avantages", label: "CSE & Avantages" },
+    { url: "/salles", label: "Salles de réunion" },
+    { url: "/agenda", label: "Agenda" },
+    { url: "/formations", label: "Formations" },
+    { url: "/support", label: "Support IT" },
+    { url: "/aide", label: "Centre d'aide" },
+    { url: "/idees", label: "Boîte à idées" },
+    { url: "/galerie", label: "Galerie photos" },
+    { url: "/anniversaires", label: "Anniversaires" },
+    { url: "/contacts", label: "Contacts" },
+    { url: "/profil", label: "Mon profil" },
+  ];
+  useEffect(() => {
+    if (linkMode === "news" && newsList.length === 0) {
+      api.get("/posts").then((r) => setNewsList(r.data || [])).catch(() => {});
+    }
+    if (linkMode === "form" && formsList.length === 0) {
+      api.get("/admin/forms").then((r) => setFormsList(r.data || [])).catch(() => {});
+    }
+    // Reset URL/title when mode changes
+    setLinkTitle("");
+    setLinkUrl("");
+    // eslint-disable-next-line
+  }, [linkMode]);
+
+  const addLinkItem = () => {
+    const title = linkTitle.trim();
+    let url = linkUrl.trim();
+    if (!title || !url) {
+      toast.error("Titre et destination requis");
+      return;
+    }
+    if (linkMode === "custom" && !url.startsWith("/") && !url.startsWith("http")) {
+      url = `https://${url}`;
+    }
+    setLinkItems((arr) => [...arr, { kind: "link", name: title, url, description: null }]);
+    setLinkTitle("");
+    setLinkUrl("");
+  };
+  const removeLinkItem = (i) => setLinkItems((arr) => arr.filter((_, idx) => idx !== i));
+
   const toggleStatus = (k) => setStatuses((s) => s.includes(k) ? s.filter((x) => x !== k) : [...s, k]);
   const uploadFile = async (file) => {
     setUploading(true);
@@ -2280,17 +2337,19 @@ function BroadcastModal({ canalKey, canalName, onClose, onSent }) {
     }
   };
   const send = async () => {
-    if (!content.trim() && attachments.length === 0 && !link.trim()) {
+    if (!content.trim() && attachments.length === 0 && linkItems.length === 0) {
       return toast.error("Le message ne peut pas être vide");
     }
     setSending(true);
     try {
+      // Concatenate link items + file attachments (link items render as opening cards)
+      const allAttachments = [...linkItems, ...attachments];
       const { data } = await api.post("/channels/corporate/broadcast", {
         canal_key: canalKey,
         content: content.trim(),
         audience_statuses: allEmployees ? [] : statuses,
-        attachments,
-        link: link.trim() || null,
+        attachments: allAttachments,
+        link: null,
       });
       onSent(data.sent || 0);
     } catch (err) {
@@ -2353,15 +2412,110 @@ function BroadcastModal({ canalKey, canalName, onClose, onSent }) {
           </div>
 
           <div>
-            <label className="ms-overline">Lien / page à ouvrir (facultatif)</label>
-            <input
-              type="text"
-              value={link}
-              onChange={(e) => setLink(e.target.value)}
-              placeholder="/documents ou https://…"
-              data-testid="broadcast-link"
-              className="ms-input mt-1 w-full text-sm"
-            />
+            <label className="ms-overline">Liens à ouvrir (facultatif)</label>
+            <div className="mt-1.5 rounded-xl bg-[#F8FAFC] p-3 space-y-2">
+              <div className="grid grid-cols-4 gap-1">
+                {[
+                  { k: "custom", l: "Lien libre" },
+                  { k: "page", l: "Page du site" },
+                  { k: "news", l: "Actualité" },
+                  { k: "form", l: "Formulaire" },
+                ].map((m) => (
+                  <button
+                    key={m.k}
+                    type="button"
+                    onClick={() => setLinkMode(m.k)}
+                    data-testid={`broadcast-link-mode-${m.k}`}
+                    className={`text-[11px] font-semibold rounded-lg px-2 py-1.5 transition-colors ${linkMode === m.k ? "bg-[#7C3AED] text-white" : "bg-white text-[#475569] ring-1 ring-[#071B34]/8 hover:bg-[#7C3AED]/10"}`}
+                  >
+                    {m.l}
+                  </button>
+                ))}
+              </div>
+              <input
+                type="text"
+                value={linkTitle}
+                onChange={(e) => setLinkTitle(e.target.value)}
+                placeholder="Titre du lien (ex : Voir le règlement intérieur)"
+                data-testid="broadcast-link-title"
+                className="ms-input text-sm w-full !py-1.5"
+              />
+              {linkMode === "custom" && (
+                <input
+                  type="text"
+                  value={linkUrl}
+                  onChange={(e) => setLinkUrl(e.target.value)}
+                  placeholder="/documents ou https://…"
+                  data-testid="broadcast-link-url"
+                  className="ms-input text-sm w-full !py-1.5"
+                />
+              )}
+              {linkMode === "page" && (
+                <select
+                  value={linkUrl}
+                  onChange={(e) => setLinkUrl(e.target.value)}
+                  data-testid="broadcast-link-page"
+                  className="ms-input text-sm w-full !py-1.5"
+                >
+                  <option value="">— Choisir une page —</option>
+                  {SITE_PAGES.map((p) => <option key={p.url} value={p.url}>{p.label}</option>)}
+                </select>
+              )}
+              {linkMode === "news" && (
+                <select
+                  value={linkUrl}
+                  onChange={(e) => {
+                    const url = e.target.value;
+                    setLinkUrl(url);
+                    if (!linkTitle) {
+                      const n = newsList.find((x) => `/actualites/${x.id}` === url);
+                      if (n) setLinkTitle(n.title);
+                    }
+                  }}
+                  data-testid="broadcast-link-news"
+                  className="ms-input text-sm w-full !py-1.5"
+                >
+                  <option value="">— Choisir une actualité —</option>
+                  {newsList.map((n) => <option key={n.id} value={`/actualites/${n.id}`}>{n.title || "(Sans titre)"}</option>)}
+                </select>
+              )}
+              {linkMode === "form" && (
+                <select
+                  value={linkUrl}
+                  onChange={(e) => {
+                    const url = e.target.value;
+                    setLinkUrl(url);
+                    if (!linkTitle) {
+                      const f = formsList.find((x) => `/formulaires/${x.id}` === url);
+                      if (f) setLinkTitle(f.title);
+                    }
+                  }}
+                  data-testid="broadcast-link-form"
+                  className="ms-input text-sm w-full !py-1.5"
+                >
+                  <option value="">— Choisir un formulaire —</option>
+                  {formsList.map((f) => <option key={f.id} value={`/formulaires/${f.id}`}>{f.title || "(Sans titre)"}</option>)}
+                </select>
+              )}
+              <button
+                type="button"
+                onClick={addLinkItem}
+                data-testid="broadcast-link-add"
+                className="w-full text-[11px] font-semibold rounded-lg bg-[#7C3AED]/10 text-[#7C3AED] hover:bg-[#7C3AED]/20 py-1.5 transition-colors"
+              >
+                + Ajouter ce lien
+              </button>
+            </div>
+            {linkItems.length > 0 && (
+              <ul className="mt-2 space-y-1">
+                {linkItems.map((l, i) => (
+                  <li key={i} data-testid={`broadcast-link-item-${i}`} className="flex items-center gap-2 rounded-lg bg-[#3BA4FF]/10 px-2.5 py-1.5">
+                    <span className="text-[11px] font-semibold text-[#1D70B8] flex-1 truncate">🔗 {l.name} <span className="text-[#475569] font-normal">· {l.url}</span></span>
+                    <button onClick={() => removeLinkItem(i)} className="text-[10px] font-semibold text-red-500 hover:text-red-700">Retirer</button>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
 
           <div>

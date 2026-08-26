@@ -55,7 +55,7 @@ export default function LoginPage() {
         </div>
         <div className="relative mt-16 md:mt-32 max-w-md">
           <div className="text-xs uppercase tracking-[0.2em] text-[#3BA4FF] font-semibold">
-            Bienvenue sur l'intranet
+            Bienvenue sur l&apos;intranet
           </div>
           <h1 className="mt-3 text-4xl md:text-5xl font-extrabold tracking-tight leading-tight">
             Votre espace<br />employé MS Park.
@@ -87,7 +87,7 @@ export default function LoginPage() {
           <div className="ms-overline">Connexion</div>
           <h2 className="mt-2 text-3xl font-bold text-[#071B34]">Content de vous revoir 👋</h2>
           <p className="mt-2 text-sm text-[#475569]">
-            Connectez-vous avec votre identifiant MS Park pour accéder à l'intranet.
+            Connectez-vous avec votre identifiant MS Park pour accéder à l&apos;intranet.
           </p>
 
           <div className="mt-6 space-y-4">

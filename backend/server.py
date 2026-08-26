@@ -7403,14 +7403,14 @@ async def admin_contract_status(employee_id: str, week_start: Optional[str] = No
     planned_minutes = sum(_covered_minutes(s) for s in schs)
     contract_hours = emp.get("contract_hours_weekly", 35)
     contract_minutes = int(round(contract_hours * 60))
-    delta_minutes = int(planned_minutes - contract_minutes)
+    delta_minutes = int(planned_minutes) - contract_minutes
     if delta_minutes == 0:
         status = "match"
         message = "Contrat respecté"
     elif delta_minutes < 0:
         status = "under"
         h = abs(delta_minutes) // 60
-        m = abs(delta_minutes) % 60
+        m = int(abs(delta_minutes) % 60)
         if m == 0:
             message = f"{h} heure{'s' if h > 1 else ''} manquante{'s' if h > 1 else ''} pour atteindre le minimum contractuel"
         else:
@@ -7418,7 +7418,7 @@ async def admin_contract_status(employee_id: str, week_start: Optional[str] = No
     else:
         status = "over"
         h = delta_minutes // 60
-        m = delta_minutes % 60
+        m = int(delta_minutes % 60)
         if m == 0:
             message = f"{h} heure{'s' if h > 1 else ''} supplémentaire{'s' if h > 1 else ''} prévue{'s' if h > 1 else ''}"
         else:
