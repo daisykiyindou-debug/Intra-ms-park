@@ -1526,7 +1526,23 @@ async def me():
     # Any employee whose `welcomed_at` is not set is considered "new" and will
     # see the intro modal until they acknowledge it.
     emp["needs_welcome"] = not emp.get("welcomed_at")
+    # Expose the guided-tour flag. Only new employees that were explicitly
+    # onboarded (`onboarding_pending=True`) get the step-by-step tour after
+    # they close the welcome popup. Legacy demo users (Idriss, Marcus…) never
+    # see the tour because `onboarding_pending` is falsy for them.
+    emp["needs_tour"] = bool(emp.get("onboarding_pending")) and not emp.get("tour_completed_at")
     return emp
+
+
+@api.post("/me/tour/complete")
+async def acknowledge_tour():
+    """Mark the onboarding guided tour as completed for the current employee."""
+    now_iso = _now()
+    await db.employees.update_one(
+        {"id": current_user()},
+        {"$set": {"tour_completed_at": now_iso, "onboarding_pending": False}},
+    )
+    return {"ok": True, "tour_completed_at": now_iso}
 
 
 @api.post("/me/welcome")
@@ -8161,6 +8177,153 @@ async def on_start():
     # assignment so his Direction inbox already has him as member.
     # (Kept as a no-op for backward-compat; deprecated shared-inbox concept.)
     pass
+
+    # ─── ONE-SHOT: seed Julien BERNARD as a brand-new employee so his next
+    # login triggers the full onboarding flow (welcome popup + RH welcome DM
+    # + step-by-step guided tour). Idempotent via `system_flags` marker.
+    try:
+        await _seed_julien_bernard()
+    except Exception as e:
+        print(f"[startup] julien onboarding seed skipped: {e}")
+
+
+async def _seed_julien_bernard():
+    """Insert Julien BERNARD as a new employee with a pending onboarding.
+    Also posts a welcome message from the Directeur RH into his personal
+    Service RH thread so it appears in his messagerie the first time he
+    opens it. Fully idempotent: runs once (marker) but the DM insert is
+    also guarded by an existence check."""
+    marker = await db.system_flags.find_one({"key": "onboarding_julien_v1"})
+    if marker:
+        return
+
+    julien_id = "emp-julien-bernard"
+    existing = await db.employees.find_one({"id": julien_id}, {"_id": 0})
+    if not existing:
+        hire = date.today().isoformat()
+        await db.employees.insert_one({
+            "id": julien_id,
+            "first_name": "Julien",
+            "last_name": "BERNARD",
+            "role": "Employé Polyvalent",
+            "role_category": "employe",
+            "role_title": "Employé Polyvalent",
+            "department": "Opérations Parc",
+            "avatar": "https://images.unsplash.com/photo-1633332755192-727a05c4013d?w=400&h=400&fit=crop&crop=faces",
+            "email": "julien.bernard@mspark.fr",
+            "personal_email": "julien.bernard@gmail.com",
+            "phone": "+33 6 78 45 21 09",
+            "personal_phone": "+33 6 78 45 21 09",
+            "address": "27 rue Voltaire, 92600 Asnières-sur-Seine",
+            "birth_date": "1998-04-15",
+            "hire_date": hire,
+            "available": True,
+            "seniority_months": 0,
+            "skills": ["Accueil clients", "Karting"],
+            "manager": "Marcus SIMÉO",
+            "location": "MS Park — Zone Karting & Attractions",
+            "badge_number": "MSP-2600",
+            "badge_expiry": "2028-01-31",
+            "badge_active": True,
+            "leave_balance": {"cp_n_1": 0, "cp_n": 2.08, "rtt": 0.5},
+            "contract_hours_weekly": 35,
+            "weekly_pattern": {
+                "0": {"type": "shift", "start": "09:00", "end": "17:00", "pause_start": "12:30", "pause_end": "13:30"},
+                "1": {"type": "shift", "start": "09:00", "end": "17:00", "pause_start": "12:30", "pause_end": "13:30"},
+                "2": {"type": "shift", "start": "09:00", "end": "17:00", "pause_start": "12:30", "pause_end": "13:30"},
+                "3": {"type": "shift", "start": "09:00", "end": "17:00", "pause_start": "12:30", "pause_end": "13:30"},
+                "4": {"type": "shift", "start": "09:00", "end": "17:00", "pause_start": "12:30", "pause_end": "13:30"},
+                "5": {"type": "off"},
+                "6": {"type": "off"},
+            },
+            "is_admin": False,
+            "can_post": False,
+            "statuses": ["ops"],
+            "account_status": "active",
+            "password": "Julien2026!",
+            "must_change_password": False,
+            # Onboarding flags — cleared as the employee progresses through
+            # the welcome popup (welcomed_at) and the guided tour
+            # (tour_completed_at).
+            "onboarding_pending": True,
+            "welcomed_at": None,
+            "tour_completed_at": None,
+        })
+
+    # ─── RH welcome DM into Julien's personal Service RH thread
+    sender_id = "emp-pierre"
+    sender = await db.employees.find_one({"id": sender_id}, {"_id": 0})
+    if sender:
+        # Ensure Pierre has service-rh access (source of truth for members)
+        await db.employees.update_one(
+            {"id": sender_id},
+            {"$addToSet": {"service_channels_access": "service-rh"}},
+        )
+        cid = f"rh-{julien_id}"
+        rh_members = await _corporate_members("service-rh")
+        members = list({julien_id, *rh_members})
+        ch = await db.channels.find_one({"id": cid}, {"_id": 0})
+        now = _now()
+        if not ch:
+            await db.channels.insert_one({
+                "id": cid,
+                "name": "Ressources Humaines",
+                "icon": "briefcase",
+                "members": len(members),
+                "members_ids": members,
+                "unread": 1,
+                "is_dm": False,
+                "is_group": True,
+                "is_official": True,
+                "is_corporate": True,
+                "corporate_key": "service-rh",
+                "archived": False,
+                "avatar": None,
+                "created_at": now,
+            })
+
+        # Post welcome only if no message exists yet in this thread
+        has_msg = await db.messages.find_one({"channel_id": cid})
+        if not has_msg:
+            sender_name = f"{sender.get('first_name','')} {sender.get('last_name','')}".strip()
+            body = (
+                "👋 Bienvenue chez MS Park, Julien !\n\n"
+                "Toute l'équipe Ressources Humaines est ravie de t'accueillir dans la famille MS Park. "
+                "Nous te souhaitons une intégration réussie et une belle aventure parmi nous.\n\n"
+                "📌 Pour bien démarrer :\n"
+                "• Complète ton profil (téléphone, adresse, contact d'urgence).\n"
+                "• Consulte ton planning et tes horaires de la semaine.\n"
+                "• Découvre les avantages CSE et les points repas dont tu bénéficies.\n"
+                "• N'hésite pas à répondre directement à ce message si tu as la moindre question.\n\n"
+                "Belle journée et bienvenue à bord ! 🚀\n\n"
+                f"— {sender_name}, Directeur RH"
+            )
+            await db.messages.insert_one({
+                "id": _id(),
+                "channel_id": cid,
+                "author_id": sender_id,
+                "author_name": sender_name,
+                "content": body,
+                "attachments": [],
+                "is_service_message": True,
+                "service_name": "Ressources Humaines",
+                "service_key": "service-rh",
+                "type": "text",
+                "ts": now,
+                "created_at": now,
+            })
+            await db.channels.update_one({"id": cid}, {"$set": {"last_message_ts": now}})
+            await _push_notification(
+                employee_id=julien_id,
+                type="message",
+                title="Ressources Humaines · Bienvenue !",
+                content="L'équipe RH te souhaite la bienvenue chez MS Park.",
+                icon="briefcase",
+                link=f"/messagerie?ch={cid}",
+            )
+
+    await db.system_flags.insert_one({"key": "onboarding_julien_v1", "at": _now()})
+    print("[startup] Julien BERNARD onboarding seeded (welcome popup + RH DM + guided tour ready)")
 
 
 async def _seed_birth_dates():
