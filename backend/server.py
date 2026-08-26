@@ -7618,33 +7618,72 @@ async def on_start():
     except Exception:
         pass
 
-    # ─── Auto-grant `service-rh` access to every RH staff member (based on
-    # role / department heuristics). Idempotent thanks to $addToSet.
+    # ─── Auto-grant `service-rh` access ONLY to users whose role strictly
+    # matches RH heuristics (Responsable RH, Directeur RH, Chargé RH, dept
+    # RH, `can_manage_hr` flag). Also cleans up any user who has `service-rh`
+    # in their access list but does NOT match — e.g. a non-RH admin who was
+    # granted access by an earlier version of this migration.
     try:
-        rh_uids = await _corporate_members("service-rh")
-        for uid in rh_uids:
-            await db.employees.update_one(
-                {"id": uid},
-                {"$addToSet": {"service_channels_access": "service-rh"}},
+        emps = await db.employees.find({}, {"_id": 0}).to_list(500)
+        def _is_rh_by_heuristic(e: dict) -> bool:
+            role = (e.get("role") or "").lower()
+            dept = (e.get("department") or "").lower()
+            statuses = [s.lower() for s in (e.get("statuses") or [])]
+            admin_role = (e.get("admin_role") or "").lower()
+            return bool(
+                e.get("can_manage_hr")
+                or "rh" == admin_role
+                or "rh" in statuses
+                or "ressources humaines" in role
+                or "responsable rh" in role
+                or "directeur rh" in role
+                or "chargé" in role and "rh" in role
+                or "chargée rh" in role
+                or "assistant rh" in role
+                or "ressources humaines" in dept
             )
+        for e in emps:
+            has_access = "service-rh" in (e.get("service_channels_access") or [])
+            should = _is_rh_by_heuristic(e)
+            if should and not has_access:
+                await db.employees.update_one(
+                    {"id": e["id"]},
+                    {"$addToSet": {"service_channels_access": "service-rh"}},
+                )
+            elif has_access and not should:
+                await db.employees.update_one(
+                    {"id": e["id"]},
+                    {"$pull": {"service_channels_access": "service-rh"}},
+                )
+                print(f"[startup] removed service-rh access from {e.get('first_name')} {e.get('last_name')} (role={e.get('role')})")
     except Exception as e:
-        print(f"[startup] rh access auto-grant skipped: {e}")
+        print(f"[startup] rh access reconciliation skipped: {e}")
 
     # ─── ONE-SHOT: hard reset of team-channel membership across the whole
     # workspace. After this migration every user starts with `team_channel_ids
     # = []` and every `team-{key}` channel has an empty members list. Admins
     # must then explicitly assign users to team channels via the wizard.
-    # Guarded by a marker so it never runs twice.
+    # Legacy `ch-*` demo channels (Accueil, Karting, Roller, …) are removed
+    # entirely — they were seeded with hardcoded members and cannot be
+    # managed via the admin UI. Guarded by a marker so it never runs twice.
     try:
-        marker = await db.system_flags.find_one({"key": "team_reset_v1"})
+        marker = await db.system_flags.find_one({"key": "team_reset_v2"})
         if not marker:
             await db.employees.update_many({}, {"$set": {"team_channel_ids": []}})
             await db.channels.update_many(
                 {"id": {"$regex": "^team-"}},
                 {"$set": {"members_ids": []}},
             )
-            await db.system_flags.insert_one({"key": "team_reset_v1", "at": _now()})
-            print("[startup] team-channel membership fully reset (one-shot)")
+            # Delete legacy ch-* demo channels and their messages
+            legacy_ch = await db.channels.find(
+                {"id": {"$regex": "^ch-"}}, {"_id": 0, "id": 1}
+            ).to_list(200)
+            legacy_ids = [c["id"] for c in legacy_ch]
+            if legacy_ids:
+                await db.channels.delete_many({"id": {"$in": legacy_ids}})
+                await db.messages.delete_many({"channel_id": {"$in": legacy_ids}})
+            await db.system_flags.insert_one({"key": "team_reset_v2", "at": _now()})
+            print(f"[startup] team-channel membership fully reset (team-* cleared, {len(legacy_ids)} legacy ch-* deleted)")
     except Exception as e:
         print(f"[startup] team reset skipped: {e}")
 
