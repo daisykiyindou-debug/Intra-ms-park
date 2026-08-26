@@ -410,6 +410,8 @@ export default function Messagerie() {
       const { data } = await api.post(`/channels/${active}/messages`, {
         content,
         attachments: pendingAttachments,
+        // Personal side → normal message. Service inbox side → sign as service.
+        as_service: mailboxMode !== "personal",
       });
       setMessages((m) => [...m, data]);
       setDraft("");

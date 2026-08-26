@@ -441,6 +441,10 @@ class CommentCreate(BaseModel):
 class MessageCreate(BaseModel):
     content: str = ""
     attachments: List[dict] = []  # [{url, name, type}]
+    # When True → author writes AS the service (auto-signature added).
+    # When False → author writes as themselves (personal side). When None,
+    # backend falls back to the legacy heuristic.
+    as_service: Optional[bool] = None
 
 
 # ───────────────────────────────── Helpers ───────────────────────────────────
@@ -4543,21 +4547,36 @@ async def post_message(cid: str, payload: MessageCreate):
         f"{author.get('first_name', '')} {author.get('last_name', '')}".strip()
         if author else "Un collègue"
     )
-    # Detect Service canal replies. Two possibilities:
-    #  1. Legacy shared inbox (`service_inbox` — still handled for BC)
-    #  2. Per-employee `corp-{key}-{uid}` thread when the author is a
-    #     member of the service (i.e. has the canal key in their access list).
+    # Detect Service canal replies. The frontend explicitly indicates via
+    # `as_service` whether the current post is a service reply (from the
+    # service inbox side) or a personal message (from Ma messagerie). When
+    # None, fall back to the legacy heuristic.
     body = payload.content or ""
-    is_service_msg = bool(ch and ch.get("is_service_inbox"))
-    service_name = ch.get("name") if is_service_msg else None
-    if not is_service_msg and ch and str(ch.get("id", "")).startswith("corp-"):
-        # Extract canal key from `corp-{key}-{uid}` — key can contain dashes,
-        # so use the corporate_key attribute stored on the channel.
-        canal_key = ch.get("corporate_key")
-        if canal_key and canal_key in (author.get("service_channels_access") or []):
-            is_service_msg = True
-            meta = CORPORATE_CANALS.get(canal_key, {})
-            service_name = meta.get("name") or ch.get("name")
+    service_name = None
+    if payload.as_service is not None:
+        is_service_msg = bool(payload.as_service)
+        if is_service_msg:
+            if ch.get("is_service_inbox"):
+                service_name = ch.get("name")
+            elif str(ch.get("id", "")).startswith("corp-"):
+                canal_key = ch.get("corporate_key")
+                meta = CORPORATE_CANALS.get(canal_key, {}) if canal_key else {}
+                service_name = meta.get("name") or ch.get("name")
+    else:
+        # Legacy heuristic (auto-signs when the author is service staff and
+        # NOT the initiator of a corp-{key}-{uid} thread — i.e. staff
+        # replying to another employee's request).
+        is_service_msg = bool(ch and ch.get("is_service_inbox"))
+        service_name = ch.get("name") if is_service_msg else None
+        if not is_service_msg and ch and str(ch.get("id", "")).startswith("corp-"):
+            canal_key = ch.get("corporate_key")
+            cid_str = str(ch.get("id", ""))
+            initiator = cid_str[len(f"corp-{canal_key}-"):] if canal_key else None
+            is_own_thread = initiator == current_user()
+            if not is_own_thread and canal_key and canal_key in (author.get("service_channels_access") or []):
+                is_service_msg = True
+                meta = CORPORATE_CANALS.get(canal_key, {})
+                service_name = meta.get("name") or ch.get("name")
     if is_service_msg and body.strip() and f"— {author_name}" not in body:
         body = f"{body.rstrip()}\n\n— {author_name}"
     msg = {
@@ -5648,7 +5667,9 @@ async def corporate_catalog():
             "name": meta["name"],
             "icon": meta.get("icon"),
             "description": meta.get("description", ""),
-            "recipient_count": len([m for m in recipients if m != uid]),
+            # Total members of the service (including self) — reflects the
+            # real audience of the canal, not "others" only.
+            "recipient_count": len(recipients),
             "already_open": bool(ch),
             "channel_id": cid if ch else None,
         })
