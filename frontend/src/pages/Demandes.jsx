@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
 import {
   Plus, FileText, Calendar as CalIcon, Banknote, Stethoscope, ArrowLeftRight, Package,
@@ -63,9 +63,28 @@ export default function Demandes() {
 
   useLiveData(refresh, ["requests", "me"], [statusFilter]);
 
+  const balance = me?.leave_balance || { cp_n_1: 0, cp_n: 0, rtt: 0 };
+  const rttEmpty = (balance.rtt || 0) <= 0;
+
+  // Clear any pre-selected dates when switching to RTT with an empty balance
+  // so no phantom selection stays behind the disabled calendar.
+  useEffect(() => {
+    if (form.type === "rtt" && rttEmpty && form.dates.length > 0) {
+      setForm((f) => ({ ...f, dates: [] }));
+    }
+  }, [form.type, rttEmpty, form.dates.length]);
+
   const submit = async (e) => {
     e.preventDefault();
     const usesCalendar = ["conge", "rtt", "absence"].includes(form.type);
+    // Defensive: block RTT submissions when the user has no RTT balance —
+    // no anticipated RTT allowed (matches HR policy).
+    if (form.type === "rtt" && (balance.rtt || 0) <= 0) {
+      toast.error("Aucun RTT disponible", {
+        description: "Vous ne pouvez pas poser de RTT anticipés. Attendez que votre solde soit crédité.",
+      });
+      return;
+    }
     const comment = form.attachment_name
       ? `${form.comment} [PJ: ${form.attachment_name}]`
       : form.comment;
@@ -126,7 +145,6 @@ export default function Demandes() {
     }
   };
 
-  const balance = me?.leave_balance || { cp_n_1: 0, cp_n: 0, rtt: 0 };
   const totalCP = balance.cp_n_1 + balance.cp_n;
 
   return (
@@ -419,7 +437,12 @@ export default function Demandes() {
                   </div>
                 )}
 
-                <button type="submit" data-testid="submit-request" className="ms-btn-primary w-full mt-2">
+                <button
+                  type="submit"
+                  data-testid="submit-request"
+                  disabled={form.type === "rtt" && (balance.rtt || 0) <= 0}
+                  className="ms-btn-primary w-full mt-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
                   Envoyer la demande
                 </button>
               </div>
@@ -430,9 +453,27 @@ export default function Demandes() {
               {["conge", "rtt", "absence"].includes(form.type) && (
                 <div className="min-h-[520px]">
                   <label className="ms-overline block mb-2">Sélectionnez vos jours dans le calendrier</label>
+                  {form.type === "rtt" && (balance.rtt || 0) <= 0 && (
+                    <div
+                      className="mb-3 rounded-2xl border-2 border-[#F59E0B]/30 bg-[#FEF3C7] p-4 flex items-start gap-3"
+                      data-testid="rtt-empty-alert"
+                      role="alert"
+                    >
+                      <div className="h-9 w-9 shrink-0 rounded-xl bg-[#F59E0B]/20 flex items-center justify-center">
+                        <Sun className="h-4 w-4 text-[#B45309]" />
+                      </div>
+                      <div className="text-sm">
+                        <div className="font-bold text-[#B45309]">0 RTT disponible</div>
+                        <p className="text-[#78350F] mt-0.5 leading-relaxed">
+                          Vous ne pouvez pas poser de RTT anticipés. Choisissez un autre type de demande, ou attendez que votre solde soit crédité par le service RH.
+                        </p>
+                      </div>
+                    </div>
+                  )}
                   <LeaveCalendar
                     value={form.dates}
                     onChange={(d) => setForm({ ...form, dates: d })}
+                    readOnly={form.type === "rtt" && (balance.rtt || 0) <= 0}
                   />
                 </div>
               )}

@@ -29,7 +29,7 @@ const MONTHS_FR = [
 function ymOf(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; }
 function todayYm() { return ymOf(new Date()); }
 
-export default function LeaveCalendar({ value = [], onChange, initialMonth }) {
+export default function LeaveCalendar({ value = [], onChange, initialMonth, readOnly = false }) {
   const [month, setMonth] = useState(initialMonth || todayYm());
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -45,6 +45,7 @@ export default function LeaveCalendar({ value = [], onChange, initialMonth }) {
   }, [month]);
 
   const toggle = (day) => {
+    if (readOnly) return;
     if (!day.selectable) return;
     const next = new Set(selected);
     if (next.has(day.date)) next.delete(day.date);
@@ -73,7 +74,7 @@ export default function LeaveCalendar({ value = [], onChange, initialMonth }) {
   const [y, m] = month.split("-").map(Number);
 
   return (
-    <div className="rounded-2xl border border-[#071B34]/8 bg-white p-4 md:p-5" data-testid="leave-calendar">
+    <div className={`rounded-2xl border border-[#071B34]/8 bg-white p-4 md:p-5 ${readOnly ? "opacity-60 pointer-events-none select-none" : ""}`} data-testid="leave-calendar" aria-disabled={readOnly}>
       {/* Header */}
       <div className="flex items-center justify-between mb-3">
         <button
