@@ -2,28 +2,12 @@ import { useEffect } from "react";
 import { createPortal } from "react-dom";
 
 /**
- * Universal modal wrapper — mounts children to document.body via a portal
- * (avoids transform/overflow clipping from any ancestor), applies the
- * site-wide backdrop + centering (`ms-modal-backdrop` + `ms-modal-panel`
- * from index.css) and locks body scroll while open.
- *
- * Usage:
- *   <PortalModal open={cartOpen} onClose={() => setCartOpen(false)} maxWidth="max-w-lg">
- *     <div className="p-5">…contenu…</div>
- *   </PortalModal>
- *
- * Legacy usage (just portal children as-is, no wrapper):
- *   <PortalModal raw>{children}</PortalModal>
+ * Barebones portal wrapper. Mounts children to `document.body` so any
+ * `position: fixed` inside them isn't scoped by an ancestor transform.
+ * Optionally locks body scroll while `open` is true and closes on Escape.
+ * Legacy signature: `<PortalModal open onClose={...}>` OR just `<PortalModal>`.
  */
-export default function PortalModal({
-  open = true,
-  onClose,
-  children,
-  maxWidth = "max-w-lg",
-  className = "",
-  raw = false,
-  testId,
-}) {
+export default function PortalModal({ open = true, onClose, children }) {
   useEffect(() => {
     if (!open) return;
     const prev = document.body.style.overflow;
@@ -35,24 +19,6 @@ export default function PortalModal({
       window.removeEventListener("keydown", onKey);
     };
   }, [open, onClose]);
-
   if (!open) return null;
-  if (raw) return createPortal(children, document.body);
-  return createPortal(
-    <div
-      role="dialog"
-      aria-modal="true"
-      onClick={onClose}
-      data-testid={testId}
-      className="ms-modal-backdrop"
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        className={`ms-modal-panel ${maxWidth} ${className}`}
-      >
-        {children}
-      </div>
-    </div>,
-    document.body
-  );
+  return createPortal(children, document.body);
 }

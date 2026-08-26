@@ -178,7 +178,7 @@ function ProposeModal({ onClose, onSaved }) {
   };
   return (
     <PortalModal>
-    <div onClick={onClose} className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
+    <div onClick={onClose} className="fixed inset-0 z-[200] bg-[#071B34]/40 backdrop-blur-md flex items-center justify-center p-4">
       <div onClick={(e) => e.stopPropagation()} className="bg-white rounded-3xl w-full max-w-lg p-6 space-y-4">
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-bold text-[#071B34]">Proposer une formation</h2>
@@ -324,7 +324,7 @@ function FormationEditor({ formation, onClose, onSaved }) {
 
   return (
     <PortalModal>
-    <div onClick={onClose} className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
+    <div onClick={onClose} className="fixed inset-0 z-[200] bg-[#071B34]/40 backdrop-blur-md flex items-center justify-center p-4">
       <div onClick={(e) => e.stopPropagation()} className="bg-white rounded-3xl w-full max-w-xl max-h-[90vh] overflow-y-auto p-6 space-y-3">
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-bold text-[#071B34]">{isNew ? "Nouvelle formation" : "Modifier la formation"}</h2>

@@ -181,8 +181,18 @@ export default function Agenda() {
 
       {/* Event modal */}
       {selected && (
-        <PortalModal open onClose={() => setSelected(null)} maxWidth="max-w-2xl" testId="event-detail-modal-wrap">
-          <div className="max-h-[90vh] overflow-y-auto" data-testid="event-detail-modal">
+        <PortalModal open onClose={() => setSelected(null)}>
+          <div
+            role="dialog"
+            aria-modal="true"
+            onClick={() => setSelected(null)}
+            className="fixed inset-0 z-[200] bg-[#071B34]/40 backdrop-blur-md flex items-center justify-center p-4"
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              data-testid="event-detail-modal"
+              className="ms-card max-w-2xl w-full max-h-[90vh] overflow-y-auto"
+            >
             {selected.image && (
               <img
                 src={absoluteUrl(selected.image)}
@@ -278,6 +288,7 @@ export default function Agenda() {
                 </button>
               </div>
             </div>
+          </div>
           </div>
         </PortalModal>
       )}
