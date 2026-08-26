@@ -977,7 +977,7 @@ export default function Messagerie() {
                 )}
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between gap-2">
-                    <div className={`text-sm font-semibold truncate inline-flex items-center gap-1.5 ${c.unread_count > 0 ? "text-[#071B34]" : active === c.id ? "text-[#0B2545]" : "text-[#334155]"}`}>
+                    <div className={`text-sm truncate inline-flex items-center gap-1.5 ${c.unread_count > 0 ? "text-[#071B34] font-extrabold" : `font-semibold ${active === c.id ? "text-[#0B2545]" : "text-[#334155]"}`}`}>
                       {c._display_name}
                       {c._is_birthday && (
                         <span
