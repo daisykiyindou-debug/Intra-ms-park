@@ -5,7 +5,7 @@ import {
   BarChart3, ClipboardList, Inbox, Newspaper, ShieldCheck, ArrowRight,
   Users as UsersIcon, AlertTriangle, CheckCircle2, TrendingUp, ChevronLeft, ChevronRight,
   Plus, Trash2, Save, X, CalendarDays, CalendarClock, Clock, MessageCircle, Gift, Sparkles,
-  FileText, Receipt, Send, Megaphone, GripVertical, UtensilsCrossed, Lightbulb,
+  FileText, Receipt, Send, Megaphone, GripVertical, UtensilsCrossed, Lightbulb, Copy,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -723,6 +723,29 @@ function WeekEditor({ employee, weekStart, existingEntries, onClose, onSaved }) 
     setRows((rs) => rs.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
   };
 
+  // Duplicate one row's horaires to a list of target day-offsets (respects locked leaves).
+  const duplicateDay = (srcIndex, targetOffsets) => {
+    const src = rows[srcIndex];
+    if (!src) return;
+    const copyable = {
+      type: src.type,
+      start: src.start,
+      end: src.end,
+      pause_start: src.pause_start,
+      pause_end: src.pause_end,
+      location: src.location,
+      service: src.service,
+      note: src.note,
+    };
+    setRows((rs) => rs.map((r, idx) => {
+      if (idx === srcIndex) return r;
+      if (!targetOffsets.includes(idx)) return r;
+      if (r._locked_leave) return r; // never overwrite a validated leave
+      return { ...r, ...copyable };
+    }));
+    toast.success(`Horaires du ${DAY_LABELS[srcIndex]} dupliqués sur ${targetOffsets.length} jour${targetOffsets.length > 1 ? "s" : ""}`);
+  };
+
   const totalMinutes = rows.reduce((sum, r) => {
     if ((r.type !== "shift" && r.type !== "remote") || !r.start || !r.end) return sum;
     const [sh, sm] = r.start.split(":").map(Number);
@@ -812,6 +835,7 @@ function WeekEditor({ employee, weekStart, existingEntries, onClose, onSaved }) 
         <div className="p-5 space-y-2">
           {rows.map((r, i) => {
             const day = addDays(weekStart, i);
+            const isSrcShift = (r.type === "shift" || r.type === "remote") && r.start && r.end;
             return (
               <WeekRow
                 key={i}
@@ -819,6 +843,11 @@ function WeekEditor({ employee, weekStart, existingEntries, onClose, onSaved }) 
                 dayDate={day}
                 row={r}
                 onChange={(patch) => updateRow(i, patch)}
+                canDuplicate={isSrcShift && !r._locked_leave}
+                dayLabels={DAY_LABELS}
+                dayIndex={i}
+                onDuplicate={(targets) => duplicateDay(i, targets)}
+                lockedIndexes={rows.map((rr, idx) => rr._locked_leave ? idx : -1).filter((idx) => idx !== -1)}
               />
             );
           })}
@@ -887,10 +916,34 @@ const WEEK_TYPES = [
   { v: "training", label: "Formation", color: "#B45309", bg: "#FEF3C7" },
 ];
 
-function WeekRow({ dayLabel, dayDate, row, onChange }) {
+function WeekRow({ dayLabel, dayDate, row, onChange, canDuplicate, dayLabels, dayIndex, onDuplicate, lockedIndexes }) {
   const isLocked = row._locked_leave;
   const isShift = row.type === "shift" || row.type === "remote";
   const meta = WEEK_TYPES.find((t) => t.v === row.type) || WEEK_TYPES[0];
+  const [dupOpen, setDupOpen] = useState(false);
+  const [dupTargets, setDupTargets] = useState(() => new Set());
+  const toggleTarget = (idx) => {
+    const next = new Set(dupTargets);
+    if (next.has(idx)) next.delete(idx); else next.add(idx);
+    setDupTargets(next);
+  };
+  const openDup = () => {
+    // Preselect all other unlocked days by default so the common case is 1-click.
+    const preset = new Set();
+    (dayLabels || []).forEach((_, idx) => {
+      if (idx === dayIndex) return;
+      if ((lockedIndexes || []).includes(idx)) return;
+      preset.add(idx);
+    });
+    setDupTargets(preset);
+    setDupOpen(true);
+  };
+  const confirmDup = () => {
+    const arr = Array.from(dupTargets);
+    if (arr.length === 0) { setDupOpen(false); return; }
+    onDuplicate?.(arr);
+    setDupOpen(false);
+  };
   // Validation — ensures shift/pause horaires are coherent.
   // Returns null if the row is valid, otherwise a human-readable error message.
   const validation = (() => {
@@ -993,12 +1046,87 @@ function WeekRow({ dayLabel, dayDate, row, onChange }) {
           </div>
           <div className="col-span-3">
             <label className="block text-[9px] uppercase tracking-wider text-[#475569] font-semibold mb-1">Lieu</label>
-            <input
-              value={row.location}
-              onChange={(e) => onChange({ location: e.target.value })}
-              placeholder="Lieu / service"
-              className="ms-input !py-1.5 !text-xs w-full"
-            />
+            <div className="flex items-center gap-1.5">
+              <input
+                value={row.location}
+                onChange={(e) => onChange({ location: e.target.value })}
+                placeholder={row.type === "remote" ? "Ex. Domicile" : "Lieu / service"}
+                className="ms-input !py-1.5 !text-xs flex-1"
+              />
+              {canDuplicate && (
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={openDup}
+                    data-testid={`week-duplicate-day-${row.day_offset}`}
+                    title="Dupliquer les horaires de ce jour sur d'autres jours"
+                    className="shrink-0 h-8 w-8 rounded-lg bg-[#3BA4FF]/10 text-[#1D70B8] hover:bg-[#3BA4FF]/20 inline-flex items-center justify-center transition-colors"
+                  >
+                    <Copy className="h-3.5 w-3.5" />
+                  </button>
+                  {dupOpen && (
+                    <>
+                      <div className="fixed inset-0 z-40" onClick={() => setDupOpen(false)} />
+                      <div
+                        className="absolute right-0 top-9 z-50 w-64 rounded-xl bg-white shadow-2xl ring-1 ring-[#071B34]/10 p-3"
+                        data-testid={`week-duplicate-popover-${row.day_offset}`}
+                      >
+                        <div className="text-xs font-bold text-[#071B34] mb-2">
+                          Dupliquer les horaires du {dayLabel}
+                        </div>
+                        <div className="text-[10px] text-[#475569] mb-2">
+                          {row.start && row.end ? (
+                            <>Horaires <strong>{row.start} → {row.end}</strong>{row.pause_start && row.pause_end && <> · pause {row.pause_start}–{row.pause_end}</>}</>
+                          ) : "—"}
+                        </div>
+                        <div className="space-y-1 max-h-56 overflow-y-auto">
+                          {(dayLabels || []).map((lbl, idx) => {
+                            if (idx === dayIndex) return null;
+                            const locked = (lockedIndexes || []).includes(idx);
+                            return (
+                              <label
+                                key={idx}
+                                className={`flex items-center gap-2 text-xs px-2 py-1.5 rounded ${
+                                  locked ? "text-[#94A3B8] cursor-not-allowed" : "text-[#334155] hover:bg-[#F4F7FA] cursor-pointer"
+                                }`}
+                              >
+                                <input
+                                  type="checkbox"
+                                  disabled={locked}
+                                  checked={dupTargets.has(idx)}
+                                  onChange={() => toggleTarget(idx)}
+                                  className="h-3.5 w-3.5 accent-[#3BA4FF]"
+                                />
+                                {lbl}
+                                {locked && <span className="ml-auto text-[9px] italic">verrouillé</span>}
+                              </label>
+                            );
+                          })}
+                        </div>
+                        <div className="mt-3 flex gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => setDupOpen(false)}
+                            className="flex-1 px-2 py-1.5 text-[11px] font-semibold rounded-lg bg-[#F4F7FA] text-[#475569] hover:bg-[#071B34]/5"
+                          >
+                            Annuler
+                          </button>
+                          <button
+                            type="button"
+                            onClick={confirmDup}
+                            disabled={dupTargets.size === 0}
+                            data-testid={`week-duplicate-confirm-${row.day_offset}`}
+                            className="flex-1 px-2 py-1.5 text-[11px] font-bold rounded-lg bg-[#3BA4FF] text-white hover:bg-[#1D70B8] disabled:opacity-40 disabled:cursor-not-allowed"
+                          >
+                            Dupliquer ({dupTargets.size})
+                          </button>
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
           {validation && (
             <div className="col-span-12 mt-1 text-[11px] font-semibold text-[#B91C1C]" data-testid={`week-error-${row.day_offset}`}>
