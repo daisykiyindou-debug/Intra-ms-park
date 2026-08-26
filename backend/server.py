@@ -5839,6 +5839,14 @@ async def admin_update_user(uid: str, payload: UserUpdate):
     if "badge_active" not in data and merged.get("badge_active") is not None:
         pass  # don't overwrite when caller didn't send it
     await db.employees.update_one({"id": uid}, {"$set": data})
+    # ─── Cross-module sync: any change to the weekly pattern (work_days, off_days,
+    # remote_days, usual_hours or weekly_pattern itself) must instantly propagate
+    # to Planning admin, Planning employé, Badge, Congés and every module that
+    # reads `db.schedules`. We purge future auto-generated entries and let
+    # `_ensure_range()` re-materialize them from the fresh pattern on next fetch.
+    pattern_touched = any(k in data for k in ("work_days", "off_days", "remote_days", "usual_hours", "weekly_pattern"))
+    if pattern_touched:
+        await _resync_pattern_schedules(uid)
     # If a new contract was attached and not already in Documents RH, register it
     if data.get("contract_url") and data.get("contract_url") != u.get("contract_url"):
         await db.documents.insert_one({
@@ -5852,6 +5860,21 @@ async def admin_update_user(uid: str, payload: UserUpdate):
         })
     updated = await db.employees.find_one({"id": uid}, {"_id": 0, "password": 0})
     return updated
+
+
+@api.post("/admin/users/{uid}/resync-schedule")
+async def admin_resync_user_schedule(uid: str):
+    """Force a full re-materialization of the employee's future planning from
+    the current `weekly_pattern`. Preserves validated leaves / RTT and past days.
+    Useful when off_days on the profile drifted from what's shown in Planning
+    or Badge (should never happen after this endpoint exists, but kept as a
+    safety net for legacy data)."""
+    await _require_admin_full()
+    u = await db.employees.find_one({"id": uid})
+    if not u:
+        raise HTTPException(404, "Utilisateur introuvable")
+    stats = await _resync_pattern_schedules(uid)
+    return {"ok": True, **stats}
 
 
 @api.post("/admin/users/{uid}/status")
@@ -6116,6 +6139,39 @@ async def _ensure_range(employee_id: str, start: date, end: date) -> None:
         d = d + timedelta(days=1)
     if to_insert:
         await db.schedules.insert_many(to_insert)
+
+
+async def _resync_pattern_schedules(employee_id: str, from_day: Optional[date] = None) -> dict:
+    """Purge future auto-generated schedule entries so `_ensure_range()` re-materializes
+    them from the up-to-date `weekly_pattern`. Approved leaves / RTT are preserved.
+    Legacy-schema rows (shift_type/start_time) are always purged so they get re-created
+    with the current schema. Also clears future badging entries.
+
+    Called automatically whenever `work_days`, `off_days`, `remote_days`, `usual_hours`
+    or `weekly_pattern` change on the employee, so every module (Planning admin,
+    Planning employé, Badge, Congés, contract calculations) stays in sync with the
+    single source of truth on the user profile."""
+    from_iso = (from_day or date.today()).isoformat()
+    # 1) Delete future auto-generated entries (keep validated leaves/RTT)
+    r1 = await db.schedules.delete_many({
+        "employee_id": employee_id,
+        "day": {"$gte": from_iso},
+        "type": {"$nin": ["leave", "rtt"]},
+    })
+    # 2) Delete any legacy-schema row at any date (they can't be interpreted by the app)
+    r2 = await db.schedules.delete_many({
+        "employee_id": employee_id,
+        "shift_type": {"$exists": True},
+    })
+    # 3) Clear future badging so it will be regenerated from the fresh schedule
+    r3 = await db.badging.delete_many({
+        "employee_id": employee_id,
+        "day": {"$gte": from_iso},
+    })
+    return {
+        "schedules_deleted": (r1.deleted_count or 0) + (r2.deleted_count or 0),
+        "badging_deleted": r3.deleted_count or 0,
+    }
 
 
 @api.get("/admin/employees")
@@ -7038,6 +7094,15 @@ async def on_start():
     await _seed_marcus_week()
     # Clean up any duplicate schedule rows for the same (employee_id, day)
     await _dedupe_schedules()
+    # ─── One-shot cleanup: remove legacy-schema schedule rows (shift_type/start_time)
+    # so `_ensure_range()` re-materializes them with the current schema from the
+    # employee's weekly_pattern. Idempotent.
+    try:
+        legacy = await db.schedules.delete_many({"shift_type": {"$exists": True}})
+        if legacy.deleted_count:
+            print(f"[startup] purged {legacy.deleted_count} legacy-schema schedule rows")
+    except Exception as e:
+        print(f"[startup] legacy cleanup skipped: {e}")
 
 
 async def _seed_birth_dates():
