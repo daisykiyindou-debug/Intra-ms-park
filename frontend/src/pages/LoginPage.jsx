@@ -39,8 +39,8 @@ export default function LoginPage() {
       <div className="md:flex-1 relative overflow-hidden bg-gradient-to-br from-[#071B34] via-[#0B2545] to-[#071B34] text-white p-10 md:p-16 ms-grain">
         <div className="absolute -right-20 -top-20 h-96 w-96 rounded-full bg-[#3BA4FF]/30 blur-3xl" />
         <div className="absolute -left-10 bottom-10 h-64 w-64 rounded-full bg-[#3BA4FF]/15 blur-3xl" />
-        <div className="relative flex items-center gap-3">
-          <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-white/10 backdrop-blur-md border border-white/15 shadow-lg shadow-[#3BA4FF]/20 p-2">
+        <div className="relative flex items-center gap-4">
+          <div className="flex h-24 w-24 items-center justify-center rounded-3xl bg-white/10 backdrop-blur-md border border-white/15 shadow-xl shadow-[#3BA4FF]/25 p-2.5">
             <img
               src={MS_PARK_LOGO}
               alt="MS Park"
@@ -49,8 +49,8 @@ export default function LoginPage() {
             />
           </div>
           <div>
-            <div className="text-2xl font-extrabold tracking-tight leading-none">MS Park</div>
-            <div className="text-[10px] uppercase tracking-[0.2em] text-white/50 mt-1">Intranet</div>
+            <div className="text-3xl font-extrabold tracking-tight leading-none">MS Park</div>
+            <div className="text-[11px] uppercase tracking-[0.2em] text-white/50 mt-1.5">Intranet</div>
           </div>
         </div>
         <div className="relative mt-16 md:mt-32 max-w-md">

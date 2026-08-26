@@ -186,8 +186,8 @@ export default function Sidebar({ open, onClose }) {
           open ? "translate-x-0" : "-translate-x-full"
         }`}
       >
-        <div className="flex h-20 items-center gap-3 px-6 border-b border-white/5">
-          <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-white/[0.06] border border-white/10 backdrop-blur-md p-1.5 shadow-lg shadow-[#3BA4FF]/10">
+        <div className="flex h-24 items-center gap-3 px-5 border-b border-white/5">
+          <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-white/[0.06] border border-white/10 backdrop-blur-md p-2 shadow-lg shadow-[#3BA4FF]/15 shrink-0">
             <img
               src="https://customer-assets-jt897jd0.emergentagent.net/job_mspark-employee-hub/artifacts/n4qg1w02_logo%20ms%20park%20transparent.png"
               alt="MS Park"
@@ -196,12 +196,12 @@ export default function Sidebar({ open, onClose }) {
             />
           </div>
           <div>
-            <div className="text-lg font-extrabold tracking-tight leading-none">MS Park</div>
-            <div className="text-[10px] uppercase tracking-[0.2em] text-white/50 mt-1">Intranet</div>
+            <div className="text-xl font-extrabold tracking-tight leading-none">MS Park</div>
+            <div className="text-[10px] uppercase tracking-[0.2em] text-white/50 mt-1.5">Intranet</div>
           </div>
         </div>
 
-        <nav className="px-3 py-4 space-y-0.5 overflow-y-auto" style={{ height: "calc(100vh - 5rem - 5rem)" }}>
+        <nav className="px-3 py-4 space-y-0.5 overflow-y-auto" style={{ height: "calc(100vh - 6rem - 5rem)" }}>
           {items.map((item, i) =>
             item.divider ? (
               <div
