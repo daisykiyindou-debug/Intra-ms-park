@@ -250,8 +250,27 @@ export default function Messagerie() {
       .sort((a, b) => (b.last_message_ts || b.created_at || "").localeCompare(a.last_message_ts || a.created_at || ""));
   }, [channels, me?.id, findEmployee]);
 
+  // "Boîte" active — personal | service-{key}. Users with service access can
+  // switch between their personal messagerie and each of their service inboxes.
+  const [mailboxMode, setMailboxMode] = useState("personal");
+  const [corpNames, setCorpNames] = useState({});
+  useEffect(() => {
+    api.get("/channels/corporate/catalog").then((r) => {
+      const map = {};
+      (r.data || []).forEach((c) => { map[c.key] = c.name; });
+      setCorpNames(map);
+    }).catch(() => {});
+  }, []);
+  const serviceAccess = me?.service_channels_access || [];
   const filtered = useMemo(() => {
     let list = conversations;
+    // Mailbox split — personal excludes corp-*, service-X shows only its threads.
+    if (mailboxMode === "personal") {
+      list = list.filter((c) => !String(c.id || "").startsWith("corp-"));
+    } else {
+      const key = mailboxMode.replace(/^service-/, "");
+      list = list.filter((c) => String(c.id || "").startsWith(`corp-${key}-`));
+    }
     if (tab === "unread") list = list.filter((c) => (c.unread_count || 0) > 0);
     if (tab === "favorites") list = list.filter((c) => favorites.has(c.id));
     if (filterKind === "dm") list = list.filter((c) => c._kind === "dm");
@@ -262,7 +281,7 @@ export default function Messagerie() {
       list = list.filter((c) => (c._display_name || "").toLowerCase().includes(needle) || (c.last_message_preview || "").toLowerCase().includes(needle));
     }
     return list;
-  }, [conversations, tab, favorites, q, filterKind]);
+  }, [conversations, tab, favorites, q, filterKind, mailboxMode]);
 
   const counts = useMemo(() => ({
     all: conversations.length,
@@ -676,6 +695,53 @@ export default function Messagerie() {
               <Pencil className="h-4 w-4" />
             </button>
           </div>
+
+          {/* Mailbox switcher — personal / service canals */}
+          {serviceAccess.length > 0 && (
+            <div className="px-3 pt-3" data-testid="mailbox-switcher">
+              <div className="text-[9px] uppercase tracking-widest font-bold text-[#94A3B8] mb-1.5">Boîte active</div>
+              <div className="flex flex-wrap gap-1">
+                <button
+                  onClick={() => { setMailboxMode("personal"); setActive(null); }}
+                  data-testid="mailbox-personal"
+                  className={`text-[11px] font-semibold rounded-lg px-2.5 py-1.5 transition-colors ${
+                    mailboxMode === "personal"
+                      ? "bg-[#3BA4FF] text-white shadow"
+                      : "bg-white ring-1 ring-[#071B34]/10 text-[#334155] hover:bg-[#F4F7FA]"
+                  }`}
+                >
+                  Ma messagerie
+                </button>
+                {serviceAccess.map((k) => (
+                  <button
+                    key={k}
+                    onClick={() => { setMailboxMode(`service-${k}`); setActive(null); }}
+                    data-testid={`mailbox-svc-${k}`}
+                    className={`text-[11px] font-semibold rounded-lg px-2.5 py-1.5 transition-colors inline-flex items-center gap-1 ${
+                      mailboxMode === `service-${k}`
+                        ? "bg-[#7C3AED] text-white shadow"
+                        : "bg-white ring-1 ring-[#7C3AED]/20 text-[#7C3AED] hover:bg-[#A78BFA]/10"
+                    }`}
+                  >
+                    <Briefcase className="h-3 w-3" /> {corpNames[k] || k}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          {/* Service mode banner — clear "you're in service mode" indicator */}
+          {mailboxMode !== "personal" && (
+            <div
+              className="mx-3 mt-2 rounded-lg bg-gradient-to-r from-[#7C3AED] to-[#A78BFA] text-white text-[11px] font-semibold px-3 py-2 flex items-center gap-2"
+              data-testid="mailbox-service-banner"
+            >
+              <Briefcase className="h-3.5 w-3.5 shrink-0" />
+              <span>
+                Boîte <strong>{corpNames[mailboxMode.replace("service-", "")] || "Service"}</strong> —
+                messages reçus des employés. Vos réponses seront signées.
+              </span>
+            </div>
+          )}
 
           {/* Tabs */}
           <div className="px-3 pt-2 border-b border-[#071B34]/5 flex items-center gap-4">
