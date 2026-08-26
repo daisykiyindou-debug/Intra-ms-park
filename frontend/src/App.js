@@ -112,6 +112,16 @@ function App() {
   useLiveData(refreshEmployees, ["employees", "me"]);
   useLiveData(refreshNotifications, ["notifications"]);
 
+  // Legacy DOM event bridge — pages (Messagerie, MeetingInviteBanner…)
+  // dispatch `ms-notifications-refresh` after they mutate the read state
+  // of message notifications. This ensures the header envelope badge
+  // clears the moment a conversation is opened.
+  useEffect(() => {
+    const onRefresh = () => refreshNotifications();
+    window.addEventListener("ms-notifications-refresh", onRefresh);
+    return () => window.removeEventListener("ms-notifications-refresh", onRefresh);
+  }, []);
+
   const findEmployee = (id) => employees.find((e) => e.id === id);
 
   return (
