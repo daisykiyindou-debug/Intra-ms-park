@@ -142,6 +142,28 @@ export default function Messagerie() {
 
   useEffect(() => { loadChannels(); }, []);
 
+  // Poll channels every 10s while the tab is visible so the sidebar unread
+  // counters + boîte badges update in near-real-time without any user
+  // action. Also refreshes messages of the active thread.
+  useEffect(() => {
+    const tick = () => {
+      if (document.visibilityState !== "visible") return;
+      loadChannels();
+      if (active) {
+        api.get(`/channels/${active}/messages`)
+          .then((r) => setMessages(r.data))
+          .catch(() => {});
+      }
+    };
+    const t = setInterval(tick, 10_000);
+    const onVis = () => { if (document.visibilityState === "visible") tick(); };
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      clearInterval(t);
+      document.removeEventListener("visibilitychange", onVis);
+    };
+  }, [active]);
+
   // Sync `active` with the URL — when the user clicks a message notification while
   // already on /messagerie, the ?ch= query changes and we need to open that conversation.
   useEffect(() => {
@@ -339,8 +361,32 @@ export default function Messagerie() {
   // the new boîte — otherwise the right pane keeps showing a conversation
   // that isn't visible in the sidebar (confusing UX). Also auto-selects
   // the first scoped conversation when `active` is empty.
+  //
+  // When `active` is set via URL (?ch=xxx) and belongs to a service canal
+  // for which the viewer is staff, auto-switch to that service boîte so
+  // the sidebar reflects the opened thread.
   useEffect(() => {
+    // Wait until conversations are loaded — otherwise we'd clear a valid
+    // `active` set from the URL before we know which mailbox it belongs to.
+    if (conversations.length === 0) return;
     if (active) {
+      const conv = conversations.find((c) => c.id === active);
+      if (conv && conv._is_service_thread) {
+        const idStr = String(conv.id || "");
+        const key =
+          conv.corporate_key ||
+          (idStr.startsWith("rh-") ? "service-rh" : null) ||
+          (() => {
+            for (const k of ["service-rh", "communication", "managers-ops", "dept-financier", "direction"]) {
+              if (idStr.startsWith(`corp-${k}-`)) return k;
+            }
+            return null;
+          })();
+        if (key && mailboxMode !== `service-${key}`) {
+          setMailboxMode(`service-${key}`);
+          return;
+        }
+      }
       const stillInScope = scopedConversations.some((c) => c.id === active);
       if (!stillInScope) {
         setActive(null);
@@ -353,7 +399,7 @@ export default function Messagerie() {
         .sort((a, b) => (b.last_message_ts || "").localeCompare(a.last_message_ts || ""))[0];
       if (first) setActive(first.id);
     }
-  }, [active, mailboxMode, scopedConversations]);
+  }, [active, mailboxMode, scopedConversations, conversations]);
   const mailboxUnread = useMemo(() => {
     // Total unread per service canal (from the viewer=service-staff side)
     const map = { personal: 0 };

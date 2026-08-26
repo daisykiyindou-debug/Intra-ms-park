@@ -97,11 +97,22 @@ function App() {
     const t2 = setInterval(() => {
       if (document.visibilityState === "visible") refreshEmployees();
     }, 60_000);
-    const onVis = () => { if (document.visibilityState === "visible") ping(); };
+    // Poll notifications every 15s so an incoming message triggers the red
+    // header badge (and messagerie unread counters) without any user action.
+    const t3 = setInterval(() => {
+      if (document.visibilityState === "visible") refreshNotifications();
+    }, 15_000);
+    const onVis = () => {
+      if (document.visibilityState === "visible") {
+        ping();
+        refreshNotifications();
+      }
+    };
     document.addEventListener("visibilitychange", onVis);
     return () => {
       clearInterval(t1);
       clearInterval(t2);
+      clearInterval(t3);
       document.removeEventListener("visibilitychange", onVis);
     };
   }, []);
