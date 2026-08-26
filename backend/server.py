@@ -1968,9 +1968,9 @@ async def availability(month: Optional[str] = None):
             label = f"Demande en attente ({r['type'].upper()})"
         elif iso in holidays:
             # Public holidays take priority over shift/off styling so they are
-            # always visible in red on the calendar. They remain selectable so
-            # employees can still declare a CP/RTT on the holiday if needed.
-            status, selectable = "holiday", True
+            # always visible in red on the calendar. They are NOT selectable —
+            # employees can't request a CP/RTT on a legal French holiday.
+            status, selectable = "holiday", False
             label = f"Férié — {holidays[iso]}"
         elif sched and sched.get("type") == "off":
             status, selectable = "off", False
@@ -2052,22 +2052,23 @@ async def create_multi_day_request(payload: MultiDayRequest):
     for y in years_needed:
         holidays.update(_year_holidays(y))
 
-    # Validate each requested day. Public holidays are allowed — employees
-    # can still declare a CP / RTT on a legal holiday if they wish.
+    # Validate each requested day. Public holidays are strictly blocked —
+    # employees can't request a CP / RTT on a legal French holiday.
     errors: list[str] = []
     for d in parsed:
         iso = d.isoformat()
         if d < today:
             errors.append(f"{iso} : jour passé")
             continue
+        if iso in holidays:
+            errors.append(f"{iso} : jour férié ({holidays[iso]})")
+            continue
         if iso in blocked_by_req:
             errors.append(f"{iso} : déjà en congé ou en attente")
             continue
         sched = sched_by_day.get(iso) or _entry_from_pattern(emp, d)
         st = sched.get("type") if sched else None
-        # OFF days are allowed only if the day is a public holiday
-        # (the standard case: no leave on a rest day).
-        if st == "off" and iso not in holidays:
+        if st == "off":
             errors.append(f"{iso} : jour OFF")
         elif st in ("cp", "rtt"):
             errors.append(f"{iso} : déjà en {st.upper()}")

@@ -166,7 +166,7 @@ export default function LeaveCalendar({ value = [], onChange, initialMonth }) {
         <Info className="h-3.5 w-3.5 mt-0.5 shrink-0 text-[#3BA4FF]" />
         <div>
           Cliquez sur les journées que vous souhaitez poser. Vous pouvez sélectionner plusieurs jours <strong>non consécutifs</strong>.
-          Les jours <strong>fériés</strong> sont marqués en rouge et restent posables. Les jours OFF, déjà validés ou en attente sont automatiquement bloqués.
+          Les jours OFF, fériés, déjà validés ou en attente sont automatiquement bloqués.
           {value.length > 0 && (
             <div className="mt-1 text-[#071B34] font-semibold">
               {value.length} jour{value.length > 1 ? "s" : ""} sélectionné{value.length > 1 ? "s" : ""}
