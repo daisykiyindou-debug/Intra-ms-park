@@ -169,6 +169,43 @@ export default function Sidebar({ open, onClose }) {
 
   const items = dedupeByTo(rawItems);
 
+  // Force strict alphabetical order on the Management / Communication
+  // sections for every user profile (admin, comm, granular-perm). "Vue
+  // d'ensemble" always stays at the top of the block. Employee-side items
+  // keep their curated ordering.
+  const sortAdminSections = (arr) => {
+    const out = [];
+    let buf = null; // { headerIndex, items: [] }
+    const flush = () => {
+      if (!buf) return;
+      const overview = buf.items.filter((it) => it.label === "Vue d'ensemble");
+      const rest = buf.items
+        .filter((it) => it.label !== "Vue d'ensemble")
+        .sort((a, b) => a.label.localeCompare(b.label, "fr", { sensitivity: "base" }));
+      out.push(...overview, ...rest);
+      buf = null;
+    };
+    for (const it of arr) {
+      const inMgmtBlock = it.section === "admin" || it.section === "comm";
+      if (it.divider) {
+        flush();
+        out.push(it);
+        // Only open a buffer if the divider tags a management block
+        if (it.adminBadge || it.commBadge) buf = { items: [] };
+        continue;
+      }
+      if (inMgmtBlock && buf) {
+        buf.items.push(it);
+      } else {
+        flush();
+        out.push(it);
+      }
+    }
+    flush();
+    return out;
+  };
+  const sortedItems = sortAdminSections(items);
+
   return (
     <>
       {/* Mobile overlay */}
@@ -202,7 +239,7 @@ export default function Sidebar({ open, onClose }) {
         </div>
 
         <nav className="px-3 py-4 space-y-0.5 overflow-y-auto" style={{ height: "calc(100vh - 6rem - 5rem)" }}>
-          {items.map((item, i) =>
+          {sortedItems.map((item, i) =>
             item.divider ? (
               <div
                 key={`d-${i}`}
