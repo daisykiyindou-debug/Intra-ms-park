@@ -6803,16 +6803,26 @@ class AdminScheduleEntry(BaseModel):
 
 
 def _shift_minutes(entry: dict) -> int:
-    """Compute net worked minutes for a 'shift' or 'remote' entry (excludes pause)."""
+    """Compute net worked minutes for a 'shift' or 'remote' entry (excludes pause).
+    Supports shifts that cross midnight (end <= start ⇒ shift ends the next day)."""
     if entry.get("type") not in ("shift", "remote") or not entry.get("start") or not entry.get("end"):
         return 0
     try:
         s = datetime.strptime(entry["start"], "%H:%M")
         e = datetime.strptime(entry["end"], "%H:%M")
+        if e <= s:
+            e = e + timedelta(days=1)
         m = int((e - s).total_seconds() // 60)
         if entry.get("pause_start") and entry.get("pause_end"):
             ps = datetime.strptime(entry["pause_start"], "%H:%M")
             pe = datetime.strptime(entry["pause_end"], "%H:%M")
+            # Unwrap pause times when the shift crosses midnight
+            if pe < ps:
+                pe = pe + timedelta(days=1)
+            if ps < s:
+                ps = ps + timedelta(days=1)
+                if pe < ps:
+                    pe = pe + timedelta(days=1)
             m -= int((pe - ps).total_seconds() // 60)
         return max(0, m)
     except Exception:
@@ -6835,10 +6845,19 @@ def _covered_minutes(entry: dict) -> int:
     try:
         s = datetime.strptime(entry["start"], "%H:%M")
         e = datetime.strptime(entry["end"], "%H:%M")
+        # Cross-midnight support: parc closes late (e.g. 02:00 the next day)
+        if e <= s:
+            e = e + timedelta(days=1)
         m = int((e - s).total_seconds() // 60)
         if entry.get("pause_start") and entry.get("pause_end"):
             ps = datetime.strptime(entry["pause_start"], "%H:%M")
             pe = datetime.strptime(entry["pause_end"], "%H:%M")
+            if pe < ps:
+                pe = pe + timedelta(days=1)
+            if ps < s:
+                ps = ps + timedelta(days=1)
+                if pe < ps:
+                    pe = pe + timedelta(days=1)
             m -= int((pe - ps).total_seconds() // 60)
         return max(0, m)
     except Exception:
@@ -7103,15 +7122,27 @@ async def admin_upsert_schedule(payload: AdminScheduleEntry):
             except Exception:
                 return None
         s = _tmin(payload.start); en = _tmin(payload.end)
-        if s is None or en is None or en <= s:
-            raise HTTPException(400, "Fin du shift doit être après le début")
+        if s is None or en is None:
+            raise HTTPException(400, "Horaires début/fin invalides")
+        # Cross-midnight support: end <= start means the shift ends the next
+        # day (parc fermeture tardive). Only reject when start == end exactly.
+        if en == s:
+            raise HTTPException(400, "Fin du shift doit être différente du début")
+        crosses_midnight = en < s
+        eff_end = en + 24 * 60 if crosses_midnight else en
         if (payload.pause_start and not payload.pause_end) or (payload.pause_end and not payload.pause_start):
             raise HTTPException(400, "Renseignez à la fois le début et la fin de la pause")
         if payload.pause_start and payload.pause_end:
             ps = _tmin(payload.pause_start); pe = _tmin(payload.pause_end)
-            if ps is None or pe is None or pe <= ps:
+            if ps is None or pe is None:
+                raise HTTPException(400, "Horaires de pause invalides")
+            # Unwrap pause times when the shift crosses midnight
+            if crosses_midnight:
+                if ps < s: ps += 24 * 60
+                if pe < s: pe += 24 * 60
+            if pe <= ps:
                 raise HTTPException(400, "Fin de pause doit être après le début de pause")
-            if ps < s or pe > en:
+            if ps < s or pe > eff_end:
                 raise HTTPException(400, "La pause doit se situer entièrement à l'intérieur du shift")
     existing = await db.schedules.find_one(
         {"employee_id": payload.employee_id, "day": payload.day}, {"_id": 0}
@@ -7316,15 +7347,26 @@ async def admin_save_week(payload: BulkWeekPayload):
         if not e.start or not e.end:
             continue
         s = _tmin(e.start); en = _tmin(e.end)
-        if s is None or en is None or en <= s:
-            raise HTTPException(400, f"Jour {e.day_offset}: fin du shift doit être après le début")
+        if s is None or en is None:
+            raise HTTPException(400, f"Jour {e.day_offset}: horaires début/fin invalides")
+        # Cross-midnight support: end <= start means the shift ends the next
+        # day (parc fermeture tardive, e.g. 02:00). Only reject if start == end.
+        if en == s:
+            raise HTTPException(400, f"Jour {e.day_offset}: fin du shift doit être différente du début")
+        crosses_midnight = en < s
+        eff_end = en + 24 * 60 if crosses_midnight else en
         if (e.pause_start and not e.pause_end) or (e.pause_end and not e.pause_start):
             raise HTTPException(400, f"Jour {e.day_offset}: renseignez à la fois le début et la fin de la pause")
         if e.pause_start and e.pause_end:
             ps = _tmin(e.pause_start); pe = _tmin(e.pause_end)
-            if ps is None or pe is None or pe <= ps:
+            if ps is None or pe is None:
+                raise HTTPException(400, f"Jour {e.day_offset}: horaires de pause invalides")
+            if crosses_midnight:
+                if ps < s: ps += 24 * 60
+                if pe < s: pe += 24 * 60
+            if pe <= ps:
                 raise HTTPException(400, f"Jour {e.day_offset}: fin de pause doit être après le début de pause")
-            if ps < s or pe > en:
+            if ps < s or pe > eff_end:
                 raise HTTPException(400, f"Jour {e.day_offset}: la pause doit se situer entièrement à l'intérieur du shift")
 
     for w in range(0, max(1, payload.duplicate_weeks + 1)):

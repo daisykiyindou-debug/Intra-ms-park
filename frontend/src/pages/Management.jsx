@@ -751,11 +751,19 @@ function WeekEditor({ employee, weekStart, existingEntries, onClose, onSaved }) 
     if ((r.type !== "shift" && r.type !== "remote") || !r.start || !r.end) return sum;
     const [sh, sm] = r.start.split(":").map(Number);
     const [eh, em] = r.end.split(":").map(Number);
-    let minutes = (eh * 60 + em) - (sh * 60 + sm);
+    let endMin = eh * 60 + em;
+    const startMin = sh * 60 + sm;
+    // Cross-midnight support: if end <= start, treat it as next-day (e.g.
+    // parc closes at 02:00). Add 24h so the maths stay positive.
+    if (endMin <= startMin) endMin += 24 * 60;
+    let minutes = endMin - startMin;
     if (r.pause_start && r.pause_end) {
       const [psh, psm] = r.pause_start.split(":").map(Number);
       const [peh, pem] = r.pause_end.split(":").map(Number);
-      minutes -= Math.max(0, (peh * 60 + pem) - (psh * 60 + psm));
+      let pauseEnd = peh * 60 + pem;
+      const pauseStart = psh * 60 + psm;
+      if (pauseEnd < pauseStart) pauseEnd += 24 * 60;
+      minutes -= Math.max(0, pauseEnd - pauseStart);
     }
     return sum + Math.max(0, minutes);
   }, 0);
@@ -768,11 +776,23 @@ function WeekEditor({ employee, weekStart, existingEntries, onClose, onSaved }) 
     if (r.type !== "shift" && r.type !== "remote") return null;
     if (!r.start || !r.end) return null;
     const toMin = (x) => { const [h, m] = (x || "").split(":").map(Number); return h * 60 + m; };
-    const s = toMin(r.start), e = toMin(r.end);
-    if (e <= s) return "Fin du shift doit être après le début";
+    const s = toMin(r.start);
+    let e = toMin(r.end);
+    // Cross-midnight: end <= start means the shift ends the next day. Only
+    // reject if start == end exactly (empty shift).
+    const crossesMidnight = e <= s;
+    if (crossesMidnight) e += 24 * 60;
+    if (e === s) return "Fin du shift doit être différente du début";
     if ((r.pause_start && !r.pause_end) || (!r.pause_start && r.pause_end)) return "Renseignez à la fois le début et la fin de la pause";
     if (r.pause_start && r.pause_end) {
-      const ps = toMin(r.pause_start), pe = toMin(r.pause_end);
+      let ps = toMin(r.pause_start);
+      let pe = toMin(r.pause_end);
+      // If the shift crosses midnight, unwrap pause times that appear "after
+      // midnight" (< start) by adding 24h so we can compare on a single line.
+      if (crossesMidnight) {
+        if (ps < s) ps += 24 * 60;
+        if (pe < s) pe += 24 * 60;
+      }
       if (pe <= ps) return "Fin de pause doit être après le début de pause";
       if (ps < s || pe > e) return "La pause doit se situer entièrement à l'intérieur du shift";
     }
@@ -1071,7 +1091,15 @@ function WeekRow({ dayLabel, dayDate, row, onChange, canDuplicate, dayLabels, da
             />
           </div>
           <div className="col-span-1">
-            <label className="block text-[9px] uppercase tracking-wider text-[#475569] font-semibold mb-1">Fin shift</label>
+            <label className="block text-[9px] uppercase tracking-wider text-[#475569] font-semibold mb-1">
+              Fin shift
+              {row.start && row.end && (() => {
+                const [sh, sm] = row.start.split(":").map(Number);
+                const [eh, em] = row.end.split(":").map(Number);
+                const s = sh * 60 + sm, e = eh * 60 + em;
+                return e < s && e >= 0 ? <span className="ml-1 text-[#7C3AED]">(→ lendemain)</span> : null;
+              })()}
+            </label>
             <input
               type="time"
               value={row.end}
