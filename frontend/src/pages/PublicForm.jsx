@@ -84,7 +84,7 @@ export default function PublicForm() {
 
   const validate = () => {
     for (const f of form.fields || []) {
-      if (f.type === "section") continue;
+      if (["section", "rich", "image"].includes(f.type)) continue;
       if (!f.required) continue;
       const v = answers[f.name];
       if (v == null || v === "" || (Array.isArray(v) && v.length === 0)) {
@@ -152,7 +152,9 @@ export default function PublicForm() {
             <h1 className="text-2xl font-bold text-[#071B34] mt-1 tracking-tight">{form.title}</h1>
           </div>
         </div>
-        {form.description && <p className="text-sm text-[#475569] mb-6 leading-relaxed">{form.description}</p>}
+        {form.description && (
+          <div className="ms-prose text-sm text-[#475569] mb-6 leading-relaxed" dangerouslySetInnerHTML={{ __html: form.description }} />
+        )}
 
         <div className="space-y-4">
           {(form.fields || []).map((f) => (
@@ -187,6 +189,29 @@ function FieldRenderer({ field, value, onChange, onToggle }) {
         <h3 className="text-base font-bold text-[#071B34]">{field.label}</h3>
         {field.help_text && <p className="mt-1 text-xs text-[#475569]">{field.help_text}</p>}
       </div>
+    );
+  }
+
+  // Rich-text block — HTML preserved exactly as authored
+  if (field.type === "rich") {
+    return (
+      <div className="ms-prose text-sm text-[#334155] leading-relaxed" data-testid="field-rich"
+           dangerouslySetInnerHTML={{ __html: field.content_html || "" }} />
+    );
+  }
+
+  // Image / banner block
+  if (field.type === "image") {
+    if (!field.image_url) return null;
+    return (
+      <figure className="rounded-xl overflow-hidden" data-testid="field-image">
+        <img src={field.image_url} alt={field.image_alt || ""} className="w-full max-h-96 object-cover" />
+        {field.image_caption && (
+          <figcaption className="text-xs text-[#475569] italic text-center py-2 bg-[#F8FAFC]">
+            {field.image_caption}
+          </figcaption>
+        )}
+      </figure>
     );
   }
 

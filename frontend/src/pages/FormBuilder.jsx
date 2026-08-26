@@ -8,9 +8,12 @@ import {
 import { toast } from "sonner";
 import { api, formatDateFr } from "@/lib/api";
 import useLiveData, { notifyLiveRefresh } from "@/hooks/useLiveData";
+import RichTextEditor from "@/components/RichTextEditor";
 
 const FIELD_TYPES = [
   { v: "section", label: "Titre / paragraphe", icon: "H", desc: "Séparateur de section (non-interactif)" },
+  { v: "rich", label: "Bloc texte enrichi", icon: "¶", desc: "Paragraphe rédigé avec gras, listes, liens… (non-interactif)" },
+  { v: "image", label: "Image / bannière", icon: "🖼", desc: "Visuel ou bannière à insérer entre les questions" },
   { v: "text", label: "Texte court", icon: "T" },
   { v: "textarea", label: "Texte long", icon: "¶" },
   { v: "email", label: "E-mail", icon: "@" },
@@ -34,6 +37,11 @@ function newField(type = "text") {
     required: false,
     placeholder: "",
     help_text: "",
+    // Rich-text content HTML (for `rich` blocks) and image URL/alt (for `image` blocks)
+    content_html: type === "rich" ? "<p>Rédigez votre bloc de texte ici…</p>" : "",
+    image_url: "",
+    image_alt: "",
+    image_caption: "",
     options: ["radio", "checkbox", "select"].includes(type) ? ["Option 1", "Option 2"] : null,
   };
 }
@@ -215,6 +223,29 @@ function PreviewField({ field }) {
       </div>
     );
   }
+  if (field.type === "rich") {
+    return (
+      <div className="rounded-lg border border-dashed border-[#071B34]/10 bg-[#F8FAFC] p-3">
+        <div className="ms-overline mb-1 text-[#94A3B8]">Bloc texte enrichi</div>
+        <div className="ms-prose text-sm" dangerouslySetInnerHTML={{ __html: field.content_html || "<p><em>Bloc de texte vide</em></p>" }} />
+      </div>
+    );
+  }
+  if (field.type === "image") {
+    return (
+      <div className="rounded-lg border border-dashed border-[#071B34]/10 bg-[#F8FAFC] p-3">
+        <div className="ms-overline mb-1 text-[#94A3B8]">Image / bannière</div>
+        {field.image_url ? (
+          <>
+            <img src={field.image_url} alt={field.image_alt || ""} className="w-full rounded-lg max-h-40 object-cover" />
+            {field.image_caption && <div className="text-[10px] text-[#475569] mt-1 italic text-center">{field.image_caption}</div>}
+          </>
+        ) : (
+          <div className="text-xs text-[#94A3B8] italic">Aucune image renseignée</div>
+        )}
+      </div>
+    );
+  }
   const commonInput =
     "w-full rounded-lg border border-[#071B34]/10 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#3BA4FF]/30 focus:border-[#3BA4FF]";
   return (
@@ -383,14 +414,15 @@ function FormEditor({ form, onClose, onSaved }) {
               />
             </div>
             <div>
-              <label className="ms-overline">Description (optionnel)</label>
-              <textarea
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                rows={3}
-                placeholder="Contexte, instructions, deadline…"
-                className="ms-input mt-2 resize-none"
-              />
+              <label className="ms-overline">Description (optionnel — texte enrichi)</label>
+              <div className="mt-2">
+                <RichTextEditor
+                  value={description}
+                  onChange={setDescription}
+                  placeholder="Contexte, instructions, deadline… (gras, listes, liens, alignement autorisés)"
+                  testId="form-description"
+                />
+              </div>
             </div>
             <div>
               <label className="ms-overline">Texte du bouton d'envoi</label>
@@ -524,6 +556,9 @@ function FormEditor({ form, onClose, onSaved }) {
 // ────────────────────────────────────── One field row in the editor
 function FieldRow({ field, index, total, onChange, onRemove, onMove }) {
   const isSection = field.type === "section";
+  const isRich = field.type === "rich";
+  const isImage = field.type === "image";
+  const isDecorative = isSection || isRich || isImage;
   const hasOptions = ["select", "radio", "checkbox"].includes(field.type);
   return (
     <div className="rounded-xl border border-[#071B34]/5 p-3 bg-white" data-testid={`field-row-${index}`}>
@@ -565,7 +600,7 @@ function FieldRow({ field, index, total, onChange, onRemove, onMove }) {
         </div>
       </div>
 
-      {!isSection && (
+      {!isDecorative && (
         <div className="grid grid-cols-2 gap-2">
           <input
             value={field.placeholder || ""}
@@ -582,12 +617,53 @@ function FieldRow({ field, index, total, onChange, onRemove, onMove }) {
         </div>
       )}
 
-      <input
-        value={field.help_text || ""}
-        onChange={(e) => onChange({ help_text: e.target.value })}
-        placeholder={isSection ? "Paragraphe (facultatif)" : "Texte d'aide (facultatif)"}
-        className="ms-input !py-1.5 !text-xs mt-2"
-      />
+      {isRich && (
+        <div className="mt-2">
+          <RichTextEditor
+            value={field.content_html || ""}
+            onChange={(v) => onChange({ content_html: v })}
+            placeholder="Rédigez ici votre bloc (gras, listes, liens, alignement…)"
+          />
+        </div>
+      )}
+
+      {isImage && (
+        <div className="mt-2 grid grid-cols-1 gap-2">
+          <input
+            value={field.image_url || ""}
+            onChange={(e) => onChange({ image_url: e.target.value })}
+            placeholder="URL de l'image (https://…)"
+            data-testid={`field-image-url-${index}`}
+            className="ms-input !py-1.5 !text-xs"
+          />
+          <div className="grid grid-cols-2 gap-2">
+            <input
+              value={field.image_alt || ""}
+              onChange={(e) => onChange({ image_alt: e.target.value })}
+              placeholder="Texte alternatif"
+              className="ms-input !py-1.5 !text-xs"
+            />
+            <input
+              value={field.image_caption || ""}
+              onChange={(e) => onChange({ image_caption: e.target.value })}
+              placeholder="Légende (facultatif)"
+              className="ms-input !py-1.5 !text-xs"
+            />
+          </div>
+          {field.image_url && (
+            <img src={field.image_url} alt={field.image_alt || ""} className="rounded-lg w-full max-h-32 object-cover" />
+          )}
+        </div>
+      )}
+
+      {!isRich && !isImage && (
+        <input
+          value={field.help_text || ""}
+          onChange={(e) => onChange({ help_text: e.target.value })}
+          placeholder={isSection ? "Paragraphe (facultatif)" : "Texte d'aide (facultatif)"}
+          className="ms-input !py-1.5 !text-xs mt-2"
+        />
+      )}
 
       {hasOptions && (
         <div className="mt-2">
@@ -646,13 +722,14 @@ function ResponsesModal({ form, onClose }) {
     api.get(`/admin/forms/${form.id}/stats`).then((r) => setStats(r.data)).catch(() => setStats(null));
   }, [form.id]);
 
+  const nonDecorativeFields = form.fields.filter((f) => !["section", "rich", "image"].includes(f.type));
   const exportCsv = () => {
     if (responses.length === 0) return;
-    const cols = ["Employé", "Date", ...form.fields.filter((f) => f.type !== "section").map((f) => f.label)];
+    const cols = ["Employé", "Date", ...nonDecorativeFields.map((f) => f.label)];
     const rows = responses.map((r) => [
       r.employee_name || "",
       r.submitted_at || "",
-      ...form.fields.filter((f) => f.type !== "section").map((f) => {
+      ...nonDecorativeFields.map((f) => {
         const v = r.answers?.[f.name];
         return Array.isArray(v) ? v.join(" · ") : (v ?? "");
       }),
@@ -738,7 +815,7 @@ function ResponsesModal({ form, onClose }) {
                   <span className="text-[10px] text-[#475569]">{formatDateFr(r.submitted_at.slice(0, 10))} · {r.submitted_at.slice(11, 16)}</span>
                 </div>
                 <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  {form.fields.filter((f) => f.type !== "section").map((f) => {
+                  {nonDecorativeFields.map((f) => {
                     const v = r.answers?.[f.name];
                     const display = Array.isArray(v) ? v.join(" · ") : (v ?? "—");
                     return (

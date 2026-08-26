@@ -271,13 +271,19 @@ class BadgingRecord(BaseModel):
 
 class FormField(BaseModel):
     id: str
-    type: str  # text | email | tel | textarea | select | checkbox | radio | date | file | number | url | section
+    type: str  # text | email | tel | textarea | select | checkbox | radio | date | file | number | url | section | rich | image
     label: str
     name: Optional[str] = None  # canonical key stored in the response (auto-generated if empty)
     required: bool = False
     placeholder: Optional[str] = None
     help_text: Optional[str] = None
     options: Optional[List[str]] = None  # for select/radio/checkbox
+    # Rich-text block (type=rich): HTML content preserved as-is on the employee side.
+    content_html: Optional[str] = None
+    # Image block (type=image): displayed banner-style with an optional caption.
+    image_url: Optional[str] = None
+    image_alt: Optional[str] = None
+    image_caption: Optional[str] = None
     # For "section" type: label = heading, help_text = paragraph
 
 
@@ -5023,7 +5029,7 @@ async def admin_form_stats(fid: str):
 
     questions_stats = []
     for f in form.get("fields", []) or []:
-        if f.get("type") == "section":
+        if f.get("type") in ("section", "rich", "image"):
             continue
         name = f.get("name")
         typ = f.get("type")
