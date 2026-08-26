@@ -724,7 +724,7 @@ function WeekEditor({ employee, weekStart, existingEntries, onClose, onSaved }) 
   };
 
   const totalMinutes = rows.reduce((sum, r) => {
-    if (r.type !== "shift" || !r.start || !r.end) return sum;
+    if ((r.type !== "shift" && r.type !== "remote") || !r.start || !r.end) return sum;
     const [sh, sm] = r.start.split(":").map(Number);
     const [eh, em] = r.end.split(":").map(Number);
     let minutes = (eh * 60 + em) - (sh * 60 + sm);
@@ -738,7 +738,31 @@ function WeekEditor({ employee, weekStart, existingEntries, onClose, onSaved }) 
   const contractH = employee.contract_hours_weekly || 35;
   const diff = totalMinutes / 60 - contractH;
 
+  // Row-level validation: block save if any shift/remote row is incoherent.
+  const validateRow = (r) => {
+    if (r._locked_leave) return null;
+    if (r.type !== "shift" && r.type !== "remote") return null;
+    if (!r.start || !r.end) return null;
+    const toMin = (x) => { const [h, m] = (x || "").split(":").map(Number); return h * 60 + m; };
+    const s = toMin(r.start), e = toMin(r.end);
+    if (e <= s) return "Fin du shift doit être après le début";
+    if ((r.pause_start && !r.pause_end) || (!r.pause_start && r.pause_end)) return "Renseignez à la fois le début et la fin de la pause";
+    if (r.pause_start && r.pause_end) {
+      const ps = toMin(r.pause_start), pe = toMin(r.pause_end);
+      if (pe <= ps) return "Fin de pause doit être après le début de pause";
+      if (ps < s || pe > e) return "La pause doit se situer entièrement à l'intérieur du shift";
+    }
+    return null;
+  };
+  const rowErrors = rows.map(validateRow);
+  const hasRowError = rowErrors.some(Boolean);
+
   const save = async () => {
+    if (hasRowError) {
+      const idx = rowErrors.findIndex(Boolean);
+      toast.error(`Horaires incohérents (${DAY_LABELS[idx]})`, { description: rowErrors[idx] });
+      return;
+    }
     setSaving(true);
     try {
       const payload = {
@@ -767,7 +791,7 @@ function WeekEditor({ employee, weekStart, existingEntries, onClose, onSaved }) 
       <div
         onClick={(e) => e.stopPropagation()}
         data-testid="week-editor"
-        className="ms-card max-w-5xl w-full max-h-[92vh] overflow-y-auto"
+        className="ms-card max-w-6xl w-full max-h-[92vh] overflow-y-auto"
       >
         <div className="sticky top-0 z-10 bg-white/95 backdrop-blur border-b border-[#071B34]/5 p-5 flex items-start justify-between">
           <div>
@@ -841,12 +865,13 @@ function WeekEditor({ employee, weekStart, existingEntries, onClose, onSaved }) 
             <button onClick={onClose} className="ms-btn-outline flex-1">Annuler</button>
             <button
               onClick={save}
-              disabled={saving}
+              disabled={saving || hasRowError}
               data-testid="week-save"
               className="ms-btn-primary flex-1 disabled:opacity-50"
+              title={hasRowError ? "Corrigez les horaires incohérents avant d'enregistrer" : undefined}
             >
               <Save className="h-4 w-4" />
-              {saving ? "Enregistrement…" : duplicate > 0 ? `Enregistrer ${duplicate + 1} semaines` : "Enregistrer la semaine"}
+              {saving ? "Enregistrement…" : hasRowError ? "Corrigez les horaires" : duplicate > 0 ? `Enregistrer ${duplicate + 1} semaines` : "Enregistrer la semaine"}
             </button>
           </div>
         </div>
@@ -866,9 +891,30 @@ function WeekRow({ dayLabel, dayDate, row, onChange }) {
   const isLocked = row._locked_leave;
   const isShift = row.type === "shift" || row.type === "remote";
   const meta = WEEK_TYPES.find((t) => t.v === row.type) || WEEK_TYPES[0];
+  // Validation — ensures shift/pause horaires are coherent.
+  // Returns null if the row is valid, otherwise a human-readable error message.
+  const validation = (() => {
+    if (!isShift || isLocked) return null;
+    if (!row.start || !row.end) return null; // empty row is allowed (draft)
+    const toMin = (s) => { const [h, m] = (s || "").split(":").map(Number); return h * 60 + m; };
+    const s = toMin(row.start), e = toMin(row.end);
+    if (e <= s) return "Fin du shift doit être après le début";
+    const hasPause = row.pause_start && row.pause_end;
+    if (hasPause) {
+      const ps = toMin(row.pause_start), pe = toMin(row.pause_end);
+      if (pe <= ps) return "Fin de pause doit être après le début de pause";
+      if (ps < s || pe > e) return "La pause doit se situer entièrement à l'intérieur du shift";
+    }
+    if ((row.pause_start && !row.pause_end) || (!row.pause_start && row.pause_end)) {
+      return "Renseignez à la fois le début et la fin de la pause";
+    }
+    return null;
+  })();
   return (
     <div
-      className="grid grid-cols-12 items-center gap-2 rounded-xl border border-[#071B34]/5 p-3 hover:bg-[#F4F7FA]/40"
+      className={`grid grid-cols-12 items-start gap-2 rounded-xl border p-3 hover:bg-[#F4F7FA]/40 ${
+        validation ? "border-[#B91C1C]/40 bg-[#FEF2F2]/40" : "border-[#071B34]/5"
+      }`}
       data-testid={`week-row-${row.day_offset}`}
     >
       <div className="col-span-2">
@@ -905,46 +951,64 @@ function WeekRow({ dayLabel, dayDate, row, onChange }) {
       </div>
       {isShift && !isLocked ? (
         <>
-          <input
-            type="time"
-            value={row.start}
-            onChange={(e) => onChange({ start: e.target.value })}
-            placeholder="Début"
-            data-testid={`week-start-${row.day_offset}`}
-            className="col-span-1 ms-input !py-1.5 !text-xs"
-          />
-          <input
-            type="time"
-            value={row.end}
-            onChange={(e) => onChange({ end: e.target.value })}
-            placeholder="Fin"
-            data-testid={`week-end-${row.day_offset}`}
-            className="col-span-1 ms-input !py-1.5 !text-xs"
-          />
-          <input
-            type="time"
-            value={row.pause_start}
-            onChange={(e) => onChange({ pause_start: e.target.value })}
-            placeholder="Pause"
-            className="col-span-1 ms-input !py-1.5 !text-xs"
-          />
-          <input
-            type="time"
-            value={row.pause_end}
-            onChange={(e) => onChange({ pause_end: e.target.value })}
-            placeholder="Reprise"
-            className="col-span-1 ms-input !py-1.5 !text-xs"
-          />
-          <input
-            value={row.location}
-            onChange={(e) => onChange({ location: e.target.value })}
-            placeholder="Lieu"
-            className="col-span-3 ms-input !py-1.5 !text-xs"
-          />
+          <div className="col-span-1">
+            <label className="block text-[9px] uppercase tracking-wider text-[#475569] font-semibold mb-1">Début shift</label>
+            <input
+              type="time"
+              value={row.start}
+              onChange={(e) => onChange({ start: e.target.value })}
+              data-testid={`week-start-${row.day_offset}`}
+              className="ms-input !py-1.5 !text-xs w-full"
+            />
+          </div>
+          <div className="col-span-1">
+            <label className="block text-[9px] uppercase tracking-wider text-[#475569] font-semibold mb-1">Début pause</label>
+            <input
+              type="time"
+              value={row.pause_start}
+              onChange={(e) => onChange({ pause_start: e.target.value })}
+              data-testid={`week-pause-start-${row.day_offset}`}
+              className="ms-input !py-1.5 !text-xs w-full"
+            />
+          </div>
+          <div className="col-span-1">
+            <label className="block text-[9px] uppercase tracking-wider text-[#475569] font-semibold mb-1">Fin pause</label>
+            <input
+              type="time"
+              value={row.pause_end}
+              onChange={(e) => onChange({ pause_end: e.target.value })}
+              data-testid={`week-pause-end-${row.day_offset}`}
+              className="ms-input !py-1.5 !text-xs w-full"
+            />
+          </div>
+          <div className="col-span-1">
+            <label className="block text-[9px] uppercase tracking-wider text-[#475569] font-semibold mb-1">Fin shift</label>
+            <input
+              type="time"
+              value={row.end}
+              onChange={(e) => onChange({ end: e.target.value })}
+              data-testid={`week-end-${row.day_offset}`}
+              className="ms-input !py-1.5 !text-xs w-full"
+            />
+          </div>
+          <div className="col-span-3">
+            <label className="block text-[9px] uppercase tracking-wider text-[#475569] font-semibold mb-1">Lieu</label>
+            <input
+              value={row.location}
+              onChange={(e) => onChange({ location: e.target.value })}
+              placeholder="Lieu / service"
+              className="ms-input !py-1.5 !text-xs w-full"
+            />
+          </div>
+          {validation && (
+            <div className="col-span-12 mt-1 text-[11px] font-semibold text-[#B91C1C]" data-testid={`week-error-${row.day_offset}`}>
+              ⚠ {validation}
+            </div>
+          )}
         </>
       ) : (
         <div
-          className="col-span-8 text-[11px] text-[#475569] italic"
+          className="col-span-7 text-[11px] text-[#475569] italic self-center"
           style={{ color: meta.color }}
         >
           {isLocked ? "Congé approuvé — ne sera pas écrasé lors de l'enregistrement." : `Journée ${meta.label.toLowerCase()} — aucun horaire`}
@@ -1009,51 +1073,103 @@ function EntryEditor({ entry, employeeName, onClose, onSave }) {
         </div>
 
         {(form.type === "shift" || form.type === "remote" || form.type === "training") && (
-          <div className="grid grid-cols-2 gap-2">
-            <div>
-              <label className="ms-overline">Début</label>
-              <input
-                type="time"
-                value={form.start || ""}
-                onChange={(e) => set("start", e.target.value)}
-                data-testid="entry-start"
-                className="ms-input mt-2"
-              />
-            </div>
-            <div>
-              <label className="ms-overline">Fin</label>
-              <input
-                type="time"
-                value={form.end || ""}
-                onChange={(e) => set("end", e.target.value)}
-                data-testid="entry-end"
-                className="ms-input mt-2"
-              />
-            </div>
-          </div>
-        )}
-
-        {(form.type === "shift" || form.type === "remote") && (
-          <div className="grid grid-cols-2 gap-2 mt-3">
-            <div>
-              <label className="ms-overline">Début pause</label>
-              <input
-                type="time"
-                value={form.pause_start || ""}
-                onChange={(e) => set("pause_start", e.target.value)}
-                className="ms-input mt-2"
-              />
-            </div>
-            <div>
-              <label className="ms-overline">Fin pause</label>
-              <input
-                type="time"
-                value={form.pause_end || ""}
-                onChange={(e) => set("pause_end", e.target.value)}
-                className="ms-input mt-2"
-              />
-            </div>
-          </div>
+          <>
+            {(form.type === "shift" || form.type === "remote") ? (
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="ms-overline">Début shift</label>
+                  <input
+                    type="time"
+                    value={form.start || ""}
+                    onChange={(e) => set("start", e.target.value)}
+                    data-testid="entry-start"
+                    className="ms-input mt-2"
+                  />
+                </div>
+                <div>
+                  <label className="ms-overline">Début pause</label>
+                  <input
+                    type="time"
+                    value={form.pause_start || ""}
+                    onChange={(e) => set("pause_start", e.target.value)}
+                    data-testid="entry-pause-start"
+                    className="ms-input mt-2"
+                  />
+                </div>
+                <div>
+                  <label className="ms-overline">Fin pause</label>
+                  <input
+                    type="time"
+                    value={form.pause_end || ""}
+                    onChange={(e) => set("pause_end", e.target.value)}
+                    data-testid="entry-pause-end"
+                    className="ms-input mt-2"
+                  />
+                </div>
+                <div>
+                  <label className="ms-overline">Fin shift</label>
+                  <input
+                    type="time"
+                    value={form.end || ""}
+                    onChange={(e) => set("end", e.target.value)}
+                    data-testid="entry-end"
+                    className="ms-input mt-2"
+                  />
+                </div>
+                {(() => {
+                  if (!form.start || !form.end) return null;
+                  const toMin = (x) => { const [h, m] = (x || "").split(":").map(Number); return h * 60 + m; };
+                  const s = toMin(form.start), e = toMin(form.end);
+                  let err = null;
+                  if (e <= s) err = "Fin du shift doit être après le début";
+                  else if ((form.pause_start && !form.pause_end) || (!form.pause_start && form.pause_end)) err = "Renseignez à la fois le début et la fin de la pause";
+                  else if (form.pause_start && form.pause_end) {
+                    const ps = toMin(form.pause_start), pe = toMin(form.pause_end);
+                    if (pe <= ps) err = "Fin de pause doit être après le début de pause";
+                    else if (ps < s || pe > e) err = "La pause doit se situer entièrement à l'intérieur du shift";
+                  }
+                  if (!err) {
+                    const paused = form.pause_start && form.pause_end ? Math.max(0, toMin(form.pause_end) - toMin(form.pause_start)) : 0;
+                    const worked = Math.max(0, e - s - paused);
+                    return (
+                      <div className="col-span-2 mt-1 text-[11px] text-[#065F46]" data-testid="entry-worked-preview">
+                        ⏱ Temps travaillé : <strong>{Math.floor(worked / 60)}h{String(worked % 60).padStart(2, "0")}</strong>
+                        {paused > 0 && <span className="text-[#475569]"> · pause {paused} min</span>}
+                      </div>
+                    );
+                  }
+                  return (
+                    <div className="col-span-2 mt-1 text-[11px] font-semibold text-[#B91C1C]" data-testid="entry-error">
+                      ⚠ {err}
+                    </div>
+                  );
+                })()}
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="ms-overline">Début</label>
+                  <input
+                    type="time"
+                    value={form.start || ""}
+                    onChange={(e) => set("start", e.target.value)}
+                    data-testid="entry-start"
+                    className="ms-input mt-2"
+                  />
+                </div>
+                <div>
+                  <label className="ms-overline">Fin</label>
+                  <input
+                    type="time"
+                    value={form.end || ""}
+                    onChange={(e) => set("end", e.target.value)}
+                    data-testid="entry-end"
+                    className="ms-input mt-2"
+                  />
+                </div>
+              </div>
+            )}
+          </>
         )}
 
         {(form.type === "shift" || form.type === "remote") && (
@@ -1085,7 +1201,25 @@ function EntryEditor({ entry, employeeName, onClose, onSave }) {
             Annuler
           </button>
           <button
-            onClick={() => onSave(form)}
+            onClick={() => {
+              // Validate before submit for shift/remote entries
+              if (form.type === "shift" || form.type === "remote") {
+                if (form.start && form.end) {
+                  const toMin = (x) => { const [h, m] = (x || "").split(":").map(Number); return h * 60 + m; };
+                  const s = toMin(form.start), e = toMin(form.end);
+                  if (e <= s) { toast.error("Fin du shift doit être après le début"); return; }
+                  if ((form.pause_start && !form.pause_end) || (!form.pause_start && form.pause_end)) {
+                    toast.error("Renseignez à la fois le début et la fin de la pause"); return;
+                  }
+                  if (form.pause_start && form.pause_end) {
+                    const ps = toMin(form.pause_start), pe = toMin(form.pause_end);
+                    if (pe <= ps) { toast.error("Fin de pause doit être après le début de pause"); return; }
+                    if (ps < s || pe > e) { toast.error("La pause doit se situer entièrement à l'intérieur du shift"); return; }
+                  }
+                }
+              }
+              onSave(form);
+            }}
             data-testid="save-entry"
             className="ms-btn-primary flex-1"
           >

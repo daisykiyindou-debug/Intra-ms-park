@@ -6166,6 +6166,25 @@ async def admin_upsert_schedule(payload: AdminScheduleEntry):
     if payload.type == "shift":
         if not payload.start or not payload.end:
             raise HTTPException(400, "Horaires début/fin requis pour un shift")
+    # Coherence checks for shift/remote entries — same rules as the week editor
+    if payload.type in ("shift", "remote") and payload.start and payload.end:
+        def _tmin(v):
+            try:
+                h, m = v.split(":")
+                return int(h) * 60 + int(m)
+            except Exception:
+                return None
+        s = _tmin(payload.start); en = _tmin(payload.end)
+        if s is None or en is None or en <= s:
+            raise HTTPException(400, "Fin du shift doit être après le début")
+        if (payload.pause_start and not payload.pause_end) or (payload.pause_end and not payload.pause_start):
+            raise HTTPException(400, "Renseignez à la fois le début et la fin de la pause")
+        if payload.pause_start and payload.pause_end:
+            ps = _tmin(payload.pause_start); pe = _tmin(payload.pause_end)
+            if ps is None or pe is None or pe <= ps:
+                raise HTTPException(400, "Fin de pause doit être après le début de pause")
+            if ps < s or pe > en:
+                raise HTTPException(400, "La pause doit se situer entièrement à l'intérieur du shift")
     existing = await db.schedules.find_one(
         {"employee_id": payload.employee_id, "day": payload.day}, {"_id": 0}
     )
@@ -6252,22 +6271,50 @@ async def admin_save_week(payload: BulkWeekPayload):
 
     total_saved = 0
     weeks_processed = 0
+
+    # Validation — reject the whole payload if any shift/remote row has incoherent horaires
+    def _tmin(v: Optional[str]) -> Optional[int]:
+        if not v or ":" not in v:
+            return None
+        try:
+            h, m = v.split(":")
+            return int(h) * 60 + int(m)
+        except Exception:
+            return None
+    for e in payload.entries:
+        if e.type not in ("shift", "remote"):
+            continue
+        if not e.start or not e.end:
+            continue
+        s = _tmin(e.start); en = _tmin(e.end)
+        if s is None or en is None or en <= s:
+            raise HTTPException(400, f"Jour {e.day_offset}: fin du shift doit être après le début")
+        if (e.pause_start and not e.pause_end) or (e.pause_end and not e.pause_start):
+            raise HTTPException(400, f"Jour {e.day_offset}: renseignez à la fois le début et la fin de la pause")
+        if e.pause_start and e.pause_end:
+            ps = _tmin(e.pause_start); pe = _tmin(e.pause_end)
+            if ps is None or pe is None or pe <= ps:
+                raise HTTPException(400, f"Jour {e.day_offset}: fin de pause doit être après le début de pause")
+            if ps < s or pe > en:
+                raise HTTPException(400, f"Jour {e.day_offset}: la pause doit se situer entièrement à l'intérieur du shift")
+
     for w in range(0, max(1, payload.duplicate_weeks + 1)):
         week_offset = timedelta(days=7 * w)
         for e in payload.entries:
             day_iso = (base + week_offset + timedelta(days=e.day_offset)).isoformat()
-            if e.type == "shift" and (not e.start or not e.end):
-                # Skip incomplete shift rows (admin left them blank)
+            is_shift_like = e.type in ("shift", "remote")
+            if is_shift_like and (not e.start or not e.end):
+                # Skip incomplete shift/remote rows (admin left them blank)
                 continue
             record = {
                 "employee_id": payload.employee_id,
                 "day": day_iso,
                 "type": e.type,
-                "start": e.start if e.type == "shift" else None,
-                "end": e.end if e.type == "shift" else None,
-                "pause_start": e.pause_start if e.type == "shift" else None,
-                "pause_end": e.pause_end if e.type == "shift" else None,
-                "break_minutes": e.break_minutes if e.type == "shift" else 0,
+                "start": e.start if is_shift_like else None,
+                "end": e.end if is_shift_like else None,
+                "pause_start": e.pause_start if is_shift_like else None,
+                "pause_end": e.pause_end if is_shift_like else None,
+                "break_minutes": e.break_minutes if is_shift_like else 0,
                 "location": e.location,
                 "service": e.service,
                 "note": e.note,
@@ -6326,8 +6373,8 @@ async def admin_contract_status(employee_id: str, week_start: Optional[str] = No
     ).to_list(20)
     planned_minutes = sum(_covered_minutes(s) for s in schs)
     contract_hours = emp.get("contract_hours_weekly", 35)
-    contract_minutes = contract_hours * 60
-    delta_minutes = planned_minutes - contract_minutes
+    contract_minutes = int(round(contract_hours * 60))
+    delta_minutes = int(planned_minutes - contract_minutes)
     if delta_minutes == 0:
         status = "match"
         message = "Contrat respecté"
