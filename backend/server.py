@@ -4519,23 +4519,29 @@ async def post_message(cid: str, payload: MessageCreate):
     if not (payload.content or "").strip() and not (payload.attachments or []):
         raise HTTPException(400, "Message vide")
     ch, _uid = await _require_channel_member(cid)
-    msg = {
-        "id": _id(),
-        "channel_id": cid,
-        "author_id": current_user(),
-        "content": payload.content or "",
-        "attachments": payload.attachments or [],
-        "ts": _now(),
-    }
-    await db.messages.insert_one(msg.copy())
-    # Notify only channel members (DM: the other person; group: every member;
-    # team channel: broadcast fallback) — spare the whole company when a DM lands.
     author = await db.employees.find_one({"id": current_user()}, {"_id": 0})
     author_name = (
         f"{author.get('first_name', '')} {author.get('last_name', '')}".strip()
         if author else "Un collègue"
     )
-    preview = (payload.content or "").strip()
+    # Auto-signature: when writing from a Service inbox, append "— Prénom Nom"
+    # unless the sender already included their signature manually.
+    body = payload.content or ""
+    is_service_msg = bool(ch and ch.get("is_service_inbox"))
+    if is_service_msg and body.strip() and f"— {author_name}" not in body:
+        body = f"{body.rstrip()}\n\n— {author_name}"
+    msg = {
+        "id": _id(),
+        "channel_id": cid,
+        "author_id": current_user(),
+        "content": body,
+        "attachments": payload.attachments or [],
+        "is_service_message": is_service_msg,
+        "service_name": ch.get("name") if is_service_msg else None,
+        "ts": _now(),
+    }
+    await db.messages.insert_one(msg.copy())
+    preview = (body or "").strip()
     if len(preview) > 90:
         preview = preview[:87] + "…"
     ch_label = (ch or {}).get("name") or cid
@@ -4555,15 +4561,21 @@ async def post_message(cid: str, payload: MessageCreate):
                 link=f"/messagerie?ch={cid}",
             )
     else:
-        # Team channel — notify only its members (no company-wide broadcast).
+        # Team / service canal — notify only its members. Service messages
+        # use a distinctive prefix so the recipient sees straight away it
+        # comes from a shared inbox, not a DM.
         member_ids = [mid for mid in (ch.get("members_ids") or []) if mid != current_user()]
+        title = (
+            f"Nouveau message — {ch_label}"
+            if is_service_msg else f"Nouveau message · #{ch_label}"
+        )
         for mid in member_ids:
             await _push_notification(
                 employee_id=mid,
                 type="message",
-                title=f"Nouveau message · #{ch_label}",
+                title=title,
                 content=f"{author_name} : {preview or 'Nouveau message'}",
-                icon="message-circle",
+                icon="briefcase" if is_service_msg else "message-circle",
                 link=f"/messagerie?ch={cid}",
             )
 
@@ -5359,12 +5371,16 @@ async def _ensure_team_channels_seeded() -> None:
 
 async def _ensure_service_inboxes_seeded() -> None:
     """Idempotent: ensure ONE shared inbox `channel` document per service
-    canal so all its members see it in their messagerie sidebar."""
+    canal so all its members see it in their messagerie sidebar. Membership
+    comes STRICTLY from the explicit `service_channels_access` field —
+    no heuristic fallback (only assigned users see the canal)."""
     for key, meta in CORPORATE_CANALS.items():
         cid = f"service-{key}"
-        # Compute members = every user who has this service key in their
-        # explicit access list. Fall back to legacy heuristics if empty.
-        members = await _corporate_members(key)
+        members = [
+            e["id"] async for e in db.employees.find(
+                {"service_channels_access": key}, {"_id": 0, "id": 1}
+            )
+        ]
         existing = await db.channels.find_one({"id": cid})
         if existing:
             await db.channels.update_one(

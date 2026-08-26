@@ -100,6 +100,7 @@ export default function Messagerie() {
   );
   const [showFilters, setShowFilters] = useState(false);
   const [showActions, setShowActions] = useState(false);
+  const [showMembers, setShowMembers] = useState(false);
   const [showInfo, setShowInfo] = useState(false);
   const [showEmoji, setShowEmoji] = useState(false);
   const [addMember, setAddMember] = useState(false);
@@ -842,8 +843,23 @@ export default function Messagerie() {
             </div>
           ) : (
             <>
+              {/* Service-inbox banner — purple identity indicator */}
+              {currentChannel?.is_service_inbox && (
+                <div
+                  className="px-5 py-2 bg-gradient-to-r from-[#7C3AED] to-[#A78BFA] text-white text-xs font-semibold flex items-center gap-2"
+                  data-testid="service-inbox-banner"
+                >
+                  <Briefcase className="h-4 w-4 shrink-0" />
+                  <span>
+                    Mode <strong>{currentChannel.name}</strong> — vous écrivez au nom du service.
+                    Vos messages seront signés <strong>— {me?.first_name} {me?.last_name}</strong>.
+                  </span>
+                </div>
+              )}
               {/* Chat header */}
-              <div className="flex items-center gap-3 px-5 py-3 border-b border-[#071B34]/5 relative">
+              <div className={`flex items-center gap-3 px-5 py-3 border-b border-[#071B34]/5 relative ${
+                currentChannel?.is_service_inbox ? "bg-[#A78BFA]/5" : ""
+              }`}>
                 <button
                   onClick={() => setMobileShowChat(false)}
                   className="lg:hidden h-9 w-9 rounded-lg hover:bg-[#F4F7FA] inline-flex items-center justify-center"
@@ -877,7 +893,7 @@ export default function Messagerie() {
                     <Users className="h-5 w-5" />
                   </div>
                 )}
-                <div className="flex-1 min-w-0">
+                <div className="flex-1 min-w-0 cursor-pointer" onClick={() => setShowMembers(true)} data-testid="msg-header-open-members">
                   <div className="flex items-center gap-2">
                     <h2 className="text-base font-bold text-[#071B34] truncate inline-flex items-center gap-1.5">
                       {currentDisplay._display_name}
@@ -1281,7 +1297,12 @@ export default function Messagerie() {
                       value={draft}
                       onChange={(e) => setDraft(e.target.value)}
                       onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
-                      placeholder={uploading ? "Envoi du fichier…" : "Écrire un message…"}
+                      placeholder={
+                        uploading ? "Envoi du fichier…"
+                        : currentChannel?.is_service_inbox
+                        ? `Écrire au nom de ${currentChannel.name}… (signature auto)`
+                        : "Écrire un message…"
+                      }
                       data-testid="msg-input"
                       className="w-full h-11 pl-4 pr-11 rounded-xl bg-[#F4F7FA] focus:bg-white focus:ring-2 focus:ring-[#3BA4FF]/30 outline-none text-sm"
                     />
@@ -1333,8 +1354,56 @@ export default function Messagerie() {
       </div>
 
       {/* Compose modal (DM + group tabs) */}
-      {composer && (
-        <div onClick={() => setComposer(null)} className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
+      {/* Members list modal — click on the chat header opens this */}
+      {showMembers && currentChannel && (
+        <div className="fixed inset-0 z-50 bg-[#0f172a]/40 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setShowMembers(false)} data-testid="msg-members-modal">
+          <div
+            className={`bg-white rounded-2xl w-full max-w-md max-h-[80vh] overflow-hidden shadow-2xl ${
+              currentChannel.is_service_inbox ? "ring-2 ring-[#7C3AED]/30" : ""
+            }`}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className={`px-5 py-4 flex items-center justify-between ${
+              currentChannel.is_service_inbox
+                ? "bg-gradient-to-r from-[#7C3AED] to-[#A78BFA] text-white"
+                : "bg-[#F8FAFC] text-[#071B34]"
+            }`}>
+              <div>
+                <div className="text-[10px] uppercase tracking-widest font-bold opacity-80">
+                  {currentChannel.is_service_inbox ? "Canal Service" : (currentChannel.is_team_channel ? "Canal d'équipe" : "Conversation")}
+                </div>
+                <h3 className="text-base font-bold">{currentChannel.name}</h3>
+              </div>
+              <button onClick={() => setShowMembers(false)} className="rounded-full h-8 w-8 inline-flex items-center justify-center hover:bg-black/10">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="p-4">
+              <div className="text-[10px] uppercase tracking-widest font-bold text-[#475569] mb-2">
+                {(currentChannel.members_ids || []).length} membre{(currentChannel.members_ids || []).length > 1 ? "s" : ""}
+              </div>
+              <div className="space-y-1 max-h-96 overflow-y-auto">
+                {(currentChannel.members_ids || []).map((mid) => {
+                  const emp = findEmployee(mid);
+                  if (!emp) return null;
+                  return (
+                    <div key={mid} className="flex items-center gap-2.5 rounded-lg hover:bg-[#F4F7FA] px-2 py-1.5" data-testid={`msg-member-${mid}`}>
+                      <img src={emp.avatar} alt="" className="h-8 w-8 rounded-full object-cover" />
+                      <div className="min-w-0">
+                        <div className="text-sm font-semibold text-[#071B34] truncate">{emp.first_name} {emp.last_name}</div>
+                        <div className="text-[11px] text-[#475569] truncate">{emp.role || "—"}</div>
+                      </div>
+                      {mid === me?.id && <span className="ml-auto text-[10px] font-bold text-[#3BA4FF]">Vous</span>}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {composer && (        <div onClick={() => setComposer(null)} className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
           <div onClick={(e) => e.stopPropagation()} className="bg-white rounded-3xl w-full max-w-md max-h-[80vh] overflow-hidden flex flex-col">
             <div className="flex items-center justify-between px-5 py-3 border-b border-[#071B34]/5">
               <h3 className="text-base font-bold text-[#071B34]">Nouveau message</h3>
