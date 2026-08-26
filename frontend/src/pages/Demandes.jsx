@@ -291,13 +291,13 @@ export default function Demandes() {
           role="dialog"
           aria-modal="true"
           onClick={() => setOpen(false)}
-          className="fixed inset-0 z-[100] bg-black/40 backdrop-blur-md flex items-start md:items-center justify-center p-4 overflow-y-auto"
+          className="fixed inset-0 z-[200] bg-[#071B34]/40 backdrop-blur-md flex items-start md:items-center justify-center p-4 overflow-y-auto"
         >
           <form
             onClick={(e) => e.stopPropagation()}
             onSubmit={submit}
             data-testid="request-form"
-            className="ms-card max-w-6xl w-full p-6 my-8"
+            className="ms-card max-w-5xl w-full p-6 my-4"
           >
             <div className="flex items-start justify-between">
               <div>
