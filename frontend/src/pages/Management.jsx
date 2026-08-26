@@ -882,15 +882,31 @@ function WeekEditor({ employee, weekStart, existingEntries, onClose, onSaved }) 
               <span className="text-[#475569]"> · Contrat </span>
               <strong className="text-[#071B34]">{contractH}h</strong>
               {" "}
-              <span
-                className="ml-2 ms-chip"
-                style={{
-                  background: Math.abs(diff) < 0.1 ? "#D1FAE5" : diff < 0 ? "#FEE2E2" : "#FEF3C7",
-                  color: Math.abs(diff) < 0.1 ? "#065F46" : diff < 0 ? "#B91C1C" : "#B45309",
-                }}
-              >
-                {Math.abs(diff) < 0.1 ? "Conforme" : diff < 0 ? `-${Math.abs(diff).toFixed(1)}h` : `+${diff.toFixed(1)}h`}
-              </span>
+              {(() => {
+                const diffMin = totalMinutes - contractH * 60;
+                const conforme = diffMin === 0;
+                const missing = diffMin < 0;
+                const abs = Math.abs(diffMin);
+                const h = Math.floor(abs / 60);
+                const m = abs % 60;
+                let text;
+                if (conforme) text = "Conforme";
+                else if (h === 0) text = `${missing ? "−" : "+"}${m} min ${missing ? "manquantes" : "en plus"}`;
+                else if (m === 0) text = `${missing ? "−" : "+"}${h} h ${missing ? "manquantes" : "en plus"}`;
+                else text = `${missing ? "−" : "+"}${h} h ${String(m).padStart(2, "0")} ${missing ? "manquantes" : "en plus"}`;
+                return (
+                  <span
+                    className="ml-2 ms-chip"
+                    style={{
+                      background: conforme ? "#D1FAE5" : missing ? "#FEE2E2" : "#FEF3C7",
+                      color: conforme ? "#065F46" : missing ? "#B91C1C" : "#B45309",
+                    }}
+                    data-testid="week-diff-chip"
+                  >
+                    {text}
+                  </span>
+                );
+              })()}
             </div>
             <div className="flex items-center gap-2">
               <label className="text-xs font-semibold text-[#475569]">Dupliquer sur</label>
@@ -1002,15 +1018,25 @@ function WeekRow({ dayLabel, dayDate, row, onChange, canDuplicate, dayLabels, da
   };
   // Validation — ensures shift/pause horaires are coherent.
   // Returns null if the row is valid, otherwise a human-readable error message.
+  // Cross-midnight support: end <= start means the shift ends the next day
+  // (parc fermeture tardive). Only reject if start == end exactly.
   const validation = (() => {
     if (!isShift || isLocked) return null;
     if (!row.start || !row.end) return null; // empty row is allowed (draft)
     const toMin = (s) => { const [h, m] = (s || "").split(":").map(Number); return h * 60 + m; };
-    const s = toMin(row.start), e = toMin(row.end);
-    if (e <= s) return "Fin du shift doit être après le début";
+    const s = toMin(row.start);
+    let e = toMin(row.end);
+    const crossesMidnight = e <= s;
+    if (crossesMidnight) e += 24 * 60;
+    if (e === s) return "Fin du shift doit être différente du début";
     const hasPause = row.pause_start && row.pause_end;
     if (hasPause) {
-      const ps = toMin(row.pause_start), pe = toMin(row.pause_end);
+      let ps = toMin(row.pause_start);
+      let pe = toMin(row.pause_end);
+      if (crossesMidnight) {
+        if (ps < s) ps += 24 * 60;
+        if (pe < s) pe += 24 * 60;
+      }
       if (pe <= ps) return "Fin de pause doit être après le début de pause";
       if (ps < s || pe > e) return "La pause doit se situer entièrement à l'intérieur du shift";
     }
@@ -1311,17 +1337,35 @@ function EntryEditor({ entry, employeeName, onClose, onSave }) {
                 {(() => {
                   if (!form.start || !form.end) return null;
                   const toMin = (x) => { const [h, m] = (x || "").split(":").map(Number); return h * 60 + m; };
-                  const s = toMin(form.start), e = toMin(form.end);
+                  const s = toMin(form.start);
+                  let e = toMin(form.end);
+                  // Cross-midnight support: end <= start ⇒ shift ends next day
+                  const crossesMidnight = e <= s;
+                  if (crossesMidnight) e += 24 * 60;
                   let err = null;
-                  if (e <= s) err = "Fin du shift doit être après le début";
+                  if (e === s) err = "Fin du shift doit être différente du début";
                   else if ((form.pause_start && !form.pause_end) || (!form.pause_start && form.pause_end)) err = "Renseignez à la fois le début et la fin de la pause";
                   else if (form.pause_start && form.pause_end) {
-                    const ps = toMin(form.pause_start), pe = toMin(form.pause_end);
+                    let ps = toMin(form.pause_start);
+                    let pe = toMin(form.pause_end);
+                    if (crossesMidnight) {
+                      if (ps < s) ps += 24 * 60;
+                      if (pe < s) pe += 24 * 60;
+                    }
                     if (pe <= ps) err = "Fin de pause doit être après le début de pause";
                     else if (ps < s || pe > e) err = "La pause doit se situer entièrement à l'intérieur du shift";
                   }
                   if (!err) {
-                    const paused = form.pause_start && form.pause_end ? Math.max(0, toMin(form.pause_end) - toMin(form.pause_start)) : 0;
+                    let paused = 0;
+                    if (form.pause_start && form.pause_end) {
+                      let ps = toMin(form.pause_start);
+                      let pe = toMin(form.pause_end);
+                      if (crossesMidnight) {
+                        if (ps < s) ps += 24 * 60;
+                        if (pe < s) pe += 24 * 60;
+                      }
+                      paused = Math.max(0, pe - ps);
+                    }
                     const worked = Math.max(0, e - s - paused);
                     return (
                       <div className="col-span-2 mt-1 text-[11px] text-[#065F46]" data-testid="entry-worked-preview">
@@ -1398,13 +1442,22 @@ function EntryEditor({ entry, employeeName, onClose, onSave }) {
               if (form.type === "shift" || form.type === "remote") {
                 if (form.start && form.end) {
                   const toMin = (x) => { const [h, m] = (x || "").split(":").map(Number); return h * 60 + m; };
-                  const s = toMin(form.start), e = toMin(form.end);
-                  if (e <= s) { toast.error("Fin du shift doit être après le début"); return; }
+                  const s = toMin(form.start);
+                  let e = toMin(form.end);
+                  // Cross-midnight support: end <= start ⇒ shift ends next day
+                  const crossesMidnight = e <= s;
+                  if (crossesMidnight) e += 24 * 60;
+                  if (e === s) { toast.error("Fin du shift doit être différente du début"); return; }
                   if ((form.pause_start && !form.pause_end) || (!form.pause_start && form.pause_end)) {
                     toast.error("Renseignez à la fois le début et la fin de la pause"); return;
                   }
                   if (form.pause_start && form.pause_end) {
-                    const ps = toMin(form.pause_start), pe = toMin(form.pause_end);
+                    let ps = toMin(form.pause_start);
+                    let pe = toMin(form.pause_end);
+                    if (crossesMidnight) {
+                      if (ps < s) ps += 24 * 60;
+                      if (pe < s) pe += 24 * 60;
+                    }
                     if (pe <= ps) { toast.error("Fin de pause doit être après le début de pause"); return; }
                     if (ps < s || pe > e) { toast.error("La pause doit se situer entièrement à l'intérieur du shift"); return; }
                   }
