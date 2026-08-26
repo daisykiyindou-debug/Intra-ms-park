@@ -510,6 +510,8 @@ function UserEditor({ user, employees, onClose, onSaved }) {
     admin_role: "employe",
     permissions: [],
     groups: [],
+    service_channels_access: [],
+    team_channel_ids: [],
     role_category: "employe",
     ...user,
   });
@@ -613,6 +615,7 @@ function UserEditor({ user, employees, onClose, onSaved }) {
             ["planning", "3. Planning"],
             ["payroll", "4. Paie"],
             ["access", "5. Accès"],
+            ["channels", "6. Messagerie"],
           ].map(([k, l]) => (
             <button
               key={k}
@@ -863,11 +866,12 @@ function UserEditor({ user, employees, onClose, onSaved }) {
               </div>
             </div>
           )}
+          {tab === "channels" && <ChannelsTab f={f} setF={setF} />}
         </div>
 
         {/* Footer — wizard navigation */}
         {(() => {
-          const STEPS = ["account", "hr", "planning", "payroll", "access"];
+          const STEPS = ["account", "hr", "planning", "payroll", "access", "channels"];
           const currentIdx = STEPS.indexOf(tab);
           const isLast = currentIdx === STEPS.length - 1;
           const isFirst = currentIdx === 0;
@@ -1182,6 +1186,99 @@ function SelectField({ label, value, onChange, options, testid, className }) {
       >
         {options.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
       </select>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────
+// Onglet Messagerie & Canaux
+// ─────────────────────────────────────────
+function ChannelsTab({ f, setF }) {
+  const [catalog, setCatalog] = useState({ service_channels: [], team_channels: [] });
+  useEffect(() => {
+    api.get("/admin/channels/catalog").then((r) => setCatalog(r.data)).catch(() => {});
+  }, []);
+  const svc = f.service_channels_access || [];
+  const teams = f.team_channel_ids || [];
+  const toggleSvc = (k) => setF((s) => ({
+    ...s,
+    service_channels_access: (s.service_channels_access || []).includes(k)
+      ? (s.service_channels_access || []).filter((x) => x !== k)
+      : [...(s.service_channels_access || []), k],
+  }));
+  const toggleTeam = (k) => setF((s) => ({
+    ...s,
+    team_channel_ids: (s.team_channel_ids || []).includes(k)
+      ? (s.team_channel_ids || []).filter((x) => x !== k)
+      : [...(s.team_channel_ids || []), k],
+  }));
+  return (
+    <div className="space-y-5">
+      {/* Section 1 — Service canals */}
+      <div className="rounded-2xl border border-[#7C3AED]/20 bg-[#A78BFA]/5 p-4">
+        <div className="flex items-center gap-2 mb-1">
+          <span className="h-2 w-2 rounded-full bg-[#7C3AED]" />
+          <h3 className="text-sm font-bold text-[#071B34]">Canaux de contact — Service</h3>
+        </div>
+        <p className="text-[11px] text-[#475569] mb-3">
+          Boîtes de réception collectives. En les activant, l'utilisateur peut consulter et répondre aux messages reçus <strong>au nom du service</strong>. Ses messages restent signés de son prénom et nom.
+        </p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+          {catalog.service_channels.map((c) => {
+            const on = svc.includes(c.key);
+            return (
+              <label
+                key={c.key}
+                className={`flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-semibold cursor-pointer transition-colors ${
+                  on ? "bg-[#7C3AED] text-white shadow" : "bg-white ring-1 ring-[#7C3AED]/20 text-[#334155] hover:bg-[#A78BFA]/10"
+                }`}
+                data-testid={`svc-canal-${c.key}`}
+              >
+                <input
+                  type="checkbox"
+                  checked={on}
+                  onChange={() => toggleSvc(c.key)}
+                  className="h-3.5 w-3.5 accent-[#7C3AED]"
+                />
+                {c.name}
+              </label>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Section 2 — Team discussion canals */}
+      <div className="rounded-2xl border border-[#3BA4FF]/20 bg-[#3BA4FF]/5 p-4">
+        <div className="flex items-center gap-2 mb-1">
+          <span className="h-2 w-2 rounded-full bg-[#3BA4FF]" />
+          <h3 className="text-sm font-bold text-[#071B34]">Canaux de discussion d'équipe</h3>
+        </div>
+        <p className="text-[11px] text-[#475569] mb-3">
+          Groupes de conversation permanents. L'utilisateur écrit avec <strong>sa propre identité</strong>. Il accède à l'historique complet dès son ajout. Un message système signale son arrivée aux autres membres.
+        </p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+          {catalog.team_channels.map((c) => {
+            const on = teams.includes(c.key);
+            return (
+              <label
+                key={c.key}
+                className={`flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-semibold cursor-pointer transition-colors ${
+                  on ? "bg-[#3BA4FF] text-white shadow" : "bg-white ring-1 ring-[#3BA4FF]/20 text-[#334155] hover:bg-[#3BA4FF]/10"
+                }`}
+                data-testid={`team-canal-${c.key}`}
+              >
+                <input
+                  type="checkbox"
+                  checked={on}
+                  onChange={() => toggleTeam(c.key)}
+                  className="h-3.5 w-3.5 accent-[#3BA4FF]"
+                />
+                {c.name}
+              </label>
+            );
+          })}
+        </div>
+      </div>
     </div>
   );
 }

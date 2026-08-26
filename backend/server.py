@@ -5321,9 +5321,84 @@ def _corporate_channel_id(canal_key: str, uid: str) -> str:
     return f"corp-{canal_key}-{uid}"
 
 
+# ─── Team discussion canals (permanent group chats)
+# 7 fixed team channels, seeded on startup. Each user's own identity is used
+# to write in these canals (unlike service canals).
+TEAM_CANALS = {
+    "karting": {"name": "Karting", "icon": "flag"},
+    "attractions": {"name": "Attractions", "icon": "sparkles"},
+    "nettoyage": {"name": "Nettoyage", "icon": "sparkle"},
+    "securite": {"name": "Sécurité", "icon": "shield"},
+    "maintenance": {"name": "Maintenance", "icon": "wrench"},
+    "employes-ops": {"name": "Employés OPS", "icon": "users"},
+    "managers-ops-chat": {"name": "Managers OPS", "icon": "user-cog"},
+}
+
+
+async def _ensure_team_channels_seeded() -> None:
+    """Idempotent: ensure a `channel` document exists for each team canal."""
+    for key, meta in TEAM_CANALS.items():
+        cid = f"team-{key}"
+        existing = await db.channels.find_one({"id": cid})
+        if existing:
+            continue
+        members = await db.employees.find(
+            {"team_channel_ids": key}, {"_id": 0, "id": 1}
+        ).to_list(500)
+        await db.channels.insert_one({
+            "id": cid,
+            "name": meta["name"],
+            "icon": meta["icon"],
+            "type": "team",
+            "is_team_channel": True,
+            "team_key": key,
+            "members_ids": [m["id"] for m in members],
+            "created_at": _now(),
+        })
+
+
+async def _sync_team_channel_membership(uid: str, before: list[str], after: list[str]) -> None:
+    """Reconcile a user's team-channel membership. Posts a system message on
+    join & remove so members see who is coming & going."""
+    before_set, after_set = set(before or []), set(after or [])
+    added = after_set - before_set
+    removed = before_set - after_set
+    if not (added or removed):
+        return
+    emp = await db.employees.find_one({"id": uid}, {"_id": 0}) or {}
+    full_name = f"{emp.get('first_name', '')} {emp.get('last_name', '')}".strip() or "Un collègue"
+    for key in added:
+        if key not in TEAM_CANALS:
+            continue
+        cid = f"team-{key}"
+        await _ensure_team_channels_seeded()
+        await db.channels.update_one({"id": cid}, {"$addToSet": {"members_ids": uid}})
+        await db.messages.insert_one({
+            "id": _id(), "channel_id": cid, "author_id": "system",
+            "text": f"{full_name} a rejoint le canal.", "type": "system",
+            "ts": _now(), "created_at": _now(),
+        })
+    for key in removed:
+        cid = f"team-{key}"
+        await db.channels.update_one({"id": cid}, {"$pull": {"members_ids": uid}})
+        await db.messages.insert_one({
+            "id": _id(), "channel_id": cid, "author_id": "system",
+            "text": f"{full_name} a quitté le canal.", "type": "system",
+            "ts": _now(), "created_at": _now(),
+        })
+
+
+
 async def _corporate_members(canal_key: str) -> list[str]:
-    """Return the employee IDs who *receive* (are staff for) a canal."""
+    """Return the employee IDs who *receive* (are staff for) a canal.
+
+    Source of truth: the `service_channels_access` list explicitly set on the
+    user profile. If NO user has this canal in their explicit access list,
+    fall back to legacy role/status/department heuristics (backward compat)."""
     emps = await db.employees.find({}, {"_id": 0}).to_list(500)
+    explicit = [e["id"] for e in emps if canal_key in (e.get("service_channels_access") or [])]
+    if explicit:
+        return explicit
     out: list[str] = []
     for e in emps:
         # Super admins are management-only accounts (no employee-facing UX),
@@ -5762,6 +5837,11 @@ class UserCreate(BaseModel):
     admin_role: str = "employe"  # employe | manager | rh | communication | comptabilite | direction | superadmin
     permissions: List[str] = []
     groups: List[str] = []
+    # Section 8 — Messagerie & Canaux (source of truth per user)
+    # Service canals: user reads & replies "on behalf of" the service.
+    service_channels_access: List[str] = []  # keys: service-rh | communication | managers-ops | dept-financier | direction
+    # Team/discussion canals: user chats with their personal identity.
+    team_channel_ids: List[str] = []  # keys: karting | attractions | nettoyage | securite | maintenance | employes-ops | managers-ops-chat
     # Legacy compat
     role_category: str = "employe"
 
@@ -5818,6 +5898,9 @@ class UserUpdate(BaseModel):
     admin_role: Optional[str] = None
     permissions: Optional[List[str]] = None
     groups: Optional[List[str]] = None
+    # Section 8 — Messagerie & Canaux
+    service_channels_access: Optional[List[str]] = None
+    team_channel_ids: Optional[List[str]] = None
     role_category: Optional[str] = None
 
 
@@ -5981,9 +6064,31 @@ async def admin_create_user(payload: UserCreate):
         link=f"/messagerie?ch={rh_channel_id}",
     )
 
+    # Team channels: enroll the new user in the ones the admin selected
+    if data.get("team_channel_ids"):
+        await _sync_team_channel_membership(data["id"], [], data["team_channel_ids"])
+
     # Return the generated password so the admin can share it
     return {"user": {k: v for k, v in data.items() if k != "password"},
             "temp_password": temp_pwd}
+
+
+@api.get("/admin/channels/catalog")
+async def admin_channels_catalog():
+    """Return the 2 catalogs (service & team) used by the admin user editor
+    to toggle a user's canal accesses. No auth-restricted content — just
+    metadata."""
+    await _require_admin_full()
+    return {
+        "service_channels": [
+            {"key": k, "name": v["name"], "icon": v.get("icon")}
+            for k, v in CORPORATE_CANALS.items()
+        ],
+        "team_channels": [
+            {"key": k, "name": v["name"], "icon": v.get("icon")}
+            for k, v in TEAM_CANALS.items()
+        ],
+    }
 
 
 @api.put("/admin/users/{uid}")
@@ -5996,6 +6101,7 @@ async def admin_update_user(uid: str, payload: UserUpdate):
     # exclude_unset ensures a missing field doesn't overwrite existing values
     # (including permissions, statuses, work_days, is_admin flags, etc.).
     data = payload.model_dump(exclude_unset=True)
+    prev_team_channels = u.get("team_channel_ids") or []
     # Never touch the password via this endpoint (dedicated reset endpoint exists)
     data.pop("password", None)
     # Only recompute admin flags when admin_role was explicitly provided.
@@ -6026,6 +6132,9 @@ async def admin_update_user(uid: str, payload: UserUpdate):
     pattern_touched = any(k in data for k in ("work_days", "off_days", "remote_days", "usual_hours", "weekly_pattern"))
     if pattern_touched:
         await _resync_pattern_schedules(uid)
+    # ─── Team channels: reconcile membership when list changed
+    if data.get("team_channel_ids") is not None:
+        await _sync_team_channel_membership(uid, prev_team_channels, data["team_channel_ids"])
     # If a new contract was attached and not already in Documents RH, register it
     if data.get("contract_url") and data.get("contract_url") != u.get("contract_url"):
         await db.documents.insert_one({
@@ -7387,6 +7496,21 @@ async def on_start():
             print(f"[startup] purged {legacy.deleted_count} legacy-schema schedule rows")
     except Exception as e:
         print(f"[startup] legacy cleanup skipped: {e}")
+
+    # Seed team discussion channels (idempotent)
+    try:
+        await _ensure_team_channels_seeded()
+    except Exception as e:
+        print(f"[startup] team-channels seed skipped: {e}")
+
+    # Assign Marcus to the Direction service canal (source of truth)
+    try:
+        await db.employees.update_one(
+            {"id": "emp-marcus-simeo"},
+            {"$addToSet": {"service_channels_access": "direction"}},
+        )
+    except Exception:
+        pass
 
 
 async def _seed_birth_dates():
