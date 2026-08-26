@@ -8,6 +8,7 @@ import {
   Briefcase, Megaphone, UserCog, Landmark, Shield, ChevronRight, ListChecks, LogOut,
 } from "lucide-react";
 import { toast } from "sonner";
+import { createPortal } from "react-dom";
 import { api } from "@/lib/api";
 import { absoluteUrl } from "@/lib/api";
 import { useApp } from "@/contexts/AppContext";
@@ -328,6 +329,7 @@ export default function Messagerie() {
   // "Boîte" active — personal | service-{key}. Users with service access can
   // switch between their personal messagerie and each of their service inboxes.
   const [mailboxMode, setMailboxMode] = useState("personal");
+  const [broadcastOpen, setBroadcastOpen] = useState(false);
   const [corpNames, setCorpNames] = useState({});
   useEffect(() => {
     api.get("/channels/corporate/catalog").then((r) => {
@@ -922,15 +924,24 @@ export default function Messagerie() {
           )}
           {/* Service mode banner — clear "you're in service mode" indicator */}
           {mailboxMode !== "personal" && (
-            <div
-              className="mx-3 mt-2 rounded-lg bg-gradient-to-r from-[#7C3AED] to-[#A78BFA] text-white text-[11px] font-semibold px-3 py-2 flex items-center gap-2"
-              data-testid="mailbox-service-banner"
-            >
-              <Briefcase className="h-3.5 w-3.5 shrink-0" />
-              <span>
-                Boîte <strong>{corpNames[mailboxMode.replace("service-", "")] || "Service"}</strong> —
-                messages reçus des employés. Vos réponses seront signées.
-              </span>
+            <div className="mx-3 mt-2 space-y-2">
+              <div
+                className="rounded-lg bg-gradient-to-r from-[#7C3AED] to-[#A78BFA] text-white text-[11px] font-semibold px-3 py-2 flex items-center gap-2"
+                data-testid="mailbox-service-banner"
+              >
+                <Briefcase className="h-3.5 w-3.5 shrink-0" />
+                <span>
+                  Boîte <strong>{corpNames[mailboxMode.replace("service-", "")] || "Service"}</strong> —
+                  messages reçus des employés. Vos réponses seront signées.
+                </span>
+              </div>
+              <button
+                onClick={() => setBroadcastOpen(true)}
+                data-testid="msg-broadcast-open"
+                className="w-full inline-flex items-center justify-center gap-2 rounded-lg bg-white ring-1 ring-[#7C3AED]/30 text-[#7C3AED] hover:bg-[#7C3AED]/5 text-xs font-bold px-3 py-2 transition-colors"
+              >
+                <Megaphone className="h-3.5 w-3.5" /> Diffuser un message
+              </button>
             </div>
           )}
 
@@ -1756,6 +1767,19 @@ export default function Messagerie() {
         </div>
       )}
 
+      {broadcastOpen && (
+        <BroadcastModal
+          canalKey={mailboxMode.replace(/^service-/, "")}
+          canalName={corpNames[mailboxMode.replace(/^service-/, "")] || "Service"}
+          onClose={() => setBroadcastOpen(false)}
+          onSent={(count) => {
+            setBroadcastOpen(false);
+            loadChannels();
+            toast.success(`Diffusion envoyée à ${count} employé${count > 1 ? "s" : ""}`);
+          }}
+        />
+      )}
+
       {composer && (        <div onClick={() => setComposer(null)} className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
           <div onClick={(e) => e.stopPropagation()} className="bg-white rounded-3xl w-full max-w-md max-h-[80vh] overflow-hidden flex flex-col">
             <div className="flex items-center justify-between px-5 py-3 border-b border-[#071B34]/5">
@@ -2218,4 +2242,165 @@ function dayLabel(day) {
   if (d.toDateString() === today.toDateString()) return "Aujourd'hui";
   if (d.toDateString() === y.toDateString()) return "Hier";
   return d.toLocaleDateString("fr-FR", { day: "2-digit", month: "long", year: "numeric" });
+}
+
+const STATUS_OPTIONS = [
+  { k: "ops", l: "Employé terrain (OPS)" },
+  { k: "management", l: "Management" },
+  { k: "bureau", l: "Employé Bureau" },
+  { k: "direction", l: "Direction" },
+  { k: "alternant", l: "Alternant" },
+  { k: "stage", l: "Stage" },
+  { k: "restauration", l: "Restauration" },
+  { k: "securite", l: "Sécurité" },
+  { k: "nettoyage", l: "Nettoyage" },
+  { k: "maintenance", l: "Maintenance" },
+];
+
+function BroadcastModal({ canalKey, canalName, onClose, onSent }) {
+  const [content, setContent] = useState("");
+  const [statuses, setStatuses] = useState([]); // empty = all employees
+  const [link, setLink] = useState("");
+  const [attachments, setAttachments] = useState([]); // {name,url,type}
+  const [uploading, setUploading] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [allEmployees, setAllEmployees] = useState(true);
+  const toggleStatus = (k) => setStatuses((s) => s.includes(k) ? s.filter((x) => x !== k) : [...s, k]);
+  const uploadFile = async (file) => {
+    setUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const { data } = await api.post("/upload", fd, { headers: { "Content-Type": "multipart/form-data" } });
+      setAttachments((a) => [...a, { name: file.name, url: data.url, type: file.type }]);
+    } catch (err) {
+      toast.error("Upload échoué");
+    } finally {
+      setUploading(false);
+    }
+  };
+  const send = async () => {
+    if (!content.trim() && attachments.length === 0 && !link.trim()) {
+      return toast.error("Le message ne peut pas être vide");
+    }
+    setSending(true);
+    try {
+      const { data } = await api.post("/channels/corporate/broadcast", {
+        canal_key: canalKey,
+        content: content.trim(),
+        audience_statuses: allEmployees ? [] : statuses,
+        attachments,
+        link: link.trim() || null,
+      });
+      onSent(data.sent || 0);
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Diffusion échouée");
+    } finally {
+      setSending(false);
+    }
+  };
+  return createPortal(
+    <div role="dialog" aria-modal="true" className="fixed inset-0 z-[120]" data-testid="broadcast-modal">
+      <button aria-label="Fermer" onClick={onClose} className="absolute inset-0 bg-black/50 backdrop-blur-md w-full h-full cursor-default" />
+      <div onClick={(e) => e.stopPropagation()} className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[92%] max-w-lg max-h-[90vh] rounded-2xl bg-white shadow-2xl overflow-y-auto">
+        <div className="p-5 space-y-4">
+          <div className="flex items-start justify-between">
+            <div>
+              <div className="text-[10px] uppercase tracking-widest font-bold text-[#7C3AED]">Diffusion — {canalName}</div>
+              <h2 className="text-lg font-bold text-[#071B34] mt-1">Message groupé</h2>
+              <p className="text-xs text-[#475569] mt-1">Envoyé au nom du service, réceptionné individuellement par chaque employé ciblé.</p>
+            </div>
+            <button onClick={onClose} data-testid="broadcast-close" className="p-1.5 rounded hover:bg-[#F4F7FA]"><X className="h-4 w-4" /></button>
+          </div>
+
+          <div>
+            <label className="ms-overline">Destinataires</label>
+            <div className="mt-1.5 space-y-2">
+              <label className="flex items-center gap-2 text-sm cursor-pointer">
+                <input type="radio" checked={allEmployees} onChange={() => setAllEmployees(true)} data-testid="broadcast-all" className="accent-[#7C3AED]" />
+                Tous les employés
+              </label>
+              <label className="flex items-center gap-2 text-sm cursor-pointer">
+                <input type="radio" checked={!allEmployees} onChange={() => setAllEmployees(false)} data-testid="broadcast-selected" className="accent-[#7C3AED]" />
+                Statuts spécifiques
+              </label>
+              {!allEmployees && (
+                <div className="grid grid-cols-2 gap-1 pl-6">
+                  {STATUS_OPTIONS.map((s) => {
+                    const on = statuses.includes(s.k);
+                    return (
+                      <label key={s.k} className={`flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-[11px] font-semibold cursor-pointer transition-colors ${on ? "bg-[#7C3AED] text-white" : "bg-white ring-1 ring-[#071B34]/5 text-[#334155] hover:bg-[#7C3AED]/10"}`} data-testid={`broadcast-status-${s.k}`}>
+                        <input type="checkbox" checked={on} onChange={() => toggleStatus(s.k)} className="h-3 w-3" />
+                        {s.l}
+                      </label>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div>
+            <label className="ms-overline">Message</label>
+            <textarea
+              value={content}
+              onChange={(e) => setContent(e.target.value)}
+              rows={4}
+              placeholder="Ex: Nouveau règlement intérieur disponible..."
+              data-testid="broadcast-content"
+              className="ms-input mt-1 w-full text-sm"
+            />
+          </div>
+
+          <div>
+            <label className="ms-overline">Lien / page à ouvrir (facultatif)</label>
+            <input
+              type="text"
+              value={link}
+              onChange={(e) => setLink(e.target.value)}
+              placeholder="/documents ou https://…"
+              data-testid="broadcast-link"
+              className="ms-input mt-1 w-full text-sm"
+            />
+          </div>
+
+          <div>
+            <label className="ms-overline">Document joint (facultatif)</label>
+            <div className="mt-1 flex items-center gap-2">
+              <input
+                type="file"
+                onChange={(e) => e.target.files?.[0] && uploadFile(e.target.files[0])}
+                data-testid="broadcast-file"
+                className="text-xs"
+              />
+              {uploading && <span className="text-[11px] text-[#475569]">Upload…</span>}
+            </div>
+            {attachments.length > 0 && (
+              <ul className="mt-2 space-y-1">
+                {attachments.map((a, i) => (
+                  <li key={i} className="text-[11px] text-[#475569] flex items-center justify-between">
+                    📎 {a.name}
+                    <button onClick={() => setAttachments((arr) => arr.filter((_, j) => j !== i))} className="text-red-500 text-xs">Retirer</button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          <div className="flex justify-end gap-2 pt-2 border-t border-[#071B34]/5">
+            <button onClick={onClose} className="ms-btn-outline text-xs">Annuler</button>
+            <button
+              onClick={send}
+              disabled={sending}
+              data-testid="broadcast-send"
+              className="ms-btn-primary text-xs bg-[#7C3AED] hover:bg-[#6D28D9] border-[#7C3AED]"
+            >
+              {sending ? "Envoi…" : "Diffuser"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
 }

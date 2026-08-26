@@ -5829,6 +5829,97 @@ async def open_corporate_canal(payload: CorporateCanalCreate):
     return await _strip(ch)
 
 
+class CorporateBroadcast(BaseModel):
+    canal_key: str
+    content: str
+    audience_statuses: List[str] = []  # empty = all employees
+    attachments: List[dict] = []
+    link: Optional[str] = None  # optional URL / route to a dedicated page
+
+
+@api.post("/channels/corporate/broadcast")
+async def corporate_broadcast(payload: CorporateBroadcast):
+    """Service staff-initiated mass DM: post an official message signed by the
+    service into the per-employee `corp-{key}-{uid}` thread of every targeted
+    employee. Only members of the canal (i.e. users whose
+    `service_channels_access` includes the key) can send a broadcast.
+    Targeted employees receive it in their personal messagerie; the sender
+    sees each thread on the service side (right pane, service avatar)."""
+    key = (payload.canal_key or "").strip()
+    if key not in CORPORATE_CANALS:
+        raise HTTPException(400, "Canal inconnu")
+    sender_id = current_user()
+    sender = await db.employees.find_one({"id": sender_id}, {"_id": 0}) or {}
+    if key not in (sender.get("service_channels_access") or []):
+        raise HTTPException(403, "Vous ne faites pas partie de ce canal service")
+    if not (payload.content or "").strip() and not payload.attachments and not payload.link:
+        raise HTTPException(400, "Le message est vide")
+    meta = CORPORATE_CANALS[key]
+    sender_name = f"{sender.get('first_name','')} {sender.get('last_name','')}".strip()
+    # Prepare message content — auto-sign with the sender identity
+    body = (payload.content or "").rstrip()
+    if payload.link:
+        body = f"{body}\n\n🔗 {payload.link}"
+    if body and f"— {sender_name}" not in body and sender_name:
+        body = f"{body}\n\n— {sender_name}"
+    # Resolve audience
+    emps = await db.employees.find({}, {"_id": 0}).to_list(1000)
+    active = [e for e in emps if e.get("account_status") != "deactivated"]
+    if payload.audience_statuses:
+        targeted = [e for e in active if _user_matches_audience(e, payload.audience_statuses)]
+    else:
+        targeted = active
+    # Never send to self as recipient — the sender already has the thread on
+    # the service side and would just spam themselves.
+    service_staff = set(await _corporate_members(key))
+    recipients = [e for e in targeted if e["id"] != sender_id and e["id"] not in service_staff]
+    now = _now()
+    for e in recipients:
+        cid = _corporate_channel_id(key, e["id"])
+        members = list({e["id"], *service_staff})
+        ch = await db.channels.find_one({"id": cid}, {"_id": 0})
+        if not ch:
+            await db.channels.insert_one({
+                "id": cid, "name": meta["name"], "icon": meta.get("icon"),
+                "members": len(members), "members_ids": members, "unread": 1,
+                "is_dm": False, "is_group": True, "is_official": True,
+                "is_corporate": True, "corporate_key": key,
+                "archived": False, "avatar": None, "created_at": now,
+            })
+        else:
+            merged = list({*(ch.get("members_ids") or []), *members})
+            await db.channels.update_one(
+                {"id": cid},
+                {"$set": {"members_ids": merged, "members": len(merged)}, "$inc": {"unread": 1}},
+            )
+        msg = {
+            "id": _id(),
+            "channel_id": cid,
+            "author_id": sender_id,
+            "author_name": sender_name,
+            "content": body,
+            "attachments": payload.attachments or [],
+            "is_service_message": True,
+            "service_name": meta["name"],
+            "service_key": key,
+            "type": "text",
+            "ts": now,
+            "created_at": now,
+        }
+        await db.messages.insert_one(msg.copy())
+        await db.channels.update_one({"id": cid}, {"$set": {"last_message_ts": now}})
+        # Push a notification so the header envelope + inline badge light up
+        await _push_notification(
+            employee_id=e["id"],
+            type="message",
+            title=f"{meta['name']} · Diffusion",
+            content=(payload.content or "")[:120] or (payload.link or "Nouveau document"),
+            icon="briefcase",
+            link=f"/messagerie?ch={cid}",
+        )
+    return {"ok": True, "sent": len(recipients)}
+
+
 # ─── DM channels (create or fetch a direct channel with an employee)
 class DMCreate(BaseModel):
     employee_id: str
