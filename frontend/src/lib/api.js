@@ -35,6 +35,40 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
+// Silent auto-retry on transient upstream errors (typically Kubernetes ingress
+// 502/503/504 while the backend is hot-reloading in dev). Retries once after
+// a short delay, then falls through to the caller with the original error.
+api.interceptors.response.use(
+  (r) => r,
+  async (error) => {
+    const cfg = error?.config || {};
+    const status = error?.response?.status;
+    const isTransient = status === 502 || status === 503 || status === 504 || error?.code === "ERR_NETWORK";
+    if (isTransient && !cfg.__retriedOnce) {
+      cfg.__retriedOnce = true;
+      await new Promise((res) => setTimeout(res, 800));
+      try {
+        return await api.request(cfg);
+      } catch (_e) {
+        // fall through — let the caller decide what to do
+      }
+    }
+    return Promise.reject(error);
+  }
+);
+
+// Suppress React dev-server's red error overlay for background/polling
+// promise rejections we already handled inline. Uncaught 502/503/504 during
+// hot-reload no longer surface as a big blocking modal.
+if (typeof window !== "undefined") {
+  window.addEventListener("unhandledrejection", (event) => {
+    const status = event?.reason?.response?.status;
+    if (status === 502 || status === 503 || status === 504) {
+      event.preventDefault();
+    }
+  });
+}
+
 // ── helpers used across pages ─────────────────────────────────────
 export const formatMinutes = (mins) => {
   const h = Math.floor((mins || 0) / 60);

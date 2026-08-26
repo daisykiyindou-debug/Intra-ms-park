@@ -251,9 +251,12 @@ function NewsletterCard({ nl, isEditor, onChange }) {
                 {nl.send_status === "scheduled" && (
                   <>
                     <button onClick={() => { setMenu(false); navigate(`/newsletters/${nl.id}/edit`); }} className="w-full text-left px-3 py-2 hover:bg-[#F4F7FA] flex items-center gap-2"><Edit3 className="h-3.5 w-3.5" /> Modifier date/heure</button>
-                    <button onClick={async () => { setMenu(false); try { await api.post(`/admin/newsletters/${nl.id}/send-now`); toast.success("Envoyée !"); onChange(); } catch { toast.error("Erreur"); } }} className="w-full text-left px-3 py-2 hover:bg-[#F4F7FA] flex items-center gap-2 text-[#1D70B8]"><Send className="h-3.5 w-3.5" /> Envoyer maintenant</button>
+                    <button onClick={async () => { setMenu(false); try { await api.post(`/admin/newsletters/${nl.id}/send-now`); toast.success("Newsletter envoyée !"); navigate(`/newsletters/${nl.id}/sent`); } catch { toast.error("Erreur"); } }} className="w-full text-left px-3 py-2 hover:bg-[#F4F7FA] flex items-center gap-2 text-[#1D70B8]"><Send className="h-3.5 w-3.5" /> Envoyer maintenant</button>
                     <button onClick={async () => { if (!window.confirm("Annuler la programmation ? La newsletter reviendra en brouillon.")) return; setMenu(false); try { await api.post(`/admin/newsletters/${nl.id}/cancel-schedule`); toast.success("Programmation annulée"); onChange(); } catch { toast.error("Erreur"); } }} className="w-full text-left px-3 py-2 hover:bg-[#FEF3C7] text-[#B45309] flex items-center gap-2"><X className="h-3.5 w-3.5" /> Annuler la programmation</button>
                   </>
+                )}
+                {nl.send_status === "sent" && (
+                  <button onClick={() => { setMenu(false); navigate(`/newsletters/${nl.id}/sent`); }} className="w-full text-left px-3 py-2 hover:bg-[#F4F7FA] flex items-center gap-2 text-[#1D70B8]"><TrendingUp className="h-3.5 w-3.5" /> Voir les statistiques</button>
                 )}
                 {!nl.archived && (
                   <button onClick={async () => { setMenu(false); await api.post(`/admin/newsletters/${nl.id}/archive`); toast.success("Archivée"); onChange(); }} className="w-full text-left px-3 py-2 hover:bg-[#F4F7FA] flex items-center gap-2"><Archive className="h-3.5 w-3.5" /> Archiver</button>
@@ -740,12 +743,22 @@ export function NewsletterEditor() {
     try {
       if (isNew) {
         const { data } = await api.post("/admin/newsletters", payload);
-        toast.success(scheduled ? "Newsletter programmée" : (publish ? "Newsletter publiée" : "Brouillon enregistré"));
-        navigate(`/newsletters/${data.id}/edit`, { replace: true });
+        if (publish && !scheduled) {
+          toast.success("Newsletter envoyée !");
+          navigate(`/newsletters/${data.id}/sent`, { replace: true });
+        } else {
+          toast.success(scheduled ? "Newsletter programmée" : "Brouillon enregistré");
+          navigate(`/newsletters/${data.id}/edit`, { replace: true });
+        }
       } else {
         await api.put(`/admin/newsletters/${id}`, payload);
-        toast.success(scheduled ? "Newsletter programmée" : (publish ? "Newsletter publiée" : "Enregistré"));
-        if (publish) navigate("/newsletters");
+        if (publish && !scheduled) {
+          toast.success("Newsletter envoyée !");
+          navigate(`/newsletters/${id}/sent`);
+        } else {
+          toast.success(scheduled ? "Newsletter programmée" : "Enregistré");
+          if (publish && scheduled) navigate("/newsletters");
+        }
       }
     } catch (err) {
       toast.error(err?.response?.data?.detail || "Erreur");
@@ -1487,6 +1500,220 @@ function ColorPicker({ label, value, onChange }) {
         ))}
         <input type="color" value={value || "#000000"} onChange={(e) => onChange(e.target.value)} className="h-6 w-6 rounded cursor-pointer" />
       </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// SENT CONFIRMATION + STATS PAGE (admin)
+// ═══════════════════════════════════════════════════════════════════
+export function NewsletterSent() {
+  const { id } = useParams();
+  const navigate = useNavigate();
+  const { me, adminMode } = useApp();
+  const canView = (me?.is_admin || me?.can_manage_communication || hasPermission(me, "manage_newsletter")) && adminMode !== false;
+  const [nl, setNl] = useState(null);
+  const [stats, setStats] = useState(null);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    if (me && !canView) navigate("/newsletters", { replace: true });
+  }, [me, canView, navigate]);
+
+  const load = async () => {
+    try {
+      const [nlRes, statsRes] = await Promise.all([
+        api.get(`/newsletters/${id}`),
+        api.get(`/admin/newsletters/${id}/stats`),
+      ]);
+      setNl(nlRes.data);
+      setStats(statsRes.data);
+    } catch (err) {
+      setError(err?.response?.data?.detail || "Impossible de charger les statistiques");
+    }
+  };
+
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [id]);
+  // Auto-refresh stats every 20s so open / click counters progress live
+  useEffect(() => {
+    const t = setInterval(() => load(), 20_000);
+    return () => clearInterval(t);
+    // eslint-disable-next-line
+  }, [id]);
+
+  if (error) {
+    return (
+      <div className="ms-card p-10 text-center max-w-xl mx-auto">
+        <h3 className="text-lg font-bold text-[#071B34]">Statistiques indisponibles</h3>
+        <p className="mt-2 text-sm text-[#475569]">{error}</p>
+        <Link to="/newsletters" className="ms-btn-outline mt-4 inline-flex"><ArrowLeft className="h-4 w-4" /> Retour aux newsletters</Link>
+      </div>
+    );
+  }
+  if (!nl || !stats) return <div className="ms-card p-10 animate-pulse h-64 max-w-4xl mx-auto" />;
+
+  const isSent = stats.send_status === "sent";
+  const isScheduled = stats.send_status === "scheduled";
+  const openRate = stats.open_rate || 0;
+  const clickRate = stats.recipient_count
+    ? Math.round((stats.click_count / stats.recipient_count) * 1000) / 10
+    : 0;
+  const remaining = Math.max(0, (stats.recipient_count || 0) - (stats.open_count || 0));
+
+  return (
+    <div className="space-y-5 ms-fade-up max-w-4xl mx-auto">
+      {/* Hero confirmation */}
+      <div className="rounded-3xl overflow-hidden bg-gradient-to-br from-[#3BA4FF] to-[#1D70B8] text-white p-8 md:p-10 relative">
+        <div className="absolute -right-16 -top-16 h-48 w-48 rounded-full bg-white/10" />
+        <div className="absolute -left-10 -bottom-10 h-40 w-40 rounded-full bg-white/5" />
+        <div className="relative flex items-start gap-4">
+          <div className="h-14 w-14 rounded-2xl bg-white/20 backdrop-blur flex items-center justify-center shrink-0">
+            {isSent ? <CheckCircle2 className="h-7 w-7" /> : <Clock className="h-7 w-7" />}
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="text-[10px] uppercase tracking-[0.2em] font-bold text-white/70">
+              {isSent ? "Newsletter envoyée" : isScheduled ? "Newsletter programmée" : "Newsletter"}
+            </div>
+            <h1 className="mt-1 text-2xl md:text-3xl font-extrabold tracking-tight" data-testid="sent-title">{nl.title}</h1>
+            <p className="mt-2 text-sm text-white/85 max-w-xl">
+              {isSent
+                ? <>Elle a été envoyée à <strong>{stats.recipient_count}</strong> destinataire{stats.recipient_count > 1 ? "s" : ""} le {stats.sent_at ? formatDateFr(stats.sent_at.slice(0, 10)) : "—"}. Suivez ci-dessous les statistiques d&apos;engagement en temps réel.</>
+                : isScheduled
+                ? <>Envoi programmé le {nl.publish_at ? formatDateFr(nl.publish_at.slice(0, 10)) : "—"}{nl.publish_at ? ` à ${nl.publish_at.slice(11, 16)}` : ""}.</>
+                : <>Brouillon non publié.</>}
+            </p>
+          </div>
+        </div>
+        <div className="mt-6 flex flex-wrap gap-2">
+          <Link to={`/newsletters/${id}`} className="inline-flex items-center gap-2 rounded-xl bg-white text-[#1D70B8] hover:bg-white/90 px-4 h-10 text-sm font-bold shadow-lg transition-colors">
+            <Eye className="h-4 w-4" /> Voir la newsletter
+          </Link>
+          <Link to="/newsletters" className="inline-flex items-center gap-2 rounded-xl bg-white/15 backdrop-blur border border-white/25 text-white hover:bg-white/25 px-4 h-10 text-sm font-semibold transition-colors">
+            <ArrowLeft className="h-4 w-4" /> Toutes les newsletters
+          </Link>
+          <button
+            onClick={() => navigate("/newsletters/new")}
+            className="inline-flex items-center gap-2 rounded-xl bg-white/15 backdrop-blur border border-white/25 text-white hover:bg-white/25 px-4 h-10 text-sm font-semibold transition-colors"
+          >
+            <Plus className="h-4 w-4" /> Nouvelle newsletter
+          </button>
+        </div>
+      </div>
+
+      {/* Stats grid */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        <StatTile
+          testid="stat-recipients"
+          icon={Users}
+          label="Destinataires"
+          value={stats.recipient_count || 0}
+          sub={stats.recipient_statuses?.length
+            ? `Ciblage : ${stats.recipient_statuses.join(", ")}`
+            : "Tous les employés"}
+          accent="#3BA4FF"
+        />
+        <StatTile
+          testid="stat-open-rate"
+          icon={Eye}
+          label="Taux d'ouverture"
+          value={`${openRate}%`}
+          sub={`${stats.open_count || 0} ouverture${(stats.open_count || 0) > 1 ? "s" : ""} · ${remaining} restant`}
+          accent="#10B981"
+          progress={openRate}
+        />
+        <StatTile
+          testid="stat-clicks"
+          icon={MousePointerClick}
+          label="Clics"
+          value={stats.click_count || 0}
+          sub={`Taux de clic ${clickRate}%`}
+          accent="#F59E0B"
+        />
+        <StatTile
+          testid="stat-status"
+          icon={isSent ? CheckCircle2 : Clock}
+          label="Statut"
+          value={isSent ? "Envoyée" : isScheduled ? "Programmée" : "Brouillon"}
+          sub={isSent
+            ? `Envoyée le ${stats.sent_at ? formatDateFr(stats.sent_at.slice(0, 10)) : "—"}`
+            : isScheduled
+            ? `Prévue le ${nl.publish_at ? formatDateFr(nl.publish_at.slice(0, 10)) : "—"}`
+            : "Non publié"}
+          accent={isSent ? "#7C3AED" : "#F59E0B"}
+        />
+      </div>
+
+      {/* Detail card */}
+      <div className="ms-card p-5">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-lg font-bold text-[#071B34] inline-flex items-center gap-2">
+            <TrendingUp className="h-5 w-5 text-[#3BA4FF]" /> Engagement en temps réel
+          </h3>
+          <span className="text-[10px] uppercase tracking-[0.2em] font-semibold text-[#475569] bg-[#F4F7FA] rounded-full px-2 py-1">
+            <span className="inline-block h-2 w-2 rounded-full bg-[#10B981] animate-pulse mr-1" />
+            Actualisé toutes les 20s
+          </span>
+        </div>
+        <div className="rounded-2xl bg-[#F8FAFC] p-4">
+          <div className="flex items-baseline justify-between text-xs mb-1.5">
+            <span className="font-semibold text-[#334155]">Ouvertures</span>
+            <span className="font-bold text-[#071B34]">{stats.open_count || 0} / {stats.recipient_count || 0}</span>
+          </div>
+          <div className="h-2.5 rounded-full bg-white overflow-hidden ring-1 ring-[#071B34]/5">
+            <div
+              className="h-full rounded-full bg-gradient-to-r from-[#10B981] to-[#059669] transition-all duration-500"
+              style={{ width: `${Math.min(100, openRate)}%` }}
+            />
+          </div>
+          <div className="mt-4 flex items-baseline justify-between text-xs mb-1.5">
+            <span className="font-semibold text-[#334155]">Clics</span>
+            <span className="font-bold text-[#071B34]">{stats.click_count || 0} clic{(stats.click_count || 0) > 1 ? "s" : ""}</span>
+          </div>
+          <div className="h-2.5 rounded-full bg-white overflow-hidden ring-1 ring-[#071B34]/5">
+            <div
+              className="h-full rounded-full bg-gradient-to-r from-[#F59E0B] to-[#D97706] transition-all duration-500"
+              style={{ width: `${Math.min(100, clickRate)}%` }}
+            />
+          </div>
+        </div>
+
+        {stats.recipient_statuses?.length > 0 && (
+          <div className="mt-4">
+            <div className="text-[10px] uppercase tracking-widest text-[#475569] font-semibold mb-1.5">Audience ciblée</div>
+            <div className="flex flex-wrap gap-1.5">
+              {stats.recipient_statuses.map((s) => (
+                <span key={s} className="ms-chip bg-[#3BA4FF]/10 text-[#1D70B8]">{s}</span>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function StatTile({ icon: Icon, label, value, sub, accent, progress, testid }) {
+  return (
+    <div className="ms-card ms-card-hover p-4" data-testid={testid}>
+      <div className="flex items-center justify-between">
+        <div
+          className="flex h-9 w-9 items-center justify-center rounded-xl"
+          style={{ background: `${accent}1F`, color: accent }}
+        >
+          <Icon className="h-4 w-4" />
+        </div>
+      </div>
+      <div className="mt-3 text-2xl font-bold text-[#071B34]">{value}</div>
+      <div className="ms-overline mt-1">{label}</div>
+      <div className="text-xs text-[#475569] mt-0.5 line-clamp-2">{sub}</div>
+      {typeof progress === "number" && (
+        <div className="mt-3 h-1.5 rounded-full bg-[#F1F5F9] overflow-hidden">
+          <div
+            className="h-full rounded-full transition-all duration-500"
+            style={{ width: `${Math.min(100, progress)}%`, background: accent }}
+          />
+        </div>
+      )}
     </div>
   );
 }
