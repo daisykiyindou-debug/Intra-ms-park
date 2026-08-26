@@ -5357,6 +5357,49 @@ async def _ensure_team_channels_seeded() -> None:
         })
 
 
+async def _ensure_service_inboxes_seeded() -> None:
+    """Idempotent: ensure ONE shared inbox `channel` document per service
+    canal so all its members see it in their messagerie sidebar."""
+    for key, meta in CORPORATE_CANALS.items():
+        cid = f"service-{key}"
+        # Compute members = every user who has this service key in their
+        # explicit access list. Fall back to legacy heuristics if empty.
+        members = await _corporate_members(key)
+        existing = await db.channels.find_one({"id": cid})
+        if existing:
+            await db.channels.update_one(
+                {"id": cid}, {"$set": {"members_ids": members}}
+            )
+            continue
+        await db.channels.insert_one({
+            "id": cid,
+            "name": f"Service — {meta['name']}",
+            "icon": meta.get("icon"),
+            "type": "service_inbox",
+            "is_service_inbox": True,
+            "service_key": key,
+            "members_ids": members,
+            "created_at": _now(),
+        })
+
+
+async def _sync_service_channel_membership(uid: str, before: list[str], after: list[str]) -> None:
+    """Reconcile `service_channels_access` diffs and add/remove uid from the
+    corresponding shared service-inbox channels."""
+    before_set, after_set = set(before or []), set(after or [])
+    added = after_set - before_set
+    removed = before_set - after_set
+    if not (added or removed):
+        return
+    await _ensure_service_inboxes_seeded()
+    for key in added:
+        if key not in CORPORATE_CANALS:
+            continue
+        await db.channels.update_one({"id": f"service-{key}"}, {"$addToSet": {"members_ids": uid}})
+    for key in removed:
+        await db.channels.update_one({"id": f"service-{key}"}, {"$pull": {"members_ids": uid}})
+
+
 async def _sync_team_channel_membership(uid: str, before: list[str], after: list[str]) -> None:
     """Reconcile a user's team-channel membership. Posts a system message on
     join & remove so members see who is coming & going."""
@@ -6102,6 +6145,7 @@ async def admin_update_user(uid: str, payload: UserUpdate):
     # (including permissions, statuses, work_days, is_admin flags, etc.).
     data = payload.model_dump(exclude_unset=True)
     prev_team_channels = u.get("team_channel_ids") or []
+    prev_service_channels = u.get("service_channels_access") or []
     # Never touch the password via this endpoint (dedicated reset endpoint exists)
     data.pop("password", None)
     # Only recompute admin flags when admin_role was explicitly provided.
@@ -6135,6 +6179,9 @@ async def admin_update_user(uid: str, payload: UserUpdate):
     # ─── Team channels: reconcile membership when list changed
     if data.get("team_channel_ids") is not None:
         await _sync_team_channel_membership(uid, prev_team_channels, data["team_channel_ids"])
+    # ─── Service canals: reconcile shared-inbox membership when access changed
+    if data.get("service_channels_access") is not None:
+        await _sync_service_channel_membership(uid, prev_service_channels, data["service_channels_access"])
     # If a new contract was attached and not already in Documents RH, register it
     if data.get("contract_url") and data.get("contract_url") != u.get("contract_url"):
         await db.documents.insert_one({
@@ -7511,6 +7558,13 @@ async def on_start():
         )
     except Exception:
         pass
+
+    # Seed shared service-inbox channels (idempotent). Runs AFTER Marcus's
+    # assignment so his Direction inbox already has him as member.
+    try:
+        await _ensure_service_inboxes_seeded()
+    except Exception as e:
+        print(f"[startup] service-inboxes seed skipped: {e}")
 
 
 async def _seed_birth_dates():
