@@ -79,6 +79,13 @@ export default function NewslettersList() {
   const [tab, setTab] = useState("published");
   const navigate = useNavigate();
   const isEditor = (me?.is_admin || me?.can_manage_communication || hasPermission(me, "manage_newsletter")) && adminMode !== false;
+  const PAGE_SIZE = 7;
+  const [page, setPage] = useState(1);
+  // Reset to page 1 whenever filters change so the user isn't stuck on an
+  // empty page after switching tab / category / query.
+  useEffect(() => { setPage(1); }, [tab, category, q]);
+  const totalPages = Math.max(1, Math.ceil(items.length / PAGE_SIZE));
+  const pagedItems = items.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   const load = async () => {
     const params = new URLSearchParams({ archived: tab === "archived" });
@@ -140,7 +147,56 @@ export default function NewslettersList() {
         {items.length === 0 && (
           <div className="ms-card p-8 text-center text-sm text-[#475569]">Aucune newsletter dans cette catégorie.</div>
         )}
-        {items.map((n) => <NewsletterCard key={n.id} nl={n} isEditor={isEditor} onChange={load} />)}
+        {pagedItems.map((n) => <NewsletterCard key={n.id} nl={n} isEditor={isEditor} onChange={load} />)}
+        {items.length > PAGE_SIZE && (
+          <div className="flex items-center justify-between pt-2" data-testid="nl-pagination">
+            <div className="text-xs text-[#475569]">
+              Page <strong className="text-[#071B34]">{page}</strong> / {totalPages}
+              <span className="ml-2">· {items.length} newsletter{items.length > 1 ? "s" : ""} au total</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={page === 1}
+                data-testid="nl-page-prev"
+                className="h-8 px-3 rounded-lg text-xs font-semibold bg-white ring-1 ring-[#071B34]/10 hover:bg-[#F4F7FA] text-[#334155] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                ← Précédent
+              </button>
+              {Array.from({ length: totalPages }, (_, i) => i + 1)
+                .filter((p) => p === 1 || p === totalPages || Math.abs(p - page) <= 1)
+                .reduce((acc, p, idx, arr) => {
+                  if (idx > 0 && p - arr[idx - 1] > 1) acc.push("…");
+                  acc.push(p);
+                  return acc;
+                }, [])
+                .map((p, i) => p === "…" ? (
+                  <span key={`gap-${i}`} className="text-xs text-[#94A3B8] px-1">…</span>
+                ) : (
+                  <button
+                    key={p}
+                    onClick={() => setPage(p)}
+                    data-testid={`nl-page-${p}`}
+                    className={`h-8 w-8 rounded-lg text-xs font-bold transition-colors ${
+                      p === page
+                        ? "bg-[#3BA4FF] text-white shadow"
+                        : "bg-white ring-1 ring-[#071B34]/10 hover:bg-[#F4F7FA] text-[#334155]"
+                    }`}
+                  >
+                    {p}
+                  </button>
+                ))}
+              <button
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                disabled={page === totalPages}
+                data-testid="nl-page-next"
+                className="h-8 px-3 rounded-lg text-xs font-semibold bg-white ring-1 ring-[#071B34]/10 hover:bg-[#F4F7FA] text-[#334155] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                Suivant →
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

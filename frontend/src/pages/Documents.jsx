@@ -215,7 +215,12 @@ export default function Documents() {
 }
 
 function DocCard({ d, isFav, onFav, onPreview, isAdmin, onEdit, onDelete }) {
-  const ext = (d.url || "").split(".").pop()?.toUpperCase() || (d.kind === "rich" ? "HTML" : "PDF");
+  // Derive file extension safely. Payslips have a URL like
+  // /documents/payslip/emp-.../2026/8 (no extension) → we must fall back to
+  // "PDF" instead of dumping the whole path inside the tiny 11x11 badge.
+  const rawExt = ((d.url || "").split(".").pop() || "").toUpperCase();
+  const isValidExt = /^[A-Z0-9]{2,5}$/.test(rawExt);
+  const ext = isValidExt ? rawExt : (d.kind === "rich" ? "HTML" : "PDF");
   const colorForExt = {
     PDF: "bg-[#EF4444]", DOCX: "bg-[#3BA4FF]", DOC: "bg-[#3BA4FF]",
     XLSX: "bg-[#10B981]", XLS: "bg-[#10B981]", PPTX: "bg-[#F59E0B]", PPT: "bg-[#F59E0B]",
@@ -228,7 +233,7 @@ function DocCard({ d, isFav, onFav, onPreview, isAdmin, onEdit, onDelete }) {
   return (
     <div className="ms-card p-4 space-y-2 hover:shadow-md transition-shadow" data-testid={`doc-${d.id}`}>
       <div className="flex items-start justify-between gap-2">
-        <div className={`inline-flex items-center justify-center h-11 w-11 rounded-xl text-white font-bold text-[10px] ${colorForExt}`}>{ext}</div>
+        <div className={`inline-flex items-center justify-center h-11 w-11 shrink-0 rounded-xl text-white font-bold text-[10px] overflow-hidden ${colorForExt}`}>{ext}</div>
         <div className="flex items-center gap-1">
           {canManage && (
             <>
