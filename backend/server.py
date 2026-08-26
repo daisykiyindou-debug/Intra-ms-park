@@ -4869,10 +4869,16 @@ async def admin_list_forms():
 
 @api.get("/forms/{fid}")
 async def get_form(fid: str):
-    """Public — logged employees can fetch a form to fill it in."""
+    """Public — logged employees can fetch a form to fill it in.
+    Also returns whether the caller has already answered (`already_answered`)
+    and the submission timestamp so the UI can hide the form."""
     f = await db.forms.find_one({"id": fid, "active": True}, {"_id": 0})
     if not f:
         raise HTTPException(404, "Formulaire introuvable ou désactivé")
+    uid = current_user()
+    existing = await db.form_responses.find_one({"form_id": fid, "employee_id": uid}, {"_id": 0})
+    f["already_answered"] = bool(existing)
+    f["my_response_at"] = existing.get("submitted_at") if existing else None
     return f
 
 
@@ -4920,17 +4926,26 @@ async def submit_form(fid: str, payload: FormSubmitPayload):
     f = await db.forms.find_one({"id": fid, "active": True}, {"_id": 0})
     if not f:
         raise HTTPException(404, "Formulaire introuvable ou désactivé")
-    me = await db.employees.find_one({"id": current_user()}, {"_id": 0})
+    uid = current_user()
+    # Server-side idempotency: reject any second submission from the same user
+    # regardless of double-click, refresh or another browser/device.
+    existing = await db.form_responses.find_one({"form_id": fid, "employee_id": uid}, {"_id": 0})
+    if existing:
+        raise HTTPException(409, "Vous avez déjà répondu à ce formulaire.")
+    me = await db.employees.find_one({"id": uid}, {"_id": 0})
     employee_name = f"{me['first_name']} {me['last_name']}" if me else "Anonyme"
     resp = {
         "id": _id(),
         "form_id": fid,
-        "employee_id": current_user(),
+        "employee_id": uid,
         "employee_name": employee_name,
         "answers": payload.answers,
         "submitted_at": _now(),
     }
-    await db.form_responses.insert_one(resp.copy())
+    try:
+        await db.form_responses.insert_one(resp.copy())
+    except Exception:
+        raise HTTPException(409, "Vous avez déjà répondu à ce formulaire.")
     # Notify the form creator when someone submits
     if f.get("created_by") and f.get("created_by") != current_user():
         await db.notifications.insert_one({

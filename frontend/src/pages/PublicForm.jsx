@@ -45,6 +45,33 @@ export default function PublicForm() {
   if (err) return <div className="ms-card p-8 text-center text-[#EF4444]">Formulaire introuvable ou désactivé</div>;
   if (!form) return <div className="ms-card p-8 animate-pulse h-64" />;
 
+  // ── Server said the current user has already answered this form.
+  // Never show the inputs nor the submit button again.
+  if (form.already_answered && !submitted) {
+    return (
+      <div className="ms-fade-up max-w-2xl mx-auto space-y-4">
+        <Link to="/dashboard" className="inline-flex items-center gap-2 text-sm font-semibold text-[#475569] hover:text-[#071B34]">
+          <ArrowLeft className="h-4 w-4" /> Retour
+        </Link>
+        <div className="ms-card p-10 text-center" data-testid="form-already-answered">
+          <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-[#10B981]/15 text-[#10B981] mb-4">
+            <CheckCircle2 className="h-8 w-8" />
+          </div>
+          <h1 className="text-2xl font-bold text-[#071B34]">Vous avez déjà répondu à ce formulaire.</h1>
+          <p className="mt-2 text-sm text-[#475569]">Votre réponse a bien été enregistrée.</p>
+          {form.my_response_at && (
+            <p className="mt-1 text-[11px] text-[#94A3B8]">
+              Envoyée le {new Date(form.my_response_at).toLocaleString("fr-FR", { dateStyle: "long", timeStyle: "short" })}
+            </p>
+          )}
+          <div className="mt-6 flex justify-center gap-2">
+            <Link to="/dashboard" className="ms-btn-primary">Retour à l'accueil</Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   const setValue = (name, value) => setAnswers((a) => ({ ...a, [name]: value }));
 
   const toggleMulti = (name, opt) => {
@@ -70,12 +97,21 @@ export default function PublicForm() {
 
   const submit = async () => {
     if (!validate()) return;
+    if (submitting) return; // hard-guard against double-click
     setSubmitting(true);
     try {
       const { data } = await api.post(`/forms/${form.id}/submit`, { answers });
       setSubmitted(data.success_message || "Merci !");
     } catch (e) {
-      toast.error("Impossible d'envoyer votre réponse", { description: e.response?.data?.detail });
+      const status = e.response?.status;
+      const detail = e.response?.data?.detail;
+      if (status === 409) {
+        // Server rejected because the user already answered — reflect it in the UI
+        toast.error(detail || "Vous avez déjà répondu à ce formulaire.");
+        setForm((f) => (f ? { ...f, already_answered: true, my_response_at: f.my_response_at || new Date().toISOString() } : f));
+      } else {
+        toast.error("Impossible d'envoyer votre réponse", { description: detail });
+      }
     } finally {
       setSubmitting(false);
     }
