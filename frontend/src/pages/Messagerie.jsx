@@ -1157,6 +1157,10 @@ export default function Messagerie() {
                             {!mine && (
                               isSystemRh
                                 ? <div className="h-7 w-7 rounded-full bg-[#3BA4FF] text-white text-[10px] font-bold flex items-center justify-center shrink-0" data-testid="msg-avatar-service-rh">RH</div>
+                                : m.is_service_message
+                                ? <div className="h-7 w-7 rounded-full bg-gradient-to-br from-[#7C3AED] to-[#A78BFA] text-white flex items-center justify-center shrink-0" title={m.service_name || "Service"} data-testid="msg-avatar-service">
+                                    <Briefcase className="h-3.5 w-3.5" />
+                                  </div>
                                 : author?.avatar
                                 ? <img src={author.avatar} alt="" className="h-7 w-7 rounded-full object-cover shrink-0" />
                                 : <div className="h-7 w-7 rounded-full bg-[#3BA4FF]/15 text-[#1D70B8] text-[10px] font-bold flex items-center justify-center shrink-0">
@@ -1166,8 +1170,15 @@ export default function Messagerie() {
                             <div className={`relative max-w-[70%] rounded-2xl px-3.5 py-2 text-sm ${
                               mine
                                 ? "bg-[#DBEAFE] text-[#0B2545] rounded-br-sm"
+                                : m.is_service_message
+                                ? "bg-gradient-to-br from-[#F5F3FF] to-white ring-1 ring-[#A78BFA]/30 text-[#0B2545] rounded-bl-sm"
                                 : "bg-[#F1F5F9] text-[#0B2545] rounded-bl-sm"
                             }`}>
+                              {!mine && m.is_service_message && (
+                                <div className="text-[10px] font-bold text-[#7C3AED] mb-1">
+                                  {m.service_name || "Service"}
+                                </div>
+                              )}
                               {m.content && (
                                 <div className="whitespace-pre-wrap break-words">{m.content}</div>
                               )}

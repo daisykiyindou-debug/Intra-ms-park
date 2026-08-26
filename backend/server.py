@@ -4524,10 +4524,21 @@ async def post_message(cid: str, payload: MessageCreate):
         f"{author.get('first_name', '')} {author.get('last_name', '')}".strip()
         if author else "Un collègue"
     )
-    # Auto-signature: when writing from a Service inbox, append "— Prénom Nom"
-    # unless the sender already included their signature manually.
+    # Detect Service canal replies. Two possibilities:
+    #  1. Legacy shared inbox (`service_inbox` — still handled for BC)
+    #  2. Per-employee `corp-{key}-{uid}` thread when the author is a
+    #     member of the service (i.e. has the canal key in their access list).
     body = payload.content or ""
     is_service_msg = bool(ch and ch.get("is_service_inbox"))
+    service_name = ch.get("name") if is_service_msg else None
+    if not is_service_msg and ch and str(ch.get("id", "")).startswith("corp-"):
+        # Extract canal key from `corp-{key}-{uid}` — key can contain dashes,
+        # so use the corporate_key attribute stored on the channel.
+        canal_key = ch.get("corporate_key")
+        if canal_key and canal_key in (author.get("service_channels_access") or []):
+            is_service_msg = True
+            meta = CORPORATE_CANALS.get(canal_key, {})
+            service_name = meta.get("name") or ch.get("name")
     if is_service_msg and body.strip() and f"— {author_name}" not in body:
         body = f"{body.rstrip()}\n\n— {author_name}"
     msg = {
@@ -4537,7 +4548,8 @@ async def post_message(cid: str, payload: MessageCreate):
         "content": body,
         "attachments": payload.attachments or [],
         "is_service_message": is_service_msg,
-        "service_name": ch.get("name") if is_service_msg else None,
+        "service_name": service_name,
+        "service_icon": (ch.get("icon") if is_service_msg else None) if ch else None,
         "ts": _now(),
     }
     await db.messages.insert_one(msg.copy())
@@ -7578,9 +7590,14 @@ async def on_start():
     # Seed shared service-inbox channels (idempotent). Runs AFTER Marcus's
     # assignment so his Direction inbox already has him as member.
     try:
-        await _ensure_service_inboxes_seeded()
+        # ─── Clean up the deprecated "shared service inbox" concept.
+        # Service canals are DM-like : each employee opens their own thread
+        # (`corp-{key}-{uid}`) and staff members reply. There is NO group inbox.
+        gone = await db.channels.delete_many({"type": "service_inbox"})
+        if gone.deleted_count:
+            print(f"[startup] purged {gone.deleted_count} deprecated service_inbox channels")
     except Exception as e:
-        print(f"[startup] service-inboxes seed skipped: {e}")
+        print(f"[startup] service-inboxes cleanup skipped: {e}")
 
 
 async def _seed_birth_dates():
