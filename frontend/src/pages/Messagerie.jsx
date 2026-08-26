@@ -153,15 +153,8 @@ export default function Messagerie() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);
 
-  // Auto-select the first conversation if none selected
-  useEffect(() => {
-    if (!active && channels.length > 0) {
-      const first = channels
-        .filter((c) => !c.archived)
-        .sort((a, b) => (b.last_message_ts || "").localeCompare(a.last_message_ts || ""))[0];
-      if (first) setActive(first.id);
-    }
-  }, [active, channels]);
+  // Auto-select the first conversation if none selected — placeholder
+  // moved below (needs scopedConversations to be defined first).
 
   const reload = useCallback(() => {
     if (!active) return Promise.resolve();
@@ -340,6 +333,27 @@ export default function Messagerie() {
       return c.corporate_key === key;
     });
   }, [conversations, mailboxMode]);
+
+  // Ensure the active channel matches the current mailbox scope. When the
+  // user switches boîte, close the current thread if it doesn't belong to
+  // the new boîte — otherwise the right pane keeps showing a conversation
+  // that isn't visible in the sidebar (confusing UX). Also auto-selects
+  // the first scoped conversation when `active` is empty.
+  useEffect(() => {
+    if (active) {
+      const stillInScope = scopedConversations.some((c) => c.id === active);
+      if (!stillInScope) {
+        setActive(null);
+        return;
+      }
+    }
+    if (!active && scopedConversations.length > 0) {
+      const first = scopedConversations
+        .filter((c) => !c.archived)
+        .sort((a, b) => (b.last_message_ts || "").localeCompare(a.last_message_ts || ""))[0];
+      if (first) setActive(first.id);
+    }
+  }, [active, mailboxMode, scopedConversations]);
   const mailboxUnread = useMemo(() => {
     // Total unread per service canal (from the viewer=service-staff side)
     const map = { personal: 0 };
