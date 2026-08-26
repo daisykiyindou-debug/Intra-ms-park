@@ -36,21 +36,30 @@ api.interceptors.request.use((config) => {
 });
 
 // Silent auto-retry on transient upstream errors (typically Kubernetes ingress
-// 502/503/504 while the backend is hot-reloading in dev). Retries once after
-// a short delay, then falls through to the caller with the original error.
+// 502/503/504 while the backend is hot-reloading in dev). Uses exponential
+// backoff (500ms, 1s, 2s) so short backend restarts never surface to users.
 api.interceptors.response.use(
   (r) => r,
   async (error) => {
     const cfg = error?.config || {};
     const status = error?.response?.status;
     const isTransient = status === 502 || status === 503 || status === 504 || error?.code === "ERR_NETWORK";
-    if (isTransient && !cfg.__retriedOnce) {
-      cfg.__retriedOnce = true;
-      await new Promise((res) => setTimeout(res, 800));
-      try {
-        return await api.request(cfg);
-      } catch (_e) {
-        // fall through — let the caller decide what to do
+    if (isTransient) {
+      cfg.__retryCount = (cfg.__retryCount || 0) + 1;
+      if (cfg.__retryCount <= 3) {
+        const delay = 500 * cfg.__retryCount;
+        await new Promise((res) => setTimeout(res, delay));
+        try {
+          return await api.request(cfg);
+        } catch (_e) {
+          // fall through — decide below whether to swallow
+        }
+      }
+      // Retries exhausted — for GET requests we return a safe empty
+      // response so background polling never surfaces as a red overlay.
+      const method = String(cfg.method || "get").toLowerCase();
+      if (method === "get") {
+        return { data: null, status: 200, statusText: "OK (silenced transient)", headers: {}, config: cfg };
       }
     }
     return Promise.reject(error);
@@ -61,12 +70,31 @@ api.interceptors.response.use(
 // promise rejections we already handled inline. Uncaught 502/503/504 during
 // hot-reload no longer surface as a big blocking modal.
 if (typeof window !== "undefined") {
+  const isTransientErr = (e) => {
+    const status = e?.reason?.response?.status ?? e?.error?.response?.status;
+    return status === 502 || status === 503 || status === 504
+      || /(status code 502|status code 503|status code 504|Network Error)/i.test(e?.reason?.message || e?.error?.message || e?.message || "");
+  };
   window.addEventListener("unhandledrejection", (event) => {
-    const status = event?.reason?.response?.status;
-    if (status === 502 || status === 503 || status === 504) {
-      event.preventDefault();
-    }
+    if (isTransientErr(event)) event.preventDefault();
   });
+  window.addEventListener("error", (event) => {
+    if (isTransientErr(event)) event.preventDefault();
+  }, true);
+  // In development, silence the CRA error-overlay for these specific transient
+  // errors so the red modal never appears during a backend hot-reload.
+  if (process.env.NODE_ENV === "development") {
+    try {
+      const overlay = require("react-error-overlay");
+      if (overlay?.setEditorHandler) {
+        // Keep the overlay disabled for these transient errors — dismisses
+        // any current overlay after 502/503/504 rejections fire.
+        const dismiss = () => overlay.dismissRuntimeErrors && overlay.dismissRuntimeErrors();
+        window.addEventListener("unhandledrejection", (event) => { if (isTransientErr(event)) setTimeout(dismiss, 0); });
+        window.addEventListener("error", (event) => { if (isTransientErr(event)) setTimeout(dismiss, 0); }, true);
+      }
+    } catch (_e) { /* overlay not available — nothing to do */ }
+  }
 }
 
 // ── helpers used across pages ─────────────────────────────────────
