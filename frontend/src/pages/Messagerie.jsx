@@ -241,7 +241,7 @@ export default function Messagerie() {
               corpInitiatorId = idStr.slice(3); // strip "rh-"
             } else {
               // Fallback parse. Employee ids may contain dashes so we detect by matching keys.
-              for (const k of ["service-rh", "communication", "managers-ops", "dept-financier", "direction"]) {
+              for (const k of ["service-rh", "communication", "managers-ops", "dept-financier", "direction", "service-web-it"]) {
                 const prefix = `corp-${k}-`;
                 if (idStr.startsWith(prefix)) { corpKey = k; corpInitiatorId = idStr.slice(prefix.length); break; }
               }
@@ -377,7 +377,7 @@ export default function Messagerie() {
           conv.corporate_key ||
           (idStr.startsWith("rh-") ? "service-rh" : null) ||
           (() => {
-            for (const k of ["service-rh", "communication", "managers-ops", "dept-financier", "direction"]) {
+            for (const k of ["service-rh", "communication", "managers-ops", "dept-financier", "direction", "service-web-it"]) {
               if (idStr.startsWith(`corp-${k}-`)) return k;
             }
             return null;
@@ -413,7 +413,7 @@ export default function Messagerie() {
           if (idStr.startsWith("rh-")) {
             key = "service-rh";
           } else {
-            for (const k of ["service-rh", "communication", "managers-ops", "dept-financier", "direction"]) {
+            for (const k of ["service-rh", "communication", "managers-ops", "dept-financier", "direction", "service-web-it"]) {
               if (idStr.startsWith(`corp-${k}-`)) { key = k; break; }
             }
           }

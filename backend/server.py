@@ -5416,7 +5416,7 @@ async def consumption_history():
 # ─── Poles (contacts grouped)
 @api.get("/poles")
 async def poles():
-    """Return the 5 official service poles aligned with the corporate canals.
+    """Return the 6 official service poles aligned with the corporate canals.
     Each pole maps to a `canal_key` used by the messagerie to open the
     corresponding service inbox (`corp-{key}-{uid}`)."""
     return [
@@ -5435,6 +5435,9 @@ async def poles():
         {"id": "direction", "canal_key": "direction", "name": "Direction",
          "email": "direction@mspark.fr", "phone": "+33 1 23 45 67 82",
          "description": "Direction générale et stratégie.", "icon": "briefcase", "color": "#A78BFA"},
+        {"id": "service-web-it", "canal_key": "service-web-it", "name": "Service Web & IT",
+         "email": "support@mspark.fr", "phone": "+33 1 78 28 04 52",
+         "description": "Support informatique, site web, applications internes.", "icon": "monitor", "color": "#7C3AED"},
     ]
 
 
@@ -5451,25 +5454,25 @@ async def _get_channel_catalog(kind: str) -> list[dict]:
 
 
 async def _seed_channel_catalog() -> None:
-    """One-shot: seed channel_catalog from CORPORATE_CANALS + TEAM_CANALS."""
-    has_any = await db.channel_catalog.count_documents({})
-    if has_any:
-        return
-    rows = []
+    """One-shot: seed channel_catalog from CORPORATE_CANALS + TEAM_CANALS.
+    Also fills in any NEW keys added to the Python constants after the
+    initial seed (idempotent per-key)."""
     for k, v in CORPORATE_CANALS.items():
-        rows.append({
-            "kind": "service", "key": k, "name": v["name"],
-            "icon": v.get("icon"), "description": v.get("description", ""),
-            "created_at": _now(),
-        })
+        exists = await db.channel_catalog.find_one({"kind": "service", "key": k})
+        if not exists:
+            await db.channel_catalog.insert_one({
+                "kind": "service", "key": k, "name": v["name"],
+                "icon": v.get("icon"), "description": v.get("description", ""),
+                "created_at": _now(),
+            })
     for k, v in TEAM_CANALS.items():
-        rows.append({
-            "kind": "team", "key": k, "name": v["name"],
-            "icon": v.get("icon"), "description": v.get("description", ""),
-            "created_at": _now(),
-        })
-    if rows:
-        await db.channel_catalog.insert_many(rows)
+        exists = await db.channel_catalog.find_one({"kind": "team", "key": k})
+        if not exists:
+            await db.channel_catalog.insert_one({
+                "kind": "team", "key": k, "name": v["name"],
+                "icon": v.get("icon"), "description": v.get("description", ""),
+                "created_at": _now(),
+            })
 
 
 def _slugify(text: str) -> str:
@@ -5512,6 +5515,11 @@ CORPORATE_CANALS = {
         "name": "Direction",
         "icon": "shield",
         "description": "Direction générale",
+    },
+    "service-web-it": {
+        "name": "Service Web & IT",
+        "icon": "monitor",
+        "description": "Support informatique & équipe web/dev",
     },
 }
 
