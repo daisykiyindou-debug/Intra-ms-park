@@ -1,13 +1,15 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Sparkles, LogIn, Mail, Lock, ArrowRight, ShieldCheck } from "lucide-react";
+import { LogIn, Mail, Lock, ArrowRight } from "lucide-react";
 import { toast } from "sonner";
 import { api, setAuthId } from "@/lib/api";
 
+const MS_PARK_LOGO = "https://customer-assets-jt897jd0.emergentagent.net/job_mspark-employee-hub/artifacts/n4qg1w02_logo%20ms%20park%20transparent.png";
+
 export default function LoginPage() {
   const navigate = useNavigate();
-  const [email, setEmail] = useState("idriss.malonga@gmail.com");
-  const [password, setPassword] = useState("Idriss2026!");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
 
   const submit = async (e) => {
@@ -24,25 +26,11 @@ export default function LoginPage() {
       window.location.href = "/dashboard";
     } catch (err) {
       toast.error("Identifiants incorrects", {
-        description:
-          "Essayez idriss.malonga@gmail.com / Idriss2026! ou marcus.simeo@mspark.fr / MSPark@Admin2026!",
+        description: "Veuillez vérifier votre email et votre mot de passe.",
       });
     } finally {
       setLoading(false);
     }
-  };
-
-  const fillAdmin = () => {
-    setEmail("marcus.simeo@mspark.fr");
-    setPassword("MSPark@Admin2026!");
-  };
-  const fillEmployee = () => {
-    setEmail("idriss.malonga@gmail.com");
-    setPassword("Idriss2026!");
-  };
-  const fillComm = () => {
-    setEmail("lea.dubois@mspark.fr");
-    setPassword("MSPark@Comm2026!");
   };
 
   return (
@@ -52,8 +40,13 @@ export default function LoginPage() {
         <div className="absolute -right-20 -top-20 h-96 w-96 rounded-full bg-[#3BA4FF]/30 blur-3xl" />
         <div className="absolute -left-10 bottom-10 h-64 w-64 rounded-full bg-[#3BA4FF]/15 blur-3xl" />
         <div className="relative flex items-center gap-3">
-          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-[#3BA4FF] to-[#1D70B8] shadow-lg shadow-[#3BA4FF]/25">
-            <Sparkles className="h-6 w-6 text-white" strokeWidth={2.5} />
+          <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-white/10 backdrop-blur-md border border-white/15 shadow-lg shadow-[#3BA4FF]/20 p-2">
+            <img
+              src={MS_PARK_LOGO}
+              alt="MS Park"
+              className="h-full w-full object-contain"
+              data-testid="login-brand-logo"
+            />
           </div>
           <div>
             <div className="text-2xl font-extrabold tracking-tight leading-none">MS Park</div>
@@ -97,34 +90,7 @@ export default function LoginPage() {
             Connectez-vous avec votre identifiant MS Park pour accéder à l'intranet.
           </p>
 
-          <div className="mt-6 grid grid-cols-3 gap-2">
-            <button
-              type="button"
-              onClick={fillEmployee}
-              data-testid="quickfill-employee"
-              className="text-[10px] font-semibold text-[#3BA4FF] bg-[#3BA4FF]/10 hover:bg-[#3BA4FF]/20 rounded-lg px-2 py-2 transition-colors"
-            >
-              👤 Démo employé
-            </button>
-            <button
-              type="button"
-              onClick={fillComm}
-              data-testid="quickfill-comm"
-              className="text-[10px] font-semibold text-[#B45309] bg-[#F59E0B]/10 hover:bg-[#F59E0B]/20 rounded-lg px-2 py-2 transition-colors inline-flex items-center justify-center gap-1"
-            >
-              📢 Démo com'
-            </button>
-            <button
-              type="button"
-              onClick={fillAdmin}
-              data-testid="quickfill-admin"
-              className="text-[10px] font-semibold text-[#7C3AED] bg-[#A78BFA]/10 hover:bg-[#A78BFA]/20 rounded-lg px-2 py-2 transition-colors inline-flex items-center justify-center gap-1"
-            >
-              <ShieldCheck className="h-3 w-3" /> Admin
-            </button>
-          </div>
-
-          <div className="mt-4 space-y-4">
+          <div className="mt-6 space-y-4">
             <div>
               <label className="ms-overline">Email personnel</label>
               <div className="relative mt-2">
@@ -154,9 +120,13 @@ export default function LoginPage() {
                 />
               </div>
               <div className="mt-2 text-right">
-                <button type="button" className="text-xs font-semibold text-[#3BA4FF] hover:underline">
-                  Mot de passe oublié ?
-                </button>
+                <a
+                  href="mailto:support@mspark.fr?subject=Mot%20de%20passe%20oubli%C3%A9%20-%20Intranet%20MS%20Park"
+                  className="text-xs font-semibold text-[#3BA4FF] hover:underline"
+                  data-testid="forgot-password-link"
+                >
+                  Mot de passe oublié ? Envoyer un mail à support@mspark.fr (Service Web &amp; IT)
+                </a>
               </div>
             </div>
           </div>

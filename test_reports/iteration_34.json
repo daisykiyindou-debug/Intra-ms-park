@@ -1,0 +1,31 @@
+{
+  "summary": "Iteration 34 — frontend-only retest of the 2 remaining 'Nouvelle demande' modal issues from iteration_33 (Marcus SIMÉO, localStorage ms_employee_id=emp-marcus-simeo, /rh/demandes). RESULT: 1 of 2 fixed. (a) HEIGHT STABILITY = STILL FAILING: rAF sampling over 1.5s, 3/3 opens, the form paints at 634px and jumps to 760px at t≈260-360ms (delta 126px) when GET /api/availability resolves. The min-h-[520px] wrapper is simply too short: measured wrapper height after load is 646px (calendar itself 622px, cal-grid 387px), so the 520px reservation is exceeded by 126px — exactly the observed jump. The vertical SHIFT is fixed though (form top stays at y=32 the whole time thanks to items-start), so the flash is now a downward growth only, no re-centering. (b) SHORT-VIEWPORT TOP = FIXED: on 1366x700 the form top is y=32 (>=0), 'Nouvelle demande' overline at y=53 and the X close button at y=53 are both visible without any scrolling; internal form scroll works (scrollTop 0, scrollHeight 758 / clientHeight 666) and the X button is clickable and closes the modal cleanly (0 residual dialogs). ADDITIONAL finding: month navigation also re-flows the modal (760px for a 6-row month like Août 2026 -> 694px for a 5-row month like Septembre 2026), so the jump is not only a load-time issue.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "Demandes.jsx l.431 wrapper + LeaveCalendar.jsx l.110-113", "issue": "Post-mount growth flash NOT fixed: min-h-[520px] under-reserves. Measured timeline (3/3 opens): t=83ms wrapper 520px / cal 235px / grid 0px -> t=99ms grid 80px -> t=261ms wrapper 646px / cal 622px / grid 387px; form height 634 -> 760 (+126px). Fix properly INSIDE LeaveCalendar: render 42 placeholder cells (or min-h on [data-testid='cal-grid'] equal to 6 rows: 6*cell + 5*6px gap ≈ 387px) while loading, so the grid never changes height; alternatively raise the wrapper reservation to >=660px. A wrapper min-height alone cannot work because it must be >= the tallest (6-row) month.", "selector": "[data-testid=\"request-form\"] / [data-testid=\"cal-grid\"]", "priority": "HIGH"},
+      {"component": "LeaveCalendar.jsx grid", "issue": "Month navigation resizes the modal: Août 2026 (6 grid rows) => form 760px, Septembre 2026 (5 rows) => 694px. Same root cause; a fixed 6-row grid min-height fixes both the load flash and the month-nav jump.", "selector": "[data-testid=\"cal-next\"] / [data-testid=\"cal-prev\"]", "priority": "MEDIUM"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Nouvelle demande modal", "issues": ["1366x700: modal now scrolls internally and the header is reachable — OK", "Left column still ends ~200px above the calendar bottom (large empty area under 'Envoyer la demande'), modal looks unbalanced"]}
+    ]
+  },
+  "test_report_links": [],
+  "action_items": [
+    "Reserve the calendar grid height inside LeaveCalendar (42 skeleton cells or min-height ≈ 6 rows on [data-testid='cal-grid']) — current min-h-[520px] on the wrapper is 126px short of the loaded 646px, so the flash still reproduces 100%",
+    "Same fix removes the month-navigation height jump (760px 6-row month vs 694px 5-row month)",
+    "No further work needed for the short-viewport issue: items-start + max-h-[calc(100vh-2rem)] + overflow-y-auto verified working at 1366x700"
+  ],
+  "critical_code_review_comments": [
+    "Demandes.jsx l.431: min-h-[520px] was derived from the wrong number; the loaded wrapper measures 646px. Height reservation must live in the component that owns the variable-height content (the grid), not in the parent.",
+    "LeaveCalendar.jsx l.111-113: the loading branch renders a single 'Chargement…' row (80px) instead of a full-height 6-row placeholder — this is the layout-jump source."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "not tested", "frontend": "50% of retested items (1/2: short-viewport top FIXED, height stability FAILING)"},
+  "seed_data_creation": "None — no request submitted.",
+  "should_call_test_agent_after_fix": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Measurement recipe: install a rAF sampler recording getBoundingClientRect() of [data-testid='request-form'], [data-testid='leave-calendar'] and [data-testid='cal-grid'] BEFORE clicking [data-testid='new-request'], sample 1.5s. Current numbers at 1500x900: form 634px@t~80ms -> 760px@t~260-360ms; wrapper 520 -> 646; grid 0 -> 80 -> 387. Target after fix: grid height constant from first frame, form delta <= 30px. Also re-check cal-next/cal-prev (Août=6 rows, Septembre=5 rows) for constant form height. 1366x700 case already PASSES (form top y=32, overline+X visible, X clickable).",
+  "rca_of_the_issue": "The flash persists because the reserved height (min-h-[520px] on the calendar column wrapper) is smaller than the calendar's real loaded height (646px). While /api/availability is pending, the grid renders one 80px 'Chargement…' row, so the column collapses to the 520px floor; when the 6-week grid (387px) paints, the column grows to 646px and the modal grows 126px. Reserving the grid height for 6 rows inside LeaveCalendar eliminates both the load flash and the 5-row/6-row month-nav jump."
+}

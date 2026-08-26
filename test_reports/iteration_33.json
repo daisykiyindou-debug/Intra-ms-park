@@ -1,0 +1,32 @@
+{
+  "summary": "Iteration 33 — frontend-only verification of the 'Nouvelle demande' modal on /rh/demandes (Marcus SIMÉO, emp-marcus-simeo). VERIFIED FIXED: only ONE [data-testid='request-form'] / [role='dialog'] exists in the DOM at any frame (rAF sampling over 1.2s, 3 consecutive opens) — no double-render, no second overlay; backdrop is correct (rgba(7,27,52,0.4) + backdrop-filter blur(12px), z-index 200, flex centered); width is exactly 896px (max-w-4xl), horizontally centered (x=302 on 1500px viewport) and fits within 1500x900 (no x/y overflow); type selection (type-conge / type-acompte), calendar month navigation (cal-next) and day selection ('1 jour sélectionné') work; X close leaves ZERO residual dialogs/overlays and body overflow stays 'visible'; reopening works. NOT FIXED: the reported half-second visual flash still reproduces 3/3 times — the modal renders at height 612px (y=144) and then jumps to 760px (y=70) at ~250-330ms, i.e. it grows 148px and shifts 74px upwards after the LeaveCalendar availability request resolves. Additional finding: on a 1366x700 viewport the modal top (overline + header/X) sits at y=-30px, above the viewport, and is unreachable (dialog scrollTop is already 0, scrollHeight 762 > clientHeight 700).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "Demandes.jsx / LeaveCalendar.jsx", "issue": "Visual 'flash' NOT fixed: modal first paints 612px tall at y=144, then re-lays-out to 760px at y=70 after ~250-330ms (100% reproducible over 3 opens). LeaveCalendar mounts with data=null so the day grid is empty/placeholder, and when GET /api/availability resolves the 5-6 week grid appears, growing the modal and re-centering it — this is the double display the user sees. Fix: reserve the grid height while loading (render 42 skeleton cells or min-h-[300px]/aspect-locked grid on [data-testid='cal-grid']), or prefetch availability before mounting the calendar.", "selector": "[data-testid=\"request-form\"] / [data-testid=\"cal-grid\"]", "priority": "HIGH"},
+      {"component": "Demandes.jsx modal wrapper", "issue": "On 1366x700 the form bounding box is y=-30 (top 30px clipped above the viewport) and the header/close area cannot be scrolled into view because the overflow-y-auto container is already at scrollTop=0 (classic 'items-center + overflow-auto' trap). Fix: keep items-start with my-auto, or give the form max-h-[90vh] with its own overflow-y-auto.", "selector": "div[role=\"dialog\"].fixed.inset-0 > form[data-testid=\"request-form\"]", "priority": "MEDIUM"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Nouvelle demande modal (1500x900)", "issues": ["Modal is 896px wide and 760px tall for congé/RTT/absence and 802px for 'Acompte' — it fits 900px height with only ~50px margin, so any laptop under ~860px usable height clips it (see 1366x700 bug)", "The left column ends far above the calendar column (large empty white area under 'Envoyer la demande'), so the modal looks unbalanced even after the max-w-4xl compaction"]}
+    ]
+  },
+  "test_report_links": [],
+  "action_items": [
+    "Fix the remaining flash: reserve the calendar grid height in LeaveCalendar while /api/availability is loading (skeleton 42 cells or fixed min-height) so the modal does not grow 148px / shift 74px after opening",
+    "Prevent the modal top from being clipped on short viewports: use items-start + my-auto on the backdrop, or max-h-[90vh] + internal scroll on the form",
+    "Optional polish: reduce vertical whitespace in the left column (or align the submit button to the calendar bottom) to make the modal feel compact"
+  ],
+  "critical_code_review_comments": [
+    "Demandes.jsx l.289-301: portal + `open && createPortal` is correct and produces a single dialog — no duplicate render found; the perceived flash comes from LeaveCalendar's async height, not from a double mount.",
+    "LeaveCalendar.jsx l.38-46 / l.108-113: grid is [] until data arrives and the loading branch renders a single-row 'Chargement…' cell, so the container height is not reserved — this is the root cause of the layout jump inside the modal.",
+    "Demandes.jsx l.295: `flex items-start md:items-center ... overflow-y-auto` makes overflowing content unreachable at the top on short viewports."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "not tested", "frontend": "70% (single-dialog, width, centering, backdrop, interactions and clean close PASS; flash-free first render and short-viewport fit FAIL)"},
+  "seed_data_creation": "None — no request was submitted (form filled and closed only).",
+  "should_call_test_agent_after_fix": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Testids: open with [data-testid='new-request']; modal form is [data-testid='request-form']; leave types are type-conge/type-rtt/type-absence/type-echange/type-acompte/type-materiel/type-maladie (NOT 'req-type-cp'); calendar is [data-testid='leave-calendar'] with cal-prev/cal-next/cal-grid; the X close button is the first <button> inside the form (it has no data-testid — consider adding one). To detect the flash, install a requestAnimationFrame sampler recording getBoundingClientRect() of the form BEFORE clicking 'new-request': current behaviour is 612px@y144 -> 760px@y70 around t=250-330ms. Days of the current month before today are disabled — navigate with cal-next to select a day. Auth: localStorage 'ms_employee_id' = 'emp-marcus-simeo' before navigation.",
+  "rca_of_the_issue": "The reported double display is a layout reflow, not a double render. LeaveCalendar fetches GET /api/availability on mount; until it resolves the day grid is empty so the modal paints ~148px shorter and, because the backdrop centers it vertically, it also sits 74px lower. When the data arrives the grid expands and the modal jumps upward/outward — perceived as a half-second flash of a different display. Reserving the grid height (or prefetching availability) removes it."
+}

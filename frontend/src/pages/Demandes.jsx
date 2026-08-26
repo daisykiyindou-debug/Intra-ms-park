@@ -288,16 +288,17 @@ export default function Demandes() {
       {/* New request modal */}
       {open && createPortal(
         <div
+          key="new-request-dialog"
           role="dialog"
           aria-modal="true"
           onClick={() => setOpen(false)}
-          className="fixed inset-0 z-[200] bg-[#071B34]/40 backdrop-blur-md flex items-start md:items-center justify-center p-4 overflow-y-auto"
+          className="fixed inset-0 z-[200] bg-[#071B34]/40 backdrop-blur-md flex items-start justify-center p-4 overflow-y-auto"
         >
           <form
             onClick={(e) => e.stopPropagation()}
             onSubmit={submit}
             data-testid="request-form"
-            className="ms-card max-w-5xl w-full p-6 my-4"
+            className="ms-card max-w-4xl w-full p-5 my-4 max-h-[calc(100vh-2rem)] overflow-y-auto"
           >
             <div className="flex items-start justify-between">
               <div>
@@ -423,9 +424,11 @@ export default function Demandes() {
                 </button>
               </div>
 
-              {/* Right column — interactive calendar (only for conge/rtt/absence) */}
+              {/* Right column — interactive calendar (only for conge/rtt/absence).
+                  Fixed min-height so async availability load doesn't grow the
+                  modal after mount (the "half-second flash"). */}
               {["conge", "rtt", "absence"].includes(form.type) && (
-                <div>
+                <div className="min-h-[520px]">
                   <label className="ms-overline block mb-2">Sélectionnez vos jours dans le calendrier</label>
                   <LeaveCalendar
                     value={form.dates}

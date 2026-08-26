@@ -13,7 +13,6 @@ import {
   Gift,
   Users,
   User,
-  Sparkles,
   ShieldCheck,
   ClipboardList,
   Inbox,
@@ -187,8 +186,13 @@ export default function Sidebar({ open, onClose }) {
         }`}
       >
         <div className="flex h-20 items-center gap-3 px-6 border-b border-white/5">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-[#3BA4FF] to-[#1D70B8] shadow-lg shadow-[#3BA4FF]/25">
-            <Sparkles className="h-5 w-5 text-white" strokeWidth={2.5} />
+          <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-white/[0.06] border border-white/10 backdrop-blur-md p-1.5 shadow-lg shadow-[#3BA4FF]/10">
+            <img
+              src="https://customer-assets-jt897jd0.emergentagent.net/job_mspark-employee-hub/artifacts/n4qg1w02_logo%20ms%20park%20transparent.png"
+              alt="MS Park"
+              className="h-full w-full object-contain"
+              data-testid="sidebar-brand-logo"
+            />
           </div>
           <div>
             <div className="text-lg font-extrabold tracking-tight leading-none">MS Park</div>
