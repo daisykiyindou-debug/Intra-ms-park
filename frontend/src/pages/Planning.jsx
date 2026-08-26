@@ -283,7 +283,7 @@ export default function Planning() {
           role="dialog"
           aria-modal="true"
           onClick={() => setSelected(null)}
-          className="fixed inset-0 z-50 bg-black/40 backdrop-blur-md flex items-center justify-center p-6"
+          className="fixed inset-0 z-[200] bg-[#071B34]/40 backdrop-blur-md flex items-center justify-center p-6"
         >
           <div
             onClick={(e) => e.stopPropagation()}

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Calendar as CalIcon, ChevronLeft, ChevronRight, MapPin, Clock, X, ExternalLink, Users } from "lucide-react";
 import { api, fr, formatDateFr, absoluteUrl } from "@/lib/api";
 import useLiveData from "@/hooks/useLiveData";
+import PortalModal from "@/components/PortalModal";
 
 const typeColor = {
   event: { bg: "#A78BFA22", color: "#7C3AED", label: "Événement" },
@@ -180,17 +181,8 @@ export default function Agenda() {
 
       {/* Event modal */}
       {selected && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          onClick={() => setSelected(null)}
-          className="fixed inset-0 z-50 bg-black/40 backdrop-blur-md flex items-center justify-center p-4"
-        >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            data-testid="event-detail-modal"
-            className="ms-card max-w-2xl w-full max-h-[90vh] overflow-y-auto"
-          >
+        <PortalModal open onClose={() => setSelected(null)} maxWidth="max-w-2xl" testId="event-detail-modal-wrap">
+          <div className="max-h-[90vh] overflow-y-auto" data-testid="event-detail-modal">
             {selected.image && (
               <img
                 src={absoluteUrl(selected.image)}
@@ -287,7 +279,7 @@ export default function Agenda() {
               </div>
             </div>
           </div>
-        </div>
+        </PortalModal>
       )}
     </div>
   );

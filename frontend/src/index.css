@@ -146,6 +146,46 @@
 }
 .ms-fade-up { animation: ms-fade-up 0.5s cubic-bezier(0.16, 1, 0.3, 1) both; }
 
+/* After the animation ends (both) the transform is `none`. But some
+ * browsers still create a containing block for fixed descendants while
+ * the animation is technically finished. We use a class helper for pages
+ * that host modals to explicitly clear any transform once the animation
+ * has run. */
+.ms-fade-up { transform: none; }
+
+/* Universal modal wrapper: perfectly centered, blurred backdrop, above
+ * everything, with entry animation. Use with the PortalModal component. */
+@keyframes ms-modal-in {
+  from { opacity: 0; transform: translateY(4px) scale(0.98); }
+  to { opacity: 1; transform: none; }
+}
+.ms-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: rgba(7, 27, 52, 0.35);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  animation: fade-in 0.15s ease-out both;
+}
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+.ms-modal-panel {
+  background: white;
+  border-radius: 1.25rem;
+  box-shadow: 0 25px 60px -20px rgba(7, 27, 52, 0.25),
+              0 12px 30px -12px rgba(7, 27, 52, 0.15);
+  max-height: min(90vh, 900px);
+  width: 100%;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  animation: ms-modal-in 0.2s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
 
 /* Rich text editor placeholder + prose */
 .ms-rte:empty::before {

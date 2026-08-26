@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   ShoppingCart, Plus, Minus, X, QrCode, Clock, MapPin, CheckCircle2,
   ListOrdered, PackageCheck, Sparkles, AlertTriangle, Timer,
@@ -381,13 +382,13 @@ function CartModal({
     month: "long",
   });
 
-  return (
+  return createPortal(
     <div
       role="dialog"
       aria-modal="true"
       onClick={onClose}
       data-testid="cart-modal"
-      className="fixed inset-0 z-50 bg-black/40 backdrop-blur-md flex items-center justify-center p-4 sm:p-6"
+      className="fixed inset-0 z-[200] bg-[#071B34]/40 backdrop-blur-md flex items-center justify-center p-4 sm:p-6"
     >
       <div
         onClick={(e) => e.stopPropagation()}
@@ -531,7 +532,8 @@ function CartModal({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
@@ -540,12 +542,12 @@ function CartModal({
 function OrderQRModal({ order, onClose, onPickup, onCancel, onSeeOrders, isDetail }) {
   const meta = STATUS_META[order.status];
   const pickupDate = new Date(order.pickup_date);
-  return (
+  return createPortal(
     <div
       role="dialog"
       aria-modal="true"
       onClick={onClose}
-      className="fixed inset-0 z-50 bg-black/40 backdrop-blur-md flex items-center justify-center p-6"
+      className="fixed inset-0 z-[200] bg-[#071B34]/40 backdrop-blur-md flex items-center justify-center p-6"
     >
       <div
         onClick={(e) => e.stopPropagation()}
@@ -670,7 +672,8 @@ function OrderQRModal({ order, onClose, onPickup, onCancel, onSeeOrders, isDetai
           )}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
