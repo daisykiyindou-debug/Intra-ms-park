@@ -218,7 +218,7 @@ export default function Contacts() {
                       <span className="text-[#071B34]">{e.professional_phone || e.phone}</span>
                     </a>
                   )}
-                  {e.id !== "emp-idriss-malonga" && (
+                  {me && e.id !== me.id && (
                     <button
                       onClick={() => startDM(e.id)}
                       data-testid={`dm-${e.id}`}
