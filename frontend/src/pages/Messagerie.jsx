@@ -1327,7 +1327,19 @@ export default function Messagerie() {
                     </div>
                     <div className="space-y-2.5">
                       {g.items.map((m) => {
-                        const mine = m.author_id === me?.id;
+                        // Position + avatar logic depends on the active
+                        // mailbox mode.
+                        // - Personal side: MY messages (non-service) on right;
+                        //   service replies always on the left with service avatar.
+                        // - Service inbox side: service replies on right with
+                        //   service avatar; the employee's personal messages
+                        //   on the left with the employee's avatar.
+                        const authoredByMe = m.author_id === me?.id;
+                        const inServiceMode = mailboxMode !== "personal";
+                        const mine = inServiceMode
+                          ? !!m.is_service_message
+                          : authoredByMe && !m.is_service_message;
+                        const showServiceAvatar = !!m.is_service_message;
                         const isSystemRh = m.author_id === "system-rh";
                         const author = isSystemRh ? null : findEmployee(m.author_id);
                         const msgChecked = selectedMsgIds.has(m.id);
@@ -1352,9 +1364,7 @@ export default function Messagerie() {
                               />
                             )}
                             {!mine && (
-                              isSystemRh
-                                ? <div className="h-7 w-7 rounded-full bg-[#3BA4FF] text-white text-[10px] font-bold flex items-center justify-center shrink-0" data-testid="msg-avatar-service-rh">RH</div>
-                                : m.is_service_message
+                              isSystemRh || showServiceAvatar
                                 ? <div className="h-7 w-7 rounded-full bg-gradient-to-br from-[#7C3AED] to-[#A78BFA] text-white flex items-center justify-center shrink-0" title={m.service_name || "Service"} data-testid="msg-avatar-service">
                                     <Briefcase className="h-3.5 w-3.5" />
                                   </div>
@@ -1413,7 +1423,11 @@ export default function Messagerie() {
                             {/* Hover-only actions row (like + edit), rendered OUTSIDE the bubble for a subtle look */}
                             <MessageActions m={m} mine={mine} onChanged={reload} />
                             {mine && (
-                              me?.avatar
+                              showServiceAvatar
+                                ? <div className="h-7 w-7 rounded-full bg-gradient-to-br from-[#7C3AED] to-[#A78BFA] text-white flex items-center justify-center shrink-0" title={m.service_name || "Service"} data-testid="msg-avatar-service-mine">
+                                    <Briefcase className="h-3.5 w-3.5" />
+                                  </div>
+                                : me?.avatar
                                 ? <img src={me.avatar} alt="" className="h-7 w-7 rounded-full object-cover shrink-0" />
                                 : <div className="h-7 w-7 rounded-full bg-[#3BA4FF]/15 text-[#1D70B8] text-[10px] font-bold flex items-center justify-center shrink-0">
                                     {initials(me?.first_name)}
