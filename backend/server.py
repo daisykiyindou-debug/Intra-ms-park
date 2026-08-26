@@ -5440,18 +5440,43 @@ async def _ensure_service_inboxes_seeded() -> None:
 
 
 async def _sync_service_channel_membership(uid: str, before: list[str], after: list[str]) -> None:
-    """Reconcile `service_channels_access` diffs.
-    Note: the legacy shared `service-{key}` inbox concept is deprecated —
-    service canals are now DM-like per-employee threads (`corp-{key}-{uid}`).
-    This function is kept only to detect membership *changes* (for future
-    hooks / notifications). No shared channel is created or updated."""
+    """Reconcile `service_channels_access` diffs. When a user is granted a
+    new service, they are added as member to ALL existing corporate channels
+    of that service (so they immediately access the full history). When
+    removed, they are pulled from every such channel."""
     before_set, after_set = set(before or []), set(after or [])
     added = after_set - before_set
     removed = before_set - after_set
     if not (added or removed):
         return
-    # No-op — deprecated shared inbox no longer exists.
-    return
+    for key in added:
+        # Match every existing corp-{key}-* thread + legacy rh-* for service-rh
+        patterns = [{"corporate_key": key}]
+        if key == "service-rh":
+            patterns.append({"id": {"$regex": "^rh-"}})
+        await db.channels.update_many(
+            {"$or": patterns},
+            {"$addToSet": {"members_ids": uid}},
+        )
+    for key in removed:
+        patterns = [{"corporate_key": key}]
+        if key == "service-rh":
+            patterns.append({"id": {"$regex": "^rh-"}})
+        # Do NOT remove the user from their OWN thread (where they are the
+        # initiator / recipient — e.g. their own payslip channel).
+        chans = await db.channels.find({"$or": patterns}, {"_id": 0}).to_list(500)
+        for ch in chans:
+            cid = ch["id"]
+            # Extract initiator id (last path segment) — either `rh-{uid}`
+            # or `corp-{key}-{uid}`.
+            if cid.startswith("rh-"):
+                initiator = cid[len("rh-"):]
+            else:
+                # corp-{key}-{initiator}
+                initiator = cid[len(f"corp-{ch.get('corporate_key','')}-"):]
+            if initiator == uid:
+                continue
+            await db.channels.update_one({"id": cid}, {"$pull": {"members_ids": uid}})
 
 
 async def _sync_team_channel_membership(uid: str, before: list[str], after: list[str]) -> None:
@@ -7618,11 +7643,10 @@ async def on_start():
     except Exception:
         pass
 
-    # ─── Auto-grant `service-rh` access ONLY to users whose role strictly
-    # matches RH heuristics (Responsable RH, Directeur RH, Chargé RH, dept
-    # RH, `can_manage_hr` flag). Also cleans up any user who has `service-rh`
-    # in their access list but does NOT match — e.g. a non-RH admin who was
-    # granted access by an earlier version of this migration.
+    # ─── Auto-grant `service-rh` access to users whose role strictly matches
+    # RH heuristics (Responsable RH, Directeur RH, Chargé RH, dept RH,
+    # `can_manage_hr` flag). ONLY ADDS access — never removes. Admin-set
+    # accesses via the wizard are the source of truth and are preserved.
     try:
         emps = await db.employees.find({}, {"_id": 0}).to_list(500)
         def _is_rh_by_heuristic(e: dict) -> bool:
@@ -7637,27 +7661,19 @@ async def on_start():
                 or "ressources humaines" in role
                 or "responsable rh" in role
                 or "directeur rh" in role
-                or "chargé" in role and "rh" in role
+                or ("chargé" in role and "rh" in role)
                 or "chargée rh" in role
                 or "assistant rh" in role
                 or "ressources humaines" in dept
             )
         for e in emps:
-            has_access = "service-rh" in (e.get("service_channels_access") or [])
-            should = _is_rh_by_heuristic(e)
-            if should and not has_access:
+            if _is_rh_by_heuristic(e) and "service-rh" not in (e.get("service_channels_access") or []):
                 await db.employees.update_one(
                     {"id": e["id"]},
                     {"$addToSet": {"service_channels_access": "service-rh"}},
                 )
-            elif has_access and not should:
-                await db.employees.update_one(
-                    {"id": e["id"]},
-                    {"$pull": {"service_channels_access": "service-rh"}},
-                )
-                print(f"[startup] removed service-rh access from {e.get('first_name')} {e.get('last_name')} (role={e.get('role')})")
     except Exception as e:
-        print(f"[startup] rh access reconciliation skipped: {e}")
+        print(f"[startup] rh access auto-grant skipped: {e}")
 
     # ─── ONE-SHOT: hard reset of team-channel membership across the whole
     # workspace. After this migration every user starts with `team_channel_ids

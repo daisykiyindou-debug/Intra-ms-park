@@ -240,6 +240,11 @@ export default function Messagerie() {
         }
         // Resolve the "other" participant.
         let otherId = null;
+        // A viewer is "acting as staff" for this thread only if they are
+        // service staff AND did NOT initiate the thread themselves. If they
+        // did initiate it, they are writing to their own service as an
+        // employee — show it as an employee POV in the sidebar.
+        const viewerActsAsStaff = viewerIsServiceStaff && corpInitiatorId !== me?.id;
         if (isDm) {
           if (Array.isArray(c.members_ids)) {
             otherId = c.members_ids.find((id) => id !== me?.id);
@@ -248,20 +253,21 @@ export default function Messagerie() {
             const enc = c.id.slice(3);
             if (enc && enc !== me?.id) otherId = enc;
           }
-        } else if (isCorp && viewerIsServiceStaff) {
+        } else if (isCorp && viewerActsAsStaff) {
           otherId = corpInitiatorId; // viewer sees the sender in the sidebar
         }
         const other = otherId ? findEmployee(otherId) : null;
         const isOfficial = c.is_official || (typeof c.id === "string" && c.id.startsWith("rh-"));
         let displayName, subtitle, avatar, kind;
-        if (isCorp && viewerIsServiceStaff) {
+        if (isCorp && viewerActsAsStaff) {
           // Service staff view — show the employee who wrote to the service
           displayName = other ? `${other.first_name} ${other.last_name}` : (c.name || "Conversation");
           subtitle = other?.role || "Message reçu — Service";
           avatar = other?.avatar || null;
           kind = "service_thread";
         } else if (isCorp) {
-          // Employee side — show the service identity
+          // Employee side (including self-initiated by service staff) —
+          // show the service identity
           displayName = c.name || "Service";
           subtitle = "Canal service";
           avatar = null; // service icon rendered separately
@@ -289,7 +295,14 @@ export default function Messagerie() {
           _avatar: avatar,
           _other: other,
           _is_official: isOfficial,
-          _is_service_thread: (isCorp && viewerIsServiceStaff) || c.is_service_inbox === true,
+          // A corp/rh channel is a "service thread" (belongs to the service
+          // inbox switcher, hidden from personal messagerie) only when the
+          // viewer is service staff AND is NOT the initiator of that thread.
+          // If the viewer IS the initiator, the thread lives in their
+          // personal messagerie (they are writing AS an employee to the service).
+          _is_service_thread:
+            (isCorp && viewerIsServiceStaff && corpInitiatorId !== me?.id) ||
+            c.is_service_inbox === true,
           _kind: kind,
           _is_birthday: !isOfficial && isBirthdayToday(other),
         };
