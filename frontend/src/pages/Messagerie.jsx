@@ -5,7 +5,7 @@ import {
   Info, MoreVertical, MessageSquare, SlidersHorizontal, Star, Pencil, Trash2, Archive,
   Cake, Check, BellOff, CheckCheck, User as UserIcon, FileText, Image as ImageIcon,
   UserPlus, UserMinus, Camera, Receipt, ThumbsUp,
-  Briefcase, Megaphone, UserCog, Landmark, Shield, ChevronRight, ListChecks,
+  Briefcase, Megaphone, UserCog, Landmark, Shield, ChevronRight, ListChecks, LogOut,
 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
@@ -1686,6 +1686,26 @@ export default function Messagerie() {
                   );
                 })}
               </div>
+              {currentChannel.is_team_channel && (currentChannel.members_ids || []).includes(me?.id) && (
+                <button
+                  onClick={async () => {
+                    if (!window.confirm(`Quitter le groupe "${currentChannel.name}" ?\n\nVous ne recevrez plus les messages de ce canal. Un admin devra vous ré-ajouter pour revenir.`)) return;
+                    try {
+                      await api.post(`/channels/${currentChannel.id}/leave`);
+                      toast.success(`Vous avez quitté "${currentChannel.name}"`);
+                      setShowMembers(false);
+                      setActive(null);
+                      loadChannels();
+                    } catch (err) {
+                      toast.error(err?.response?.data?.detail || "Impossible de quitter le canal");
+                    }
+                  }}
+                  data-testid="msg-leave-channel"
+                  className="mt-3 w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-[#FEF2F2] hover:bg-[#FEE2E2] ring-1 ring-[#B91C1C]/20 text-[#B91C1C] text-xs font-semibold transition-colors"
+                >
+                  <LogOut className="h-3.5 w-3.5" /> Quitter le groupe
+                </button>
+              )}
             </div>
           </div>
         </div>

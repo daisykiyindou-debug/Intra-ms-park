@@ -4501,6 +4501,37 @@ async def mark_channel_read(cid: str):
     return {"ok": True}
 
 
+@api.post("/channels/{cid}/leave")
+async def leave_channel(cid: str):
+    """Employee-initiated leave from a team channel. Removes the user from
+    `members_ids`, pulls the team key from their `team_channel_ids`, and
+    posts a system message "X a quitté le groupe." for remaining members."""
+    uid = current_user()
+    ch = await db.channels.find_one({"id": cid}, {"_id": 0})
+    if not ch:
+        raise HTTPException(404, "Conversation introuvable")
+    # Only team channels can be self-left
+    if not (ch.get("is_team_channel") or (isinstance(ch.get("id"), str) and ch["id"].startswith("team-"))):
+        raise HTTPException(400, "Impossible de quitter cette conversation")
+    if uid not in (ch.get("members_ids") or []):
+        raise HTTPException(400, "Vous n'êtes pas membre de ce canal")
+    emp = await db.employees.find_one({"id": uid}, {"_id": 0}) or {}
+    full_name = f"{emp.get('first_name', '')} {emp.get('last_name', '')}".strip() or "Un collègue"
+    # Pull the user from the channel members
+    await db.channels.update_one({"id": cid}, {"$pull": {"members_ids": uid}})
+    # Strip the team key from their profile so admin UI stays in sync
+    team_key = cid[len("team-"):] if cid.startswith("team-") else ch.get("team_key")
+    if team_key:
+        await db.employees.update_one({"id": uid}, {"$pull": {"team_channel_ids": team_key}})
+    # System message visible to remaining members
+    await db.messages.insert_one({
+        "id": _id(), "channel_id": cid, "author_id": "system",
+        "text": f"{full_name} a quitté le groupe.", "type": "system",
+        "ts": _now(), "created_at": _now(),
+    })
+    return {"ok": True}
+
+
 async def _require_channel_member(cid: str) -> tuple[dict, str]:
     """Load channel and verify the caller is a member. Returns (channel, uid)."""
     uid = current_user()

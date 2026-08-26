@@ -67,6 +67,61 @@ const PERMISSIONS = [
   { k: "add_gallery", l: "Ajouter dans la galerie photo" },
 ];
 
+// Permissions grouped by profession (métier). One permission can appear in
+// several groups — the UI still shows each permission only once (grouped by
+// first-hit) but the "presets" section below lets an admin apply all perms of
+// a given métier in one click.
+const PERMISSION_GROUPS = [
+  {
+    k: "communication",
+    l: "Chargé de Communication",
+    icon: "megaphone",
+    color: "#F59E0B",
+    perms: ["publish_news", "edit_news", "manage_carousel", "manage_newsletter",
+            "create_events", "edit_events", "add_gallery", "create_forms",
+            "publish_documents"],
+  },
+  {
+    k: "rh",
+    l: "Ressources Humaines",
+    icon: "briefcase",
+    color: "#7C3AED",
+    perms: ["view_payslips", "approve_leaves", "approve_recovery",
+            "manage_documents", "manage_users", "view_expenses", "approve_expenses"],
+  },
+  {
+    k: "finance",
+    l: "Comptabilité & Finance",
+    icon: "landmark",
+    color: "#10B981",
+    perms: ["view_payslips", "view_expenses", "approve_expenses", "export_data",
+            "view_stats"],
+  },
+  {
+    k: "manager",
+    l: "Manager Opérationnel",
+    icon: "user-cog",
+    color: "#3BA4FF",
+    perms: ["approve_leaves", "approve_recovery", "view_tickets", "reply_tickets",
+            "view_stats", "view_expenses"],
+  },
+  {
+    k: "support",
+    l: "Support / IT",
+    icon: "shield",
+    color: "#0EA5E9",
+    perms: ["view_tickets", "reply_tickets", "manage_documents"],
+  },
+  {
+    k: "direction",
+    l: "Direction",
+    icon: "shield-check",
+    color: "#B91C1C",
+    perms: ["full_admin", "manage_users", "export_data", "view_stats",
+            "approve_leaves", "approve_expenses", "approve_recovery"],
+  },
+];
+
 const STATUS_BADGE = {
   active: { l: "Actif", bg: "#D1FAE5", color: "#065F46" },
   suspended: { l: "Suspendu", bg: "#FEF3C7", color: "#B45309" },
@@ -853,16 +908,94 @@ function UserEditor({ user, employees, onClose, onSaved }) {
                 <SelectField label="Rôle" testid="admin_role" value={f.admin_role} onChange={(v) => setF({ ...f, admin_role: v })} options={ROLES.map((r) => [r.k, r.l])} />
                 <Field label="Groupes (séparés par virgule)" testid="groups" value={f.groups.join(", ")} onChange={(v) => setF({ ...f, groups: v.split(",").map((x) => x.trim()).filter(Boolean) })} placeholder="Ex. Projets, Managers" />
               </div>
-              <div>
-                <label className="ms-overline">Permissions</label>
-                <div className="mt-2 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-1.5">
-                  {PERMISSIONS.map((p) => (
-                    <label key={p.k} className="flex items-center gap-2 text-xs text-[#071B34] rounded-lg px-2 py-1.5 hover:bg-[#F4F7FA] cursor-pointer">
-                      <input type="checkbox" checked={f.permissions.includes(p.k)} onChange={() => togglePerm(p.k)} data-testid={`perm-${p.k}`} className="h-3.5 w-3.5 accent-[#3BA4FF]" />
-                      {p.l}
-                    </label>
-                  ))}
+
+              {/* Presets by métier — one-click apply of the whole group's perms */}
+              <div className="rounded-2xl border border-[#071B34]/8 bg-[#F8FAFC] p-3">
+                <p className="text-[11px] uppercase tracking-widest font-bold text-[#475569] mb-2">Presets métier</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {PERMISSION_GROUPS.map((g) => {
+                    const allOn = g.perms.every((k) => f.permissions.includes(k));
+                    return (
+                      <button
+                        key={g.k}
+                        type="button"
+                        onClick={() => setF((s) => ({
+                          ...s,
+                          permissions: allOn
+                            ? s.permissions.filter((k) => !g.perms.includes(k))
+                            : Array.from(new Set([...(s.permissions || []), ...g.perms])),
+                        }))}
+                        data-testid={`preset-${g.k}`}
+                        style={{ backgroundColor: allOn ? g.color : "white", color: allOn ? "white" : g.color, borderColor: g.color + "40" }}
+                        className="text-xs font-semibold px-3 py-1.5 rounded-full ring-1 transition-colors"
+                        title={g.perms.join(", ")}
+                      >
+                        {allOn ? "✓ " : "+ "}{g.l}
+                      </button>
+                    );
+                  })}
                 </div>
+              </div>
+
+              {/* Permissions grouped by profession */}
+              <div className="space-y-3">
+                <label className="ms-overline">Permissions individuelles</label>
+                {PERMISSION_GROUPS.map((g) => {
+                  const groupPerms = g.perms
+                    .map((k) => PERMISSIONS.find((p) => p.k === k))
+                    .filter(Boolean);
+                  if (groupPerms.length === 0) return null;
+                  return (
+                    <div
+                      key={g.k}
+                      className="rounded-xl border p-3"
+                      style={{ borderColor: g.color + "30", backgroundColor: g.color + "08" }}
+                      data-testid={`perm-group-${g.k}`}
+                    >
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className="h-2 w-2 rounded-full" style={{ backgroundColor: g.color }} />
+                        <h4 className="text-sm font-bold text-[#071B34]">{g.l}</h4>
+                        <span className="text-[10px] text-[#475569] ml-auto">
+                          {groupPerms.filter((p) => f.permissions.includes(p.k)).length}/{groupPerms.length}
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-1.5">
+                        {groupPerms.map((p) => (
+                          <label key={`${g.k}-${p.k}`} className="flex items-center gap-2 text-xs text-[#071B34] rounded-lg px-2 py-1.5 hover:bg-white cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={f.permissions.includes(p.k)}
+                              onChange={() => togglePerm(p.k)}
+                              data-testid={`perm-${p.k}`}
+                              className="h-3.5 w-3.5"
+                              style={{ accentColor: g.color }}
+                            />
+                            {p.l}
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
+                {/* Uncategorized perms (safety net) */}
+                {(() => {
+                  const grouped = new Set(PERMISSION_GROUPS.flatMap((g) => g.perms));
+                  const others = PERMISSIONS.filter((p) => !grouped.has(p.k));
+                  if (others.length === 0) return null;
+                  return (
+                    <div className="rounded-xl border border-[#071B34]/10 bg-white p-3">
+                      <h4 className="text-sm font-bold text-[#071B34] mb-2">Autres</h4>
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-1.5">
+                        {others.map((p) => (
+                          <label key={p.k} className="flex items-center gap-2 text-xs text-[#071B34] rounded-lg px-2 py-1.5 hover:bg-[#F4F7FA] cursor-pointer">
+                            <input type="checkbox" checked={f.permissions.includes(p.k)} onChange={() => togglePerm(p.k)} data-testid={`perm-${p.k}`} className="h-3.5 w-3.5 accent-[#3BA4FF]" />
+                            {p.l}
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
             </div>
           )}
