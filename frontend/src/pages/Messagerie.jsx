@@ -331,7 +331,14 @@ export default function Messagerie() {
       return conversations.filter((c) => !c._is_service_thread);
     }
     const key = mailboxMode.replace(/^service-/, "");
-    return conversations.filter((c) => String(c.id || "").startsWith(`corp-${key}-`));
+    return conversations.filter((c) => {
+      if (!c._is_service_thread) return false;
+      const idStr = String(c.id || "");
+      // Match either `corp-{key}-*` or (only for service-rh) legacy `rh-*`
+      if (idStr.startsWith(`corp-${key}-`)) return true;
+      if (key === "service-rh" && idStr.startsWith("rh-")) return true;
+      return c.corporate_key === key;
+    });
   }, [conversations, mailboxMode]);
   const mailboxUnread = useMemo(() => {
     // Total unread per service canal (from the viewer=service-staff side)
@@ -339,12 +346,16 @@ export default function Messagerie() {
     for (const c of conversations) {
       const u = c.unread_count || 0;
       if (c._is_service_thread) {
-        // Extract canal key from `corp-{key}-{uid}`
+        // Extract canal key from `corp-{key}-{uid}` or `rh-{uid}` (legacy)
         const idStr = String(c.id || "");
         let key = c.corporate_key || null;
         if (!key) {
-          for (const k of ["service-rh", "communication", "managers-ops", "dept-financier", "direction"]) {
-            if (idStr.startsWith(`corp-${k}-`)) { key = k; break; }
+          if (idStr.startsWith("rh-")) {
+            key = "service-rh";
+          } else {
+            for (const k of ["service-rh", "communication", "managers-ops", "dept-financier", "direction"]) {
+              if (idStr.startsWith(`corp-${k}-`)) { key = k; break; }
+            }
           }
         }
         if (key) map[key] = (map[key] || 0) + u;
@@ -362,7 +373,13 @@ export default function Messagerie() {
       list = list.filter((c) => !c._is_service_thread);
     } else {
       const key = mailboxMode.replace(/^service-/, "");
-      list = list.filter((c) => String(c.id || "").startsWith(`corp-${key}-`));
+      list = list.filter((c) => {
+        if (!c._is_service_thread) return false;
+        const idStr = String(c.id || "");
+        if (idStr.startsWith(`corp-${key}-`)) return true;
+        if (key === "service-rh" && idStr.startsWith("rh-")) return true;
+        return c.corporate_key === key;
+      });
     }
     if (tab === "unread") list = list.filter((c) => (c.unread_count || 0) > 0);
     if (tab === "favorites") list = list.filter((c) => favorites.has(c.id));
