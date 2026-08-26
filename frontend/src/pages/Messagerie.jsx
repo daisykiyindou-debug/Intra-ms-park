@@ -289,7 +289,7 @@ export default function Messagerie() {
           _avatar: avatar,
           _other: other,
           _is_official: isOfficial,
-          _is_service_thread: isCorp && viewerIsServiceStaff,
+          _is_service_thread: (isCorp && viewerIsServiceStaff) || c.is_service_inbox === true,
           _kind: kind,
           _is_birthday: !isOfficial && isBirthdayToday(other),
         };

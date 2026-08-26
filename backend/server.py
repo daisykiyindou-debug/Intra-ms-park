@@ -5432,20 +5432,18 @@ async def _ensure_service_inboxes_seeded() -> None:
 
 
 async def _sync_service_channel_membership(uid: str, before: list[str], after: list[str]) -> None:
-    """Reconcile `service_channels_access` diffs and add/remove uid from the
-    corresponding shared service-inbox channels."""
+    """Reconcile `service_channels_access` diffs.
+    Note: the legacy shared `service-{key}` inbox concept is deprecated —
+    service canals are now DM-like per-employee threads (`corp-{key}-{uid}`).
+    This function is kept only to detect membership *changes* (for future
+    hooks / notifications). No shared channel is created or updated."""
     before_set, after_set = set(before or []), set(after or [])
     added = after_set - before_set
     removed = before_set - after_set
     if not (added or removed):
         return
-    await _ensure_service_inboxes_seeded()
-    for key in added:
-        if key not in CORPORATE_CANALS:
-            continue
-        await db.channels.update_one({"id": f"service-{key}"}, {"$addToSet": {"members_ids": uid}})
-    for key in removed:
-        await db.channels.update_one({"id": f"service-{key}"}, {"$pull": {"members_ids": uid}})
+    # No-op — deprecated shared inbox no longer exists.
+    return
 
 
 async def _sync_team_channel_membership(uid: str, before: list[str], after: list[str]) -> None:
@@ -7623,6 +7621,40 @@ async def on_start():
     except Exception as e:
         print(f"[startup] rh access auto-grant skipped: {e}")
 
+    # ─── ONE-SHOT: hard reset of team-channel membership across the whole
+    # workspace. After this migration every user starts with `team_channel_ids
+    # = []` and every `team-{key}` channel has an empty members list. Admins
+    # must then explicitly assign users to team channels via the wizard.
+    # Guarded by a marker so it never runs twice.
+    try:
+        marker = await db.system_flags.find_one({"key": "team_reset_v1"})
+        if not marker:
+            await db.employees.update_many({}, {"$set": {"team_channel_ids": []}})
+            await db.channels.update_many(
+                {"id": {"$regex": "^team-"}},
+                {"$set": {"members_ids": []}},
+            )
+            await db.system_flags.insert_one({"key": "team_reset_v1", "at": _now()})
+            print("[startup] team-channel membership fully reset (one-shot)")
+    except Exception as e:
+        print(f"[startup] team reset skipped: {e}")
+
+    # ─── Purge deprecated shared service inbox channels (`service-{key}` /
+    # `is_service_inbox`). Service canals are DM-like per-employee threads
+    # (`corp-{key}-{uid}`) — there is NO shared inbox any more.
+    try:
+        gone = await db.channels.delete_many({
+            "$or": [
+                {"is_service_inbox": True},
+                {"type": "service_inbox"},
+                {"id": {"$regex": r"^service-"}},
+            ]
+        })
+        if gone.deleted_count:
+            print(f"[startup] purged {gone.deleted_count} deprecated shared service-inboxes")
+    except Exception as e:
+        print(f"[startup] service-inbox purge skipped: {e}")
+
     # ─── Migrate legacy `rh-{uid}` channels: add all current RH staff as
     # members + set `corporate_key = service-rh` so the frontend can
     # recognize them as Service RH threads (hidden from personal messagerie
@@ -7648,15 +7680,8 @@ async def on_start():
 
     # Seed shared service-inbox channels (idempotent). Runs AFTER Marcus's
     # assignment so his Direction inbox already has him as member.
-    try:
-        # ─── Clean up the deprecated "shared service inbox" concept.
-        # Service canals are DM-like : each employee opens their own thread
-        # (`corp-{key}-{uid}`) and staff members reply. There is NO group inbox.
-        gone = await db.channels.delete_many({"type": "service_inbox"})
-        if gone.deleted_count:
-            print(f"[startup] purged {gone.deleted_count} deprecated service_inbox channels")
-    except Exception as e:
-        print(f"[startup] service-inboxes cleanup skipped: {e}")
+    # (Kept as a no-op for backward-compat; deprecated shared-inbox concept.)
+    pass
 
 
 async def _seed_birth_dates():
