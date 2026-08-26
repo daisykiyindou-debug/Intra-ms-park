@@ -70,6 +70,9 @@ export default function SalleReserver() {
   const [empQ, setEmpQ] = useState("");
 
   const [saving, setSaving] = useState(false);
+  // Recurrence — none | weekly | biweekly | monthly, with number of occurrences.
+  const [recurrence, setRecurrence] = useState("none");
+  const [recurrenceCount, setRecurrenceCount] = useState(4);
 
   useEffect(() => {
     api.get(`/rooms/${rid}`).then((r) => setRoom(r.data)).catch(() => nav("/salles"));
@@ -133,7 +136,7 @@ export default function SalleReserver() {
     if (!selectedSlot) return;
     setSaving(true);
     try {
-      await api.post("/reservations", {
+      const body = {
         room_id: rid,
         title: title.trim(),
         meeting_type: meetingType,
@@ -144,8 +147,14 @@ export default function SalleReserver() {
         description,
         equipments_needed: equipments,
         special_request: specialRequest,
-      });
-      toast.success("Réservation confirmée");
+      };
+      if (recurrence !== "none") {
+        body.recurrence_frequency = recurrence;
+        body.recurrence_count = Math.max(2, Math.min(52, Number(recurrenceCount) || 2));
+      }
+      const { data } = await api.post("/reservations", body);
+      const n = data?.count || 1;
+      toast.success(n > 1 ? `${n} réservations confirmées (récurrence)` : "Réservation confirmée");
       nav("/salles");
     } catch (err) {
       toast.error(err?.response?.data?.detail || "Impossible de réserver");
@@ -470,6 +479,60 @@ export default function SalleReserver() {
             <textarea rows={2} value={specialRequest} onChange={(e) => setSpecialRequest(e.target.value)} className="ms-input mt-1 resize-y" data-testid="reserve-special" placeholder="Ex : disposition en U, café pour 8 personnes…" />
           </div>
 
+          {/* ─── Récurrence ─── */}
+          <div className="rounded-2xl border border-[#3BA4FF]/20 bg-[#3BA4FF]/5 p-3">
+            <label className="ms-overline text-[#1D70B8]">Réunion récurrente ?</label>
+            <div className="mt-2 grid grid-cols-2 md:grid-cols-4 gap-1.5">
+              {[
+                ["none", "Ponctuelle"],
+                ["weekly", "Chaque semaine"],
+                ["biweekly", "Toutes les 2 semaines"],
+                ["monthly", "Chaque mois"],
+              ].map(([k, l]) => (
+                <button
+                  key={k}
+                  type="button"
+                  onClick={() => setRecurrence(k)}
+                  data-testid={`recurrence-${k}`}
+                  className={`px-3 py-2 text-xs font-semibold rounded-lg transition-colors ${
+                    recurrence === k
+                      ? "bg-[#1D70B8] text-white shadow"
+                      : "bg-white text-[#334155] hover:bg-[#3BA4FF]/10 ring-1 ring-[#3BA4FF]/20"
+                  }`}
+                >
+                  {l}
+                </button>
+              ))}
+            </div>
+            {recurrence !== "none" && (
+              <div className="mt-3 flex items-center gap-2">
+                <label className="text-xs font-semibold text-[#475569] whitespace-nowrap">Nombre d'occurrences :</label>
+                <input
+                  type="number"
+                  min={2}
+                  max={52}
+                  value={recurrenceCount}
+                  onChange={(e) => setRecurrenceCount(e.target.value)}
+                  data-testid="recurrence-count"
+                  className="ms-input !py-1.5 !text-xs w-20"
+                />
+                <span className="text-[10px] text-[#475569] italic">
+                  {(() => {
+                    const n = Math.max(2, Math.min(52, Number(recurrenceCount) || 2));
+                    const step = recurrence === "weekly" ? 7 : recurrence === "biweekly" ? 14 : 30;
+                    const totalDays = (n - 1) * step;
+                    return `${n} rendez-vous au total, jusqu'à ~${Math.round(totalDays / 7)} semaines`;
+                  })()}
+                </span>
+              </div>
+            )}
+            {recurrence !== "none" && (
+              <div className="mt-2 text-[10px] text-[#B45309] italic">
+                ⚠ Toutes les occurrences seront vérifiées ; si l'une est en conflit, aucune ne sera enregistrée.
+              </div>
+            )}
+          </div>
+
           <div className="flex items-center justify-between pt-4 border-t border-[#071B34]/5">
             <button onClick={() => setStep(1)} className="ms-btn-secondary" data-testid="reserve-prev-2">
               <ChevronLeft className="h-4 w-4" /> Précédent
@@ -500,6 +563,12 @@ export default function SalleReserver() {
               <RecapRow label="Type" value={MEETING_TYPES.find(t => t.k === meetingType)?.l} />
               <RecapRow label="Participants" value={`${participantsCount} personne${participantsCount > 1 ? "s" : ""}`} />
               <RecapRow label="Équipements" value={(equipments.length ? equipments.map(e => EQUIP_LABEL[e]).join(", ") : "—")} />
+              {recurrence !== "none" && (
+                <RecapRow
+                  label="Récurrence"
+                  value={`${{weekly:"Chaque semaine",biweekly:"Toutes les 2 semaines",monthly:"Chaque mois"}[recurrence]} · ${Math.max(2, Math.min(52, Number(recurrenceCount) || 2))} occurrences`}
+                />
+              )}
             </div>
             {description && (
               <div className="text-sm">

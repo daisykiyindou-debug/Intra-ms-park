@@ -893,6 +893,39 @@ function WeekEditor({ employee, weekStart, existingEntries, onClose, onSaved }) 
           <div className="flex gap-2">
             <button onClick={onClose} className="ms-btn-outline flex-1">Annuler</button>
             <button
+              onClick={async () => {
+                const opts = [
+                  { l: "cette semaine", w: 1 },
+                  { l: "les 4 prochaines semaines", w: 4 },
+                  { l: "les 8 prochaines semaines", w: 8 },
+                  { l: "les 12 prochaines semaines (~3 mois)", w: 12 },
+                ];
+                const choice = window.prompt(
+                  `Effacer les horaires enregistrés à partir de cette semaine (les congés validés seront préservés).\n\nTapez :\n${opts.map(o => `  ${o.w} = ${o.l}`).join("\n")}\n\nCombien de semaines effacer ?`,
+                  "1"
+                );
+                if (!choice) return;
+                const weeks = Math.max(1, Math.min(52, parseInt(choice, 10) || 1));
+                if (!window.confirm(`Confirmer : effacer ${weeks} semaine${weeks > 1 ? "s" : ""} à partir du ${weekStart.toLocaleDateString("fr-FR")} ?\nLes CP/RTT validés seront préservés. Le planning par défaut sera régénéré automatiquement.`)) return;
+                try {
+                  const { data } = await api.post("/admin/schedule/clear-weeks", {
+                    employee_id: employee.id,
+                    week_start: isoDate(weekStart),
+                    weeks,
+                  });
+                  toast.success(`${data.schedules_deleted} entrée${data.schedules_deleted > 1 ? "s" : ""} effacée${data.schedules_deleted > 1 ? "s" : ""} sur ${data.weeks_cleared} semaine${data.weeks_cleared > 1 ? "s" : ""}`);
+                  onSaved();
+                } catch (err) {
+                  toast.error(err?.response?.data?.detail || "Impossible d'effacer");
+                }
+              }}
+              data-testid="week-clear"
+              className="ms-btn-outline text-[#B91C1C] hover:bg-[#FEE2E2]"
+              title="Effacer les horaires enregistrés (les CP/RTT validés sont préservés)"
+            >
+              <Trash2 className="h-4 w-4" /> Effacer
+            </button>
+            <button
               onClick={save}
               disabled={saving || hasRowError}
               data-testid="week-save"

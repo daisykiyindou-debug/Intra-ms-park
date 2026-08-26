@@ -6295,6 +6295,58 @@ async def admin_delete_schedule(schedule_id: str):
     return {"ok": True}
 
 
+class BulkClearPayload(BaseModel):
+    employee_id: str
+    week_start: str  # YYYY-MM-DD (Monday of the first week to clear)
+    weeks: int = 1   # number of weeks to clear (>=1)
+
+
+@api.post("/admin/schedule/clear-weeks")
+async def admin_clear_weeks(payload: BulkClearPayload):
+    """Erase every non-validated schedule row over `weeks` consecutive weeks
+    starting from `week_start`. Approved leaves / RTT are preserved.
+    Also clears the badging entries in the same window so nothing lingers
+    in the badge module. Days re-materialize from `weekly_pattern` on next
+    fetch (a "reset to default" behaviour)."""
+    await require_permission("manage_users", "approve_leaves")
+    try:
+        ws = date.fromisoformat(payload.week_start)
+    except Exception:
+        raise HTTPException(400, "week_start invalide (YYYY-MM-DD attendu)")
+    n = max(1, min(52, int(payload.weeks or 1)))
+    we = ws + timedelta(days=7 * n - 1)
+    r1 = await db.schedules.delete_many({
+        "employee_id": payload.employee_id,
+        "day": {"$gte": ws.isoformat(), "$lte": we.isoformat()},
+        "type": {"$nin": ["leave", "rtt"]},
+    })
+    r2 = await db.badging.delete_many({
+        "employee_id": payload.employee_id,
+        "day": {"$gte": ws.isoformat(), "$lte": we.isoformat()},
+    })
+    await db.notifications.insert_one({
+        "id": _id(),
+        "employee_id": payload.employee_id,
+        "type": "planning",
+        "title": "Planning réinitialisé",
+        "content": f"{n} semaine{'s' if n > 1 else ''} de planning ont été effacées par votre responsable. Le planning par défaut sera régénéré automatiquement.",
+        "message": f"{n} semaine{'s' if n > 1 else ''} de planning ont été effacées par votre responsable.",
+        "icon": "calendar",
+        "link": "/rh/planning",
+        "ts": _now(),
+        "created_at": _now(),
+        "read": False,
+    })
+    return {
+        "ok": True,
+        "weeks_cleared": n,
+        "from_day": ws.isoformat(),
+        "to_day": we.isoformat(),
+        "schedules_deleted": r1.deleted_count or 0,
+        "badging_deleted": r2.deleted_count or 0,
+    }
+
+
 class WeekEntry(BaseModel):
     day_offset: int  # 0..6 relative to week_start
     type: str = "shift"  # shift | off | leave | training | meeting
@@ -9198,10 +9250,25 @@ class MeetingReservationIn(BaseModel):
     equipments_needed: List[str] = []
     special_request: Optional[str] = ""
     organizer_id: Optional[str] = None  # admin can book on behalf
+    # Recurrence — optional. If provided, the server creates N reservations
+    # (one every `frequency` interval starting from start_ts/end_ts). Each
+    # occurrence is atomically checked for room conflicts.
+    recurrence_frequency: Optional[str] = None  # "weekly" | "biweekly" | "monthly"
+    recurrence_count: Optional[int] = None      # total number of occurrences (>=1). 1 = single booking.
 
 
 def _parse_iso(s: str) -> datetime:
     return datetime.fromisoformat(str(s).replace("Z", "+00:00"))
+
+
+def _add_month(dt: datetime) -> datetime:
+    """Advance a datetime by ~1 month, clamping day-of-month to the target month's last day."""
+    y, m = dt.year, dt.month + 1
+    if m > 12:
+        y += 1; m = 1
+    import calendar as _cal
+    last = _cal.monthrange(y, m)[1]
+    return dt.replace(year=y, month=m, day=min(dt.day, last))
 
 
 async def _room_conflicts(room_id: str, start_iso: str, end_iso: str, exclude_id: Optional[str] = None) -> list[dict]:
@@ -9364,42 +9431,75 @@ async def create_reservation(payload: MeetingReservationIn):
         raise HTTPException(400, "Durée minimum : 15 minutes.")
     if not payload.title.strip():
         raise HTTPException(400, "Titre requis")
-    # Conflict check
-    conflicts = await _room_conflicts(payload.room_id, payload.start_ts, payload.end_ts)
-    if conflicts:
-        c = conflicts[0]
-        cs = _parse_iso(c["start_ts"]).astimezone(PARIS_TZ).strftime("%Hh%M")
-        ce = _parse_iso(c["end_ts"]).astimezone(PARIS_TZ).strftime("%Hh%M")
-        raise HTTPException(409, f"La salle n'est pas disponible entre {cs} et {ce}. Veuillez modifier votre horaire ou choisir une autre salle.")
+    # Conflict check (single or recurring occurrences below)
+    # Build the list of (start, end) pairs to create. Non-recurring = 1 occurrence.
+    freq = (payload.recurrence_frequency or "").strip().lower() if payload.recurrence_frequency else None
+    count = max(1, int(payload.recurrence_count or 1))
+    if freq and freq not in ("weekly", "biweekly", "monthly"):
+        raise HTTPException(400, "Fréquence de récurrence invalide (weekly | biweekly | monthly).")
+    if count > 52:
+        raise HTTPException(400, "Récurrence limitée à 52 occurrences (1 an environ).")
+    occurrences: list[tuple[str, str]] = []
+    if freq and count > 1:
+        step_days = {"weekly": 7, "biweekly": 14}.get(freq)
+        cur_s, cur_e = s, e
+        for i in range(count):
+            occurrences.append((cur_s.isoformat(), cur_e.isoformat()))
+            if step_days:
+                cur_s = cur_s + timedelta(days=step_days)
+                cur_e = cur_e + timedelta(days=step_days)
+            else:  # monthly — same day-of-month, keep time
+                # Advance ~1 month by adding 28-31 days safely
+                cur_s = _add_month(cur_s)
+                cur_e = _add_month(cur_e)
+    else:
+        occurrences.append((payload.start_ts, payload.end_ts))
+    # Verify EVERY occurrence is conflict-free — reject the whole batch if any fails
+    for os_iso, oe_iso in occurrences:
+        conflicts = await _room_conflicts(payload.room_id, os_iso, oe_iso)
+        if conflicts:
+            c = conflicts[0]
+            cs = _parse_iso(c["start_ts"]).astimezone(PARIS_TZ).strftime("%d/%m %Hh%M")
+            ce = _parse_iso(c["end_ts"]).astimezone(PARIS_TZ).strftime("%Hh%M")
+            ds = _parse_iso(os_iso).astimezone(PARIS_TZ).strftime("%d/%m %Hh%M")
+            raise HTTPException(409, f"Conflit sur {ds}: la salle est déjà réservée entre {cs} et {ce}. Aucune occurrence n'a été enregistrée.")
     uid = current_user()
     organizer_id = payload.organizer_id or uid
-    res_id = _id()
-    doc = {
-        "id": res_id,
-        "room_id": payload.room_id,
-        "organizer_id": organizer_id,
-        "title": payload.title.strip(),
-        "meeting_type": payload.meeting_type,
-        "start_ts": payload.start_ts,
-        "end_ts": payload.end_ts,
-        "participants_ids": list({*(payload.participants_ids or []), organizer_id}),
-        "external_participants": payload.external_participants or [],
-        "participants_count": payload.participants_count or (len(payload.participants_ids or []) + len(payload.external_participants or []) + 1),
-        "description": (payload.description or "").strip(),
-        "equipments_needed": payload.equipments_needed or [],
-        "special_request": (payload.special_request or "").strip(),
-        "status": "confirmed",
-        # Track RSVP: organizer is auto-confirmed, all invitees start as pending
-        "participant_responses": {
-            pid: ("confirmed" if pid == organizer_id else "pending")
-            for pid in list({*(payload.participants_ids or []), organizer_id})
-        },
-        "created_at": _now(),
-        "created_by": uid,
-    }
-    await db.room_reservations.insert_one(doc.copy())
-    await _notify_participants(doc, "created")
-    return doc
+    series_id = _id() if len(occurrences) > 1 else None
+    created: list[dict] = []
+    for os_iso, oe_iso in occurrences:
+        res_id = _id()
+        doc = {
+            "id": res_id,
+            "room_id": payload.room_id,
+            "organizer_id": organizer_id,
+            "title": payload.title.strip(),
+            "meeting_type": payload.meeting_type,
+            "start_ts": os_iso,
+            "end_ts": oe_iso,
+            "participants_ids": list({*(payload.participants_ids or []), organizer_id}),
+            "external_participants": payload.external_participants or [],
+            "participants_count": payload.participants_count or (len(payload.participants_ids or []) + len(payload.external_participants or []) + 1),
+            "description": (payload.description or "").strip(),
+            "equipments_needed": payload.equipments_needed or [],
+            "special_request": (payload.special_request or "").strip(),
+            "status": "confirmed",
+            "participant_responses": {
+                pid: ("confirmed" if pid == organizer_id else "pending")
+                for pid in list({*(payload.participants_ids or []), organizer_id})
+            },
+            "created_at": _now(),
+            "created_by": uid,
+        }
+        if series_id:
+            doc["series_id"] = series_id
+            doc["recurrence_frequency"] = freq
+        await db.room_reservations.insert_one(doc.copy())
+        await _notify_participants(doc, "created")
+        created.append(doc)
+    if len(created) == 1:
+        return created[0]
+    return {"series_id": series_id, "count": len(created), "reservations": created}
 
 
 @api.get("/reservations")
