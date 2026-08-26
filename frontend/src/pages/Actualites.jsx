@@ -345,9 +345,25 @@ function AdminComposer({ me, onPublished, canUseOfficial = true }) {
         data-testid="open-composer"
         className="ms-card w-full p-4 flex items-center gap-3 hover:shadow-md transition-shadow text-left"
       >
-        <img src={me.avatar} alt="" className="h-10 w-10 rounded-full object-cover ring-2 ring-[#3BA4FF]/40" />
+        <img
+          src={canUseOfficial || isCommOnly ? OFFICIAL_AVATAR : me.avatar}
+          alt=""
+          className={`h-10 w-10 rounded-full shrink-0 ${
+            canUseOfficial || isCommOnly
+              ? "object-contain bg-[#071B34] p-1 ring-2 ring-[#071B34]"
+              : "object-cover ring-2 ring-[#3BA4FF]/40"
+          }`}
+        />
         <span className="text-sm text-[#475569] flex-1">
-          Quoi de neuf, <strong className="text-[#071B34]">{me.first_name}</strong> ? Publiez sur le fil MS Park…
+          {canUseOfficial || isCommOnly ? (
+            <>
+              Quoi de neuf, <strong className="text-[#071B34]">MS Park</strong> ? Publiez sur le fil…
+            </>
+          ) : (
+            <>
+              Quoi de neuf, <strong className="text-[#071B34]">{me.first_name}</strong> ? Publiez sur le fil MS Park…
+            </>
+          )}
         </span>
         <span className={`ms-chip ${isCommOnly ? "bg-[#F59E0B]/15 text-[#B45309]" : !canUseOfficial ? "bg-[#3BA4FF]/15 text-[#1D70B8]" : "bg-[#A78BFA]/15 text-[#7C3AED]"}`}>
           <Sparkles className="h-3 w-3" /> {isCommOnly ? "Communication" : !canUseOfficial ? "Personnel" : "Admin"}
@@ -805,7 +821,7 @@ function PostCard({ post, me, onLike, findEmployee, refresh, setEditingPost, set
               )}
             </div>
           </div>
-          {(post.author_id === me?.id || (me?.is_admin && canModerate)) && (
+          {((post.author_id === me?.id && post.posted_as !== "official") || ((me?.is_admin || me?.can_manage_communication) && canModerate && post.posted_as === "official")) && (
             <button
               onClick={() => setEditingPost(post)}
               data-testid={`edit-post-${post.id}`}

@@ -45,20 +45,20 @@ import ImageUpload from "@/components/ImageUpload";
 
 const subNav = [
   { to: "/management", label: "Vue d'ensemble", icon: BarChart3, end: true },
-  { to: "/management/planning", label: "Plannings", icon: ClipboardList },
-  { to: "/management/demandes", label: "Demandes", icon: Inbox },
-  { to: "/management/attributions", label: "RTT / CP", icon: Gift },
-  { to: "/management/notes-de-frais", label: "Notes de frais", icon: FileText },
-  { to: "/management/heures-supp", label: "Heures supp.", icon: FileText },
-  { to: "/management/restauration", label: "Restauration", icon: UtensilsCrossed },
-  { to: "/management/carrousel", label: "Carrousel accueil", icon: Newspaper },
   { to: "/management/agenda", label: "Agenda", icon: CalendarDays },
-  { to: "/management/formulaires", label: "Formulaires", icon: FileText },
-  { to: "/management/utilisateurs", label: "Utilisateurs", icon: UsersIcon },
-  { to: "/management/fiches-de-paie", label: "Fiches de paie", icon: FileText },
-  { to: "/management/documents-editor", label: "Rédiger documents", icon: FileText },
   { to: "/management/idees", label: "Boîte à idées", icon: Lightbulb },
+  { to: "/management/carrousel", label: "Carrousel accueil", icon: Newspaper },
   { to: "/management/avantages", label: "CSE & Avantages", icon: Gift },
+  { to: "/management/demandes", label: "Demandes", icon: Inbox },
+  { to: "/management/fiches-de-paie", label: "Fiches de paie", icon: FileText },
+  { to: "/management/formulaires", label: "Formulaires", icon: FileText },
+  { to: "/management/heures-supp", label: "Heures supp.", icon: FileText },
+  { to: "/management/notes-de-frais", label: "Notes de frais", icon: FileText },
+  { to: "/management/planning", label: "Plannings", icon: ClipboardList },
+  { to: "/management/documents-editor", label: "Rédiger documents", icon: FileText },
+  { to: "/management/restauration", label: "Restauration", icon: UtensilsCrossed },
+  { to: "/management/attributions", label: "RTT / CP", icon: Gift },
+  { to: "/management/utilisateurs", label: "Utilisateurs", icon: UsersIcon },
 ];
 
 const isoDate = (d) =>

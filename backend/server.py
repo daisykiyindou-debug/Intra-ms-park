@@ -3285,11 +3285,16 @@ async def update_post(post_id: str, payload: PostUpdate):
     p = await db.posts.find_one({"id": post_id}, {"_id": 0})
     if not p:
         raise HTTPException(404, "Publication introuvable")
-    # Only the author OR an admin can edit — a comm editor can only edit posts
-    # they authored themselves (not other people's).
+    # Edit rules:
+    #  - Author always can edit their own post
+    #  - Admin / Communication editors can ONLY edit official MS Park posts
+    #    (posts made by any author but posted_as == "official"). They cannot
+    #    edit other employees' personal posts (they may delete them though).
     is_author = p.get("author_id") == me["id"]
-    if not is_author and not me.get("is_admin"):
-        raise HTTPException(403, "Vous ne pouvez modifier que vos propres publications")
+    is_official = p.get("posted_as") == "official"
+    can_edit_official = is_official and (me.get("is_admin") or me.get("can_manage_communication"))
+    if not is_author and not can_edit_official:
+        raise HTTPException(403, "Vous pouvez uniquement modifier vos publications ou celles publiées au nom de MS Park")
     updates = {k: v for k, v in payload.model_dump().items() if v is not None}
     if updates:
         updates["edited_at"] = _now()

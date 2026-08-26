@@ -69,27 +69,28 @@ const employeeNav = [
 ];
 
 // Each admin nav item can carry a `perm` array. Full admins bypass filtering.
+// Items sorted alphabetically by label (Vue d'ensemble kept first as overview).
 const adminNav = [
   { divider: "Management", adminBadge: true },
   { to: "/management", label: "Vue d'ensemble", icon: BarChart3, key: "mgmt-overview", perm: ["view_stats"] },
-  { to: "/management/planning", label: "Plannings employés", icon: ClipboardList, key: "mgmt-planning", perm: ["manage_users", "approve_leaves"] },
-  { to: "/management/demandes", label: "Validation demandes", icon: Inbox, key: "mgmt-demandes", perm: ["approve_leaves", "approve_recovery"] },
-  { to: "/management/attributions", label: "RTT / CP", icon: Gift, key: "mgmt-rtt", perm: ["approve_leaves"] },
-  { to: "/management/notes-de-frais", label: "Notes de frais", icon: Receipt, key: "mgmt-expenses", perm: ["view_expenses", "approve_expenses"] },
-  { to: "/management/heures-supp", label: "Heures supp. & récup.", icon: Clock, key: "mgmt-overtime", perm: ["approve_recovery"] },
-  { to: "/management/restauration", label: "Restauration (menu)", icon: UtensilsCrossed, key: "mgmt-restauration" },
-  { to: "/management/formations", label: "Formations", icon: GraduationCap, key: "mgmt-formations" },
-  { to: "/management/support", label: "Support IT (tickets)", icon: LifeBuoy, key: "mgmt-support", perm: ["view_tickets", "reply_tickets"] },
-  { to: "/management/carrousel", label: "Carrousel accueil", icon: Newspaper, key: "mgmt-carrousel", perm: ["manage_carousel"] },
-  { to: "/management/agenda", label: "Agenda", icon: Calendar, key: "mgmt-agenda", perm: ["create_events", "edit_events"] },
-  { to: "/management/formulaires", label: "Formulaires", icon: ListChecks, key: "mgmt-forms", perm: ["create_forms"] },
-  { to: "/management/utilisateurs", label: "Utilisateurs", icon: Users, key: "mgmt-users", perm: ["manage_users"] },
-  { to: "/management/fiches-de-paie", label: "Fiches de paie", icon: FileText, key: "mgmt-payslips", perm: ["view_payslips"] },
-  { to: "/management/idees", label: "Boîte à idées", icon: Lightbulb, key: "mgmt-ideas" },
-  { to: "/management/salles", label: "Salles de réunion", icon: DoorOpen, key: "mgmt-rooms" },
-  { to: "/management/documents-editor", label: "Rédiger documents", icon: Edit3, key: "mgmt-hrdocs", perm: ["manage_documents", "publish_documents"] },
-  { to: "/newsletters", label: "Newsletters", icon: Mail, key: "mgmt-newsletters", perm: ["manage_newsletter"] },
   { to: "/actualites", label: "Actualités (rédaction)", icon: Newspaper, key: "mgmt-news", perm: ["publish_news", "edit_news"] },
+  { to: "/management/agenda", label: "Agenda", icon: Calendar, key: "mgmt-agenda", perm: ["create_events", "edit_events"] },
+  { to: "/management/idees", label: "Boîte à idées", icon: Lightbulb, key: "mgmt-ideas" },
+  { to: "/management/carrousel", label: "Carrousel accueil", icon: Newspaper, key: "mgmt-carrousel", perm: ["manage_carousel"] },
+  { to: "/management/fiches-de-paie", label: "Fiches de paie", icon: FileText, key: "mgmt-payslips", perm: ["view_payslips"] },
+  { to: "/management/formations", label: "Formations", icon: GraduationCap, key: "mgmt-formations" },
+  { to: "/management/formulaires", label: "Formulaires", icon: ListChecks, key: "mgmt-forms", perm: ["create_forms"] },
+  { to: "/management/heures-supp", label: "Heures supp. & récup.", icon: Clock, key: "mgmt-overtime", perm: ["approve_recovery"] },
+  { to: "/newsletters", label: "Newsletters", icon: Mail, key: "mgmt-newsletters", perm: ["manage_newsletter"] },
+  { to: "/management/notes-de-frais", label: "Notes de frais", icon: Receipt, key: "mgmt-expenses", perm: ["view_expenses", "approve_expenses"] },
+  { to: "/management/planning", label: "Plannings employés", icon: ClipboardList, key: "mgmt-planning", perm: ["manage_users", "approve_leaves"] },
+  { to: "/management/documents-editor", label: "Rédiger documents", icon: Edit3, key: "mgmt-hrdocs", perm: ["manage_documents", "publish_documents"] },
+  { to: "/management/restauration", label: "Restauration (menu)", icon: UtensilsCrossed, key: "mgmt-restauration" },
+  { to: "/management/attributions", label: "RTT / CP", icon: Gift, key: "mgmt-rtt", perm: ["approve_leaves"] },
+  { to: "/management/salles", label: "Salles de réunion", icon: DoorOpen, key: "mgmt-rooms" },
+  { to: "/management/support", label: "Support IT (tickets)", icon: LifeBuoy, key: "mgmt-support", perm: ["view_tickets", "reply_tickets"] },
+  { to: "/management/utilisateurs", label: "Utilisateurs", icon: Users, key: "mgmt-users", perm: ["manage_users"] },
+  { to: "/management/demandes", label: "Validation demandes", icon: Inbox, key: "mgmt-demandes", perm: ["approve_leaves", "approve_recovery"] },
 ];
 
 const commNav = [
