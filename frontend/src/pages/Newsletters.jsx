@@ -255,8 +255,8 @@ function NewsletterCard({ nl, isEditor, onChange }) {
                     <button onClick={async () => { if (!window.confirm("Annuler la programmation ? La newsletter reviendra en brouillon.")) return; setMenu(false); try { await api.post(`/admin/newsletters/${nl.id}/cancel-schedule`); toast.success("Programmation annulée"); onChange(); } catch { toast.error("Erreur"); } }} className="w-full text-left px-3 py-2 hover:bg-[#FEF3C7] text-[#B45309] flex items-center gap-2"><X className="h-3.5 w-3.5" /> Annuler la programmation</button>
                   </>
                 )}
-                {nl.send_status === "sent" && (
-                  <button onClick={() => { setMenu(false); navigate(`/newsletters/${nl.id}/sent`); }} className="w-full text-left px-3 py-2 hover:bg-[#F4F7FA] flex items-center gap-2 text-[#1D70B8]"><TrendingUp className="h-3.5 w-3.5" /> Voir les statistiques</button>
+                {(nl.send_status === "sent" || nl.send_status === "published" || nl.send_status === "archived") && (
+                  <button onClick={() => { setMenu(false); navigate(`/newsletters/${nl.id}/sent`); }} data-testid={`nl-stats-${nl.id}`} className="w-full text-left px-3 py-2 hover:bg-[#F4F7FA] flex items-center gap-2 text-[#1D70B8]"><TrendingUp className="h-3.5 w-3.5" /> Voir les statistiques</button>
                 )}
                 {!nl.archived && (
                   <button onClick={async () => { setMenu(false); await api.post(`/admin/newsletters/${nl.id}/archive`); toast.success("Archivée"); onChange(); }} className="w-full text-left px-3 py-2 hover:bg-[#F4F7FA] flex items-center gap-2"><Archive className="h-3.5 w-3.5" /> Archiver</button>
@@ -1552,7 +1552,7 @@ export function NewsletterSent() {
   }
   if (!nl || !stats) return <div className="ms-card p-10 animate-pulse h-64 max-w-4xl mx-auto" />;
 
-  const isSent = stats.send_status === "sent";
+  const isSent = stats.send_status === "sent" || stats.send_status === "published" || stats.send_status === "archived";
   const isScheduled = stats.send_status === "scheduled";
   const openRate = stats.open_rate || 0;
   const clickRate = stats.recipient_count
@@ -1572,12 +1572,12 @@ export function NewsletterSent() {
           </div>
           <div className="flex-1 min-w-0">
             <div className="text-[10px] uppercase tracking-[0.2em] font-bold text-white/70">
-              {isSent ? "Newsletter envoyée" : isScheduled ? "Newsletter programmée" : "Newsletter"}
+              {stats.send_status === "archived" ? "Newsletter archivée" : isSent ? "Newsletter envoyée" : isScheduled ? "Newsletter programmée" : "Newsletter"}
             </div>
             <h1 className="mt-1 text-2xl md:text-3xl font-extrabold tracking-tight" data-testid="sent-title">{nl.title}</h1>
             <p className="mt-2 text-sm text-white/85 max-w-xl">
               {isSent
-                ? <>Elle a été envoyée à <strong>{stats.recipient_count}</strong> destinataire{stats.recipient_count > 1 ? "s" : ""} le {stats.sent_at ? formatDateFr(stats.sent_at.slice(0, 10)) : "—"}. Suivez ci-dessous les statistiques d&apos;engagement en temps réel.</>
+                ? <>{stats.send_status === "archived" ? "Elle a été archivée après avoir été envoyée à" : "Elle a été envoyée à"} <strong>{stats.recipient_count}</strong> destinataire{stats.recipient_count > 1 ? "s" : ""}{stats.sent_at ? <> le {formatDateFr(stats.sent_at.slice(0, 10))}</> : nl.published_at ? <> le {formatDateFr(nl.published_at.slice(0, 10))}</> : null}. Retrouvez ci-dessous les statistiques d&apos;engagement.</>
                 : isScheduled
                 ? <>Envoi programmé le {nl.publish_at ? formatDateFr(nl.publish_at.slice(0, 10)) : "—"}{nl.publish_at ? ` à ${nl.publish_at.slice(11, 16)}` : ""}.</>
                 : <>Brouillon non publié.</>}
