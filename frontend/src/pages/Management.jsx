@@ -629,6 +629,7 @@ function EntryCard({ entry, onEdit, onDelete }) {
     leave: { color: "#7C3AED", bg: "#A78BFA22", label: "Congé" },
     rtt: { color: "#1D70B8", bg: "#DBEAFE", label: "RTT" },
     training: { color: "#B45309", bg: "#FEF3C7", label: "Formation" },
+    cleared: { color: "#94A3B8", bg: "#F8FAFC", label: "Vide" },
   };
   const m = typeMeta[entry.type] || typeMeta.shift;
   return (
@@ -913,7 +914,8 @@ function WeekEditor({ employee, weekStart, existingEntries, onClose, onSaved }) 
                     week_start: isoDate(weekStart),
                     weeks,
                   });
-                  toast.success(`${data.schedules_deleted} entrée${data.schedules_deleted > 1 ? "s" : ""} effacée${data.schedules_deleted > 1 ? "s" : ""} sur ${data.weeks_cleared} semaine${data.weeks_cleared > 1 ? "s" : ""}`);
+                  const n = data.schedules_cleared || 0;
+                  toast.success(`${n} journée${n > 1 ? "s" : ""} vidée${n > 1 ? "s" : ""} sur ${data.weeks_cleared} semaine${data.weeks_cleared > 1 ? "s" : ""}`);
                   onSaved();
                 } catch (err) {
                   toast.error(err?.response?.data?.detail || "Impossible d'effacer");
@@ -947,6 +949,7 @@ const WEEK_TYPES = [
   { v: "remote", label: "Télétravail", color: "#059669", bg: "#D1FAE5" },
   { v: "off", label: "OFF", color: "#64748B", bg: "#F1F5F9" },
   { v: "training", label: "Formation", color: "#B45309", bg: "#FEF3C7" },
+  { v: "cleared", label: "Vide", color: "#94A3B8", bg: "#F8FAFC" },
 ];
 
 function WeekRow({ dayLabel, dayDate, row, onChange, canDuplicate, dayLabels, dayIndex, onDuplicate, lockedIndexes }) {

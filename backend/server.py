@@ -6274,11 +6274,25 @@ async def admin_upsert_schedule(payload: AdminScheduleEntry):
 
 @api.delete("/admin/schedule/{schedule_id}")
 async def admin_delete_schedule(schedule_id: str):
+    """"Vider" une journée : on ne supprime pas la ligne (qui serait aussitôt
+    re-matérialisée depuis `weekly_pattern` par `_ensure_range`). On la
+    remplace par un marqueur `type: "cleared"` — respecté par tous les
+    modules (calendrier employé, badge, calcul contrat) — pour laisser la
+    journée réellement vide et éditable."""
     await require_permission("manage_users", "approve_leaves")
     sch = await db.schedules.find_one({"id": schedule_id}, {"_id": 0})
     if not sch:
         raise HTTPException(404, "Entrée introuvable")
-    await db.schedules.delete_one({"id": schedule_id})
+    await db.schedules.update_one(
+        {"id": schedule_id},
+        {"$set": {
+            "type": "cleared",
+            "start": None, "end": None,
+            "pause_start": None, "pause_end": None,
+            "break_minutes": 0,
+            "location": None, "service": None, "note": None,
+        }},
+    )
     await db.notifications.insert_one({
         "id": _id(),
         "employee_id": sch["employee_id"],
@@ -6315,11 +6329,46 @@ async def admin_clear_weeks(payload: BulkClearPayload):
         raise HTTPException(400, "week_start invalide (YYYY-MM-DD attendu)")
     n = max(1, min(52, int(payload.weeks or 1)))
     we = ws + timedelta(days=7 * n - 1)
-    r1 = await db.schedules.delete_many({
-        "employee_id": payload.employee_id,
-        "day": {"$gte": ws.isoformat(), "$lte": we.isoformat()},
-        "type": {"$nin": ["leave", "rtt"]},
-    })
+    # Replace every non-validated existing entry with a `cleared` marker
+    r1 = await db.schedules.update_many(
+        {
+            "employee_id": payload.employee_id,
+            "day": {"$gte": ws.isoformat(), "$lte": we.isoformat()},
+            "type": {"$nin": ["leave", "rtt"]},
+        },
+        {"$set": {
+            "type": "cleared",
+            "start": None, "end": None,
+            "pause_start": None, "pause_end": None,
+            "break_minutes": 0,
+            "location": None, "service": None, "note": None,
+        }},
+    )
+    # Insert `cleared` markers for days that were still empty in the DB so
+    # `_ensure_range()` won't regenerate them from the pattern.
+    existing_days = set()
+    async for e in db.schedules.find(
+        {"employee_id": payload.employee_id,
+         "day": {"$gte": ws.isoformat(), "$lte": we.isoformat()}},
+        {"_id": 0, "day": 1},
+    ):
+        existing_days.add(e["day"])
+    to_insert = []
+    d = ws
+    while d <= we:
+        if d.isoformat() not in existing_days:
+            to_insert.append({
+                "employee_id": payload.employee_id,
+                "day": d.isoformat(),
+                "type": "cleared",
+                "start": None, "end": None,
+                "pause_start": None, "pause_end": None,
+                "break_minutes": 0,
+                "location": None, "service": None, "note": None,
+            })
+        d = d + timedelta(days=1)
+    if to_insert:
+        await db.schedules.insert_many(to_insert)
     r2 = await db.badging.delete_many({
         "employee_id": payload.employee_id,
         "day": {"$gte": ws.isoformat(), "$lte": we.isoformat()},
@@ -6329,7 +6378,7 @@ async def admin_clear_weeks(payload: BulkClearPayload):
         "employee_id": payload.employee_id,
         "type": "planning",
         "title": "Planning réinitialisé",
-        "content": f"{n} semaine{'s' if n > 1 else ''} de planning ont été effacées par votre responsable. Le planning par défaut sera régénéré automatiquement.",
+        "content": f"{n} semaine{'s' if n > 1 else ''} de planning ont été effacées par votre responsable.",
         "message": f"{n} semaine{'s' if n > 1 else ''} de planning ont été effacées par votre responsable.",
         "icon": "calendar",
         "link": "/rh/planning",
@@ -6342,7 +6391,7 @@ async def admin_clear_weeks(payload: BulkClearPayload):
         "weeks_cleared": n,
         "from_day": ws.isoformat(),
         "to_day": we.isoformat(),
-        "schedules_deleted": r1.deleted_count or 0,
+        "schedules_cleared": (r1.modified_count or 0) + len(to_insert),
         "badging_deleted": r2.deleted_count or 0,
     }
 
