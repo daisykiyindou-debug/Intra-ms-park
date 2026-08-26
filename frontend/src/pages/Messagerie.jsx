@@ -1208,26 +1208,36 @@ export default function Messagerie() {
                         >
                           <Archive className="h-4 w-4" /> Archiver la conversation
                         </button>
-                        {currentDisplay?.is_team_channel && (currentDisplay?.members_ids || []).includes(me?.id) && (
-                          <button
-                            onClick={async () => {
-                              setMenuOpen(false);
-                              if (!window.confirm(`Quitter le groupe "${currentDisplay.name}" ?\n\nVous ne recevrez plus les messages de ce canal. Un admin devra vous ré-ajouter pour revenir.`)) return;
-                              try {
-                                await api.post(`/channels/${currentDisplay.id}/leave`);
-                                toast.success(`Vous avez quitté "${currentDisplay.name}"`);
-                                setActive(null);
-                                loadChannels();
-                              } catch (err) {
-                                toast.error(err?.response?.data?.detail || "Impossible de quitter le canal");
-                              }
-                            }}
-                            data-testid="msg-leave-group"
-                            className="w-full text-left px-3 py-2 flex items-center gap-2 text-sm hover:bg-[#FEF3C7] text-[#B45309]"
-                          >
-                            <LogOut className="h-4 w-4" /> Quitter le groupe
-                          </button>
-                        )}
+                        {(() => {
+                          const idStr = String(currentDisplay?.id || "");
+                          const canLeave = !!currentDisplay && (currentDisplay.members_ids || []).includes(me?.id) && (
+                            currentDisplay.is_team_channel ||
+                            idStr.startsWith("team-") ||
+                            idStr.startsWith("grp-") ||
+                            (currentDisplay.is_group && !currentDisplay.is_official && !currentDisplay.is_service_inbox && !idStr.startsWith("corp-") && !idStr.startsWith("rh-"))
+                          );
+                          if (!canLeave) return null;
+                          return (
+                            <button
+                              onClick={async () => {
+                                setMenuOpen(false);
+                                if (!window.confirm(`Quitter le groupe "${currentDisplay.name}" ?\n\nVous ne recevrez plus les messages de ce canal. Un admin devra vous ré-ajouter pour revenir.`)) return;
+                                try {
+                                  await api.post(`/channels/${currentDisplay.id}/leave`);
+                                  toast.success(`Vous avez quitté "${currentDisplay.name}"`);
+                                  setActive(null);
+                                  loadChannels();
+                                } catch (err) {
+                                  toast.error(err?.response?.data?.detail || "Impossible de quitter le canal");
+                                }
+                              }}
+                              data-testid="msg-leave-group"
+                              className="w-full text-left px-3 py-2 flex items-center gap-2 text-sm hover:bg-[#FEF3C7] text-[#B45309]"
+                            >
+                              <LogOut className="h-4 w-4" /> Quitter le groupe
+                            </button>
+                          );
+                        })()}
                         <button
                           onClick={deleteActive}
                           data-testid="msg-delete"
