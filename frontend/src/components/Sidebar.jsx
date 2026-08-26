@@ -144,7 +144,20 @@ export default function Sidebar({ open, onClose }) {
 
   const tagSection = (arr, section) => arr.map((it) => it.divider ? it : ({ ...it, section }));
 
-  const items = isSuperAdmin
+  // Deduplicate items by their `to` URL — some users (e.g. Chargée de
+  // communication with extra granular perms) match items both in commNav and
+  // in adminNav. First occurrence wins to preserve the intended section order.
+  const dedupeByTo = (arr) => {
+    const seen = new Set();
+    return arr.filter((it) => {
+      if (it.divider || !it.to) return true;
+      if (seen.has(it.to)) return false;
+      seen.add(it.to);
+      return true;
+    });
+  };
+
+  const rawItems = isSuperAdmin
     ? [...superAdminBase, ...(showAdmin ? tagSection(adminNav, "admin") : [])]
     : isAdmin
     ? [...employeeNav, ...(showAdmin ? tagSection(adminNav, "admin") : [])]
@@ -153,6 +166,8 @@ export default function Sidebar({ open, onClose }) {
     : hasAnyMgmtPerm && showAdmin
     ? [...employeeNav, ...tagSection(filterByPerm(adminNav), "admin")]
     : employeeNav;
+
+  const items = dedupeByTo(rawItems);
 
   return (
     <>
