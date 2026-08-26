@@ -4559,17 +4559,26 @@ async def post_message(cid: str, payload: MessageCreate):
     ch_label = (ch or {}).get("name") or cid
     if ch and (ch.get("is_dm") or ch.get("is_group")):
         member_ids = [mid for mid in (ch.get("members_ids") or []) if mid != current_user()]
-        if ch.get("is_dm"):
+        if is_service_msg:
+            # Corp channel — recipient sees the service identity, not the individual
+            title = f"Nouveau message — {service_name or ch_label}"
+            content = preview or "Nouveau message"
+            icon = "briefcase"
+        elif ch.get("is_dm"):
             title = f"Message de {author_name}"
+            content = preview or "Nouveau message"
+            icon = "message-circle"
         else:
             title = f"{author_name} · #{ch_label}"
+            content = preview or "Nouveau message"
+            icon = "message-circle"
         for mid in member_ids:
             await _push_notification(
                 employee_id=mid,
                 type="message",
                 title=title,
-                content=preview or "Nouveau message",
-                icon="message-circle",
+                content=content,
+                icon=icon,
                 link=f"/messagerie?ch={cid}",
             )
     else:

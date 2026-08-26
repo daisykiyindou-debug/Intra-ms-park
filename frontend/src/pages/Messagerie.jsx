@@ -301,15 +301,22 @@ export default function Messagerie() {
   }, []);
   const serviceAccess = me?.service_channels_access || [];
   const scopedConversations = useMemo(() => {
-    if (mailboxMode === "personal") return conversations.filter((c) => !String(c.id || "").startsWith("corp-"));
+    if (mailboxMode === "personal") {
+      // Personal mailbox = every conversation EXCEPT service threads for which
+      // the user is service staff (those live in the corresponding service
+      // boîte). Corporate threads where the user is the employee-initiator
+      // stay here so they still receive the service replies in their inbox.
+      return conversations.filter((c) => !c._is_service_thread);
+    }
     const key = mailboxMode.replace(/^service-/, "");
     return conversations.filter((c) => String(c.id || "").startsWith(`corp-${key}-`));
   }, [conversations, mailboxMode]);
   const filtered = useMemo(() => {
     let list = conversations;
-    // Mailbox split — personal excludes corp-*, service-X shows only its threads.
+    // Mailbox split — personal excludes service threads (where user is staff),
+    // service-X shows only its threads.
     if (mailboxMode === "personal") {
-      list = list.filter((c) => !String(c.id || "").startsWith("corp-"));
+      list = list.filter((c) => !c._is_service_thread);
     } else {
       const key = mailboxMode.replace(/^service-/, "");
       list = list.filter((c) => String(c.id || "").startsWith(`corp-${key}-`));
