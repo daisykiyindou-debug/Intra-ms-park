@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   Users, UserPlus, Search, MoreVertical, Edit3, KeyRound, Ban, CheckCircle2, Copy, X, Save,
-  ShieldCheck, Mail,
+  ShieldCheck, Mail, Settings2, Pencil, Trash2, Plus, Check,
 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
@@ -1195,9 +1195,9 @@ function SelectField({ label, value, onChange, options, testid, className }) {
 // ─────────────────────────────────────────
 function ChannelsTab({ f, setF }) {
   const [catalog, setCatalog] = useState({ service_channels: [], team_channels: [] });
-  useEffect(() => {
-    api.get("/admin/channels/catalog").then((r) => setCatalog(r.data)).catch(() => {});
-  }, []);
+  const [managing, setManaging] = useState(false);
+  const reload = () => api.get("/admin/channels/catalog").then((r) => setCatalog(r.data)).catch(() => {});
+  useEffect(() => { reload(); }, []);
   const svc = f.service_channels_access || [];
   const teams = f.team_channel_ids || [];
   const toggleSvc = (k) => setF((s) => ({
@@ -1214,6 +1214,16 @@ function ChannelsTab({ f, setF }) {
   }));
   return (
     <div className="space-y-5">
+      <div className="flex justify-end">
+        <button
+          type="button"
+          onClick={() => setManaging(true)}
+          data-testid="btn-manage-channels"
+          className="ms-btn-outline text-xs"
+        >
+          <Settings2 className="h-3.5 w-3.5" /> Gérer les canaux
+        </button>
+      </div>
       {/* Section 1 — Service canals */}
       <div className="rounded-2xl border border-[#7C3AED]/20 bg-[#A78BFA]/5 p-4">
         <div className="flex items-center gap-2 mb-1">
@@ -1279,6 +1289,198 @@ function ChannelsTab({ f, setF }) {
           })}
         </div>
       </div>
+
+      {managing && (
+        <ChannelManagerModal
+          catalog={catalog}
+          onClose={() => setManaging(false)}
+          onChange={reload}
+        />
+      )}
     </div>
+  );
+}
+
+// ─────────────────────────────────────────
+// Modale Gérer les canaux (CRUD)
+// ─────────────────────────────────────────
+function ChannelManagerModal({ catalog, onClose, onChange }) {
+  const [newName, setNewName] = useState("");
+  const [newKind, setNewKind] = useState("team");
+  const [busy, setBusy] = useState(false);
+  const [editing, setEditing] = useState(null); // { kind, key, name }
+
+  const create = async () => {
+    if (!newName.trim()) return;
+    setBusy(true);
+    try {
+      await api.post("/admin/channels/catalog", { kind: newKind, name: newName.trim() });
+      toast.success(`Canal "${newName.trim()}" créé`);
+      setNewName("");
+      onChange();
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Erreur création");
+    } finally {
+      setBusy(false);
+    }
+  };
+  const rename = async () => {
+    if (!editing?.name.trim()) return;
+    setBusy(true);
+    try {
+      await api.patch(`/admin/channels/catalog/${editing.kind}/${editing.key}`, { name: editing.name.trim() });
+      toast.success("Canal renommé");
+      setEditing(null);
+      onChange();
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Erreur");
+    } finally {
+      setBusy(false);
+    }
+  };
+  const remove = async (kind, key, name) => {
+    if (!window.confirm(`Supprimer définitivement le canal "${name}" ?\n\nTous les messages, notifications et accès seront supprimés.`)) return;
+    setBusy(true);
+    try {
+      const r = await api.delete(`/admin/channels/catalog/${kind}/${key}`);
+      toast.success(`Canal "${name}" supprimé (${r.data.deleted_channels || 0} conversations)`);
+      onChange();
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Erreur suppression");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const renderList = (kind, items, color) => (
+    <div className="space-y-1.5">
+      {items.map((c) => (
+        <div
+          key={c.key}
+          data-testid={`manage-${kind}-${c.key}`}
+          className={`flex items-center gap-2 rounded-lg bg-white ring-1 ring-${color}/20 px-3 py-2 text-xs`}
+        >
+          {editing?.kind === kind && editing?.key === c.key ? (
+            <>
+              <input
+                autoFocus
+                value={editing.name}
+                onChange={(e) => setEditing({ ...editing, name: e.target.value })}
+                className="ms-input h-8 flex-1 text-xs"
+                data-testid={`edit-input-${c.key}`}
+              />
+              <button type="button" onClick={rename} disabled={busy} className="ms-btn-primary text-[11px] px-2 h-8">
+                <Check className="h-3.5 w-3.5" />
+              </button>
+              <button type="button" onClick={() => setEditing(null)} className="ms-btn-outline text-[11px] px-2 h-8">
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </>
+          ) : (
+            <>
+              <span className="flex-1 font-semibold text-[#071B34]">{c.name}</span>
+              <span className="text-[10px] text-[#475569] font-mono">{c.key}</span>
+              <button
+                type="button"
+                onClick={() => setEditing({ kind, key: c.key, name: c.name })}
+                data-testid={`btn-rename-${c.key}`}
+                className="p-1.5 rounded hover:bg-[#F4F7FA]"
+              >
+                <Pencil className="h-3.5 w-3.5 text-[#475569]" />
+              </button>
+              <button
+                type="button"
+                onClick={() => remove(kind, c.key, c.name)}
+                data-testid={`btn-delete-${c.key}`}
+                className="p-1.5 rounded hover:bg-red-50 text-red-500"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            </>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+
+  return (
+    <ChannelManagerPortal onClose={onClose}>
+      <div className="p-6 space-y-5">
+        <div>
+          <h2 className="text-lg font-bold text-[#071B34]">Gérer les canaux</h2>
+          <p className="text-xs text-[#475569] mt-1">
+            Renommer / supprimer les canaux existants ou en créer un nouveau. Les modifications sont propagées instantanément dans toutes les messageries.
+          </p>
+        </div>
+
+        <div className="rounded-xl bg-[#F4F7FA] p-3 space-y-2">
+          <p className="text-xs font-bold text-[#071B34]">Créer un nouveau canal</p>
+          <div className="flex flex-wrap gap-2 items-center">
+            <select
+              value={newKind}
+              onChange={(e) => setNewKind(e.target.value)}
+              data-testid="new-channel-kind"
+              className="ms-input h-9 text-xs w-40"
+            >
+              <option value="team">Équipe</option>
+              <option value="service">Service</option>
+            </select>
+            <input
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              placeholder="Nom du canal (ex: Événementiel)"
+              data-testid="new-channel-name"
+              className="ms-input h-9 text-xs flex-1 min-w-[200px]"
+            />
+            <button
+              type="button"
+              onClick={create}
+              disabled={busy || !newName.trim()}
+              data-testid="btn-create-channel"
+              className="ms-btn-primary text-xs h-9"
+            >
+              <Plus className="h-3.5 w-3.5" /> Ajouter
+            </button>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <p className="text-xs font-bold text-[#7C3AED] mb-2 uppercase tracking-wide">Services ({catalog.service_channels.length})</p>
+            {renderList("service", catalog.service_channels, "[#7C3AED]")}
+          </div>
+          <div>
+            <p className="text-xs font-bold text-[#3BA4FF] mb-2 uppercase tracking-wide">Équipes ({catalog.team_channels.length})</p>
+            {renderList("team", catalog.team_channels, "[#3BA4FF]")}
+          </div>
+        </div>
+
+        <div className="flex justify-end">
+          <button type="button" onClick={onClose} className="ms-btn-outline text-xs">
+            Fermer
+          </button>
+        </div>
+      </div>
+    </ChannelManagerPortal>
+  );
+}
+
+function ChannelManagerPortal({ onClose, children }) {
+  return createPortal(
+    <div role="dialog" aria-modal="true" className="fixed inset-0 z-[110]">
+      <button
+        aria-label="Fermer"
+        onClick={onClose}
+        className="absolute inset-0 bg-black/40 backdrop-blur-md w-full h-full cursor-default"
+      />
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[92%] max-w-2xl max-h-[90vh] rounded-2xl bg-white shadow-2xl overflow-y-auto"
+        data-testid="channel-manager-modal"
+      >
+        {children}
+      </div>
+    </div>,
+    document.body
   );
 }

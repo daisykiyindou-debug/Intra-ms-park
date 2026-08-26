@@ -5327,6 +5327,49 @@ async def poles():
     ]
 
 
+# ─── Channel catalog (DB-backed metadata for service + team canals).
+# Admins can rename, delete or add new canals from the User Manager UI.
+# The Python constants below act as SEED FALLBACKS on a fresh install;
+# after seeding, the DB is the source of truth.
+async def _get_channel_catalog(kind: str) -> list[dict]:
+    """Return the catalog list for a kind ("service" or "team")."""
+    rows = await db.channel_catalog.find(
+        {"kind": kind}, {"_id": 0}
+    ).sort("created_at", 1).to_list(200)
+    return rows
+
+
+async def _seed_channel_catalog() -> None:
+    """One-shot: seed channel_catalog from CORPORATE_CANALS + TEAM_CANALS."""
+    has_any = await db.channel_catalog.count_documents({})
+    if has_any:
+        return
+    rows = []
+    for k, v in CORPORATE_CANALS.items():
+        rows.append({
+            "kind": "service", "key": k, "name": v["name"],
+            "icon": v.get("icon"), "description": v.get("description", ""),
+            "created_at": _now(),
+        })
+    for k, v in TEAM_CANALS.items():
+        rows.append({
+            "kind": "team", "key": k, "name": v["name"],
+            "icon": v.get("icon"), "description": v.get("description", ""),
+            "created_at": _now(),
+        })
+    if rows:
+        await db.channel_catalog.insert_many(rows)
+
+
+def _slugify(text: str) -> str:
+    """Convert a channel name into a safe key (a-z0-9 + dashes)."""
+    import re
+    import unicodedata
+    s = unicodedata.normalize("NFKD", text or "").encode("ascii", "ignore").decode("ascii")
+    s = re.sub(r"[^a-zA-Z0-9]+", "-", s).strip("-").lower()
+    return s or f"canal-{int(datetime.now().timestamp())}"
+
+
 # ─── Corporate canals (Service RH, Communication, Managers OPS,
 # Département financier, Direction) — one canal per user linking them with
 # the members of the target service. Every employee can *write* to any of
@@ -5584,18 +5627,27 @@ class CorporateCanalCreate(BaseModel):
 
 @api.get("/channels/corporate/catalog")
 async def corporate_catalog():
-    """List the 5 corporate canals available to the current user."""
+    """List the corporate canals available to the current user (DB-backed
+    catalog — falls back to constants if the collection is empty)."""
     uid = current_user()
+    catalog = await _get_channel_catalog("service")
+    if not catalog:
+        catalog = [
+            {"key": k, "name": v["name"], "icon": v.get("icon"),
+             "description": v.get("description", "")}
+            for k, v in CORPORATE_CANALS.items()
+        ]
     out = []
-    for key, meta in CORPORATE_CANALS.items():
+    for meta in catalog:
+        key = meta["key"]
         recipients = await _corporate_members(key)
         cid = _corporate_channel_id(key, uid)
         ch = await db.channels.find_one({"id": cid}, {"_id": 0})
         out.append({
             "key": key,
             "name": meta["name"],
-            "icon": meta["icon"],
-            "description": meta["description"],
+            "icon": meta.get("icon"),
+            "description": meta.get("description", ""),
             "recipient_count": len([m for m in recipients if m != uid]),
             "already_open": bool(ch),
             "channel_id": cid if ch else None,
@@ -6203,19 +6255,145 @@ async def admin_create_user(payload: UserCreate):
 @api.get("/admin/channels/catalog")
 async def admin_channels_catalog():
     """Return the 2 catalogs (service & team) used by the admin user editor
-    to toggle a user's canal accesses. No auth-restricted content — just
-    metadata."""
+    to toggle a user's canal accesses."""
     await _require_admin_full()
     return {
-        "service_channels": [
-            {"key": k, "name": v["name"], "icon": v.get("icon")}
-            for k, v in CORPORATE_CANALS.items()
-        ],
-        "team_channels": [
-            {"key": k, "name": v["name"], "icon": v.get("icon")}
-            for k, v in TEAM_CANALS.items()
-        ],
+        "service_channels": await _get_channel_catalog("service"),
+        "team_channels": await _get_channel_catalog("team"),
     }
+
+
+class ChannelMetaCreate(BaseModel):
+    kind: str  # "service" | "team"
+    name: str
+    icon: Optional[str] = None
+    description: Optional[str] = ""
+
+
+class ChannelMetaUpdate(BaseModel):
+    name: Optional[str] = None
+    icon: Optional[str] = None
+    description: Optional[str] = None
+
+
+@api.post("/admin/channels/catalog")
+async def admin_channel_catalog_create(payload: ChannelMetaCreate):
+    """Create a new team or service canal. For team canals, an empty
+    `team-{key}` chat channel is created immediately so members can be
+    assigned. Service canals are DM-like: a `corp-{key}-{uid}` thread is
+    created per employee only on first interaction."""
+    await _require_admin_full()
+    kind = payload.kind
+    if kind not in ("service", "team"):
+        raise HTTPException(400, "Type invalide")
+    name = (payload.name or "").strip()
+    if not name:
+        raise HTTPException(400, "Nom requis")
+    # Slugify + ensure unique
+    base_key = _slugify(name)
+    key = base_key
+    n = 1
+    while await db.channel_catalog.find_one({"kind": kind, "key": key}):
+        n += 1
+        key = f"{base_key}-{n}"
+    row = {
+        "kind": kind, "key": key, "name": name,
+        "icon": payload.icon or ("briefcase" if kind == "service" else "users"),
+        "description": (payload.description or "").strip(),
+        "created_at": _now(),
+    }
+    await db.channel_catalog.insert_one(row.copy())
+    # For team canals, materialize the shared chat channel now
+    if kind == "team":
+        cid = f"team-{key}"
+        exists = await db.channels.find_one({"id": cid})
+        if not exists:
+            await db.channels.insert_one({
+                "id": cid, "name": name, "icon": row["icon"],
+                "type": "team", "is_team_channel": True, "team_key": key,
+                "members_ids": [], "created_at": _now(),
+            })
+    row.pop("_id", None)
+    return row
+
+
+@api.patch("/admin/channels/catalog/{kind}/{key}")
+async def admin_channel_catalog_update(kind: str, key: str, payload: ChannelMetaUpdate):
+    """Rename a canal — cascades the new name to every existing chat
+    channel bound to it (team-{key} + all corp-{key}-* + rh-* for
+    service-rh)."""
+    await _require_admin_full()
+    meta = await db.channel_catalog.find_one({"kind": kind, "key": key}, {"_id": 0})
+    if not meta:
+        raise HTTPException(404, "Canal introuvable")
+    updates = {}
+    for k in ("name", "icon", "description"):
+        v = getattr(payload, k, None)
+        if v is not None:
+            updates[k] = v.strip() if isinstance(v, str) else v
+    if not updates:
+        return meta
+    await db.channel_catalog.update_one({"kind": kind, "key": key}, {"$set": updates})
+    # Cascade to messaging channels
+    if kind == "team":
+        chan_updates = {}
+        if "name" in updates:
+            chan_updates["name"] = updates["name"]
+        if "icon" in updates:
+            chan_updates["icon"] = updates["icon"]
+        if chan_updates:
+            await db.channels.update_one({"id": f"team-{key}"}, {"$set": chan_updates})
+    else:  # service
+        chan_updates = {}
+        if "name" in updates:
+            chan_updates["name"] = updates["name"]
+        if "icon" in updates:
+            chan_updates["icon"] = updates["icon"]
+        if chan_updates:
+            patterns = [{"corporate_key": key}]
+            if key == "service-rh":
+                patterns.append({"id": {"$regex": "^rh-"}})
+            await db.channels.update_many({"$or": patterns}, {"$set": chan_updates})
+    merged = {**meta, **updates}
+    return merged
+
+
+@api.delete("/admin/channels/catalog/{kind}/{key}")
+async def admin_channel_catalog_delete(kind: str, key: str):
+    """Delete a canal from the catalog and cascade: remove every bound
+    chat channel + their messages, purge the key from every user's access
+    list, and remove tied notifications."""
+    await _require_admin_full()
+    meta = await db.channel_catalog.find_one({"kind": kind, "key": key}, {"_id": 0})
+    if not meta:
+        raise HTTPException(404, "Canal introuvable")
+    # 1. Collect all channel ids to delete
+    channel_ids: list[str] = []
+    if kind == "team":
+        channel_ids.append(f"team-{key}")
+    else:
+        query = {"corporate_key": key}
+        chans = await db.channels.find(query, {"_id": 0, "id": 1}).to_list(500)
+        channel_ids.extend([c["id"] for c in chans])
+        if key == "service-rh":
+            rh_chans = await db.channels.find(
+                {"id": {"$regex": "^rh-"}}, {"_id": 0, "id": 1}
+            ).to_list(500)
+            channel_ids.extend([c["id"] for c in rh_chans])
+    # 2. Delete messages, channel_reads, notifications tied to these ids
+    if channel_ids:
+        await db.messages.delete_many({"channel_id": {"$in": channel_ids}})
+        await db.channel_reads.delete_many({"channel_id": {"$in": channel_ids}})
+        # Notifications linking to these channels
+        for cid in channel_ids:
+            await db.notifications.delete_many({"link": {"$regex": f"(ch|channel)={cid}"}})
+        await db.channels.delete_many({"id": {"$in": channel_ids}})
+    # 3. Purge key from every user's access list
+    field = "team_channel_ids" if kind == "team" else "service_channels_access"
+    await db.employees.update_many({field: key}, {"$pull": {field: key}})
+    # 4. Remove catalog entry
+    await db.channel_catalog.delete_one({"kind": kind, "key": key})
+    return {"ok": True, "deleted_channels": len(channel_ids)}
 
 
 @api.put("/admin/users/{uid}")
@@ -7633,6 +7811,12 @@ async def on_start():
         await _ensure_team_channels_seeded()
     except Exception as e:
         print(f"[startup] team-channels seed skipped: {e}")
+
+    # Seed channel catalog (idempotent — DB-backed metadata for admin CRUD)
+    try:
+        await _seed_channel_catalog()
+    except Exception as e:
+        print(f"[startup] channel catalog seed skipped: {e}")
 
     # Assign Marcus to the Direction service canal (source of truth)
     try:
