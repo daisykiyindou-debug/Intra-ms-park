@@ -6428,26 +6428,55 @@ async def admin_create_user(payload: UserCreate):
     # Members = new user + all RH staff. The admin who creates the user is
     # NOT added (unless they are RH staff themselves) so a non-RH admin
     # never sees this thread in their personal messagerie.
-    rh_channel_id = f"rh-{data['id']}"
+    await _post_rh_welcome_dm(data)
+
+    # Team channels: enroll the new user in the ones the admin selected
+    if data.get("team_channel_ids"):
+        await _sync_team_channel_membership(data["id"], [], data["team_channel_ids"])
+
+    # Return the generated password so the admin can share it
+    return {"user": {k: v for k, v in data.items() if k != "password"},
+            "temp_password": temp_pwd}
+
+
+async def _post_rh_welcome_dm(user: dict) -> None:
+    """Idempotently create the Service RH welcome thread for a brand-new
+    employee and post the official onboarding message with actionable links.
+    Reused by `admin_create_user` (wizard) and `_seed_julien_bernard`
+    (startup seed) so both paths share the exact same template."""
+    rh_channel_id = f"rh-{user['id']}"
     rh_staff = await _corporate_members("service-rh")
-    all_members = list({data["id"], *rh_staff})
-    await db.channels.insert_one({
-        "id": rh_channel_id,
-        "name": "Service RH",
-        "icon": "briefcase",
-        "members": len(all_members),
-        "members_ids": all_members,
-        "unread": 1,
-        "is_dm": False,
-        "is_group": True,
-        "is_official": True,
-        "corporate_key": "service-rh",
-        "archived": False,
-        "avatar": None,
-        "created_at": _now(),
-    })
+    all_members = list({user["id"], *rh_staff})
+    existing = await db.channels.find_one({"id": rh_channel_id}, {"_id": 0})
+    if not existing:
+        await db.channels.insert_one({
+            "id": rh_channel_id,
+            "name": "Service RH",
+            "icon": "briefcase",
+            "members": len(all_members),
+            "members_ids": all_members,
+            "unread": 1,
+            "is_dm": False,
+            "is_group": True,
+            "is_official": True,
+            "corporate_key": "service-rh",
+            "archived": False,
+            "avatar": None,
+            "created_at": _now(),
+        })
+    else:
+        # Ensure RH staff membership stays in sync
+        await db.channels.update_one(
+            {"id": rh_channel_id},
+            {"$set": {"members_ids": all_members, "members": len(all_members),
+                       "corporate_key": "service-rh"}},
+        )
+    # Skip if a welcome message is already present in that thread
+    has_msg = await db.messages.find_one({"channel_id": rh_channel_id})
+    if has_msg:
+        return
     welcome_content = (
-        f"Bonjour {data['first_name']} 👋\n\n"
+        f"Bonjour {user['first_name']} 👋\n\n"
         f"Bienvenue chez MS Park ! Voici les liens essentiels pour bien démarrer :"
     )
     welcome_attachments = [
@@ -6462,10 +6491,11 @@ async def admin_create_user(payload: UserCreate):
         {"kind": "link", "name": "Poser un congé", "url": "/rh/demandes",
          "description": "Demandes de CP, RTT, récupération"},
         {"kind": "link", "name": "Points repas & Restauration", "url": "/restaurant",
-         "description": f"Vous avez {data.get('meal_points', 0)} points/jour"},
+         "description": f"Vous avez {user.get('meal_points', 0)} points/jour"},
         {"kind": "link", "name": "CSE & Avantages", "url": "/avantages",
          "description": "Réductions partenaires + billets gratuits"},
     ]
+    now = _now()
     await db.messages.insert_one({
         "id": _id(),
         "channel_id": rh_channel_id,
@@ -6473,25 +6503,19 @@ async def admin_create_user(payload: UserCreate):
         "author_name": "Service RH",
         "content": welcome_content,
         "attachments": welcome_attachments,
-        "ts": _now(),
+        "ts": now,
+        "created_at": now,
         "is_official": True,
     })
+    await db.channels.update_one({"id": rh_channel_id}, {"$set": {"last_message_ts": now}})
     await _push_notification(
-        employee_id=data["id"],
+        employee_id=user["id"],
         type="message",
         title="Service RH",
-        content=f"Bienvenue {data['first_name']} ! Retrouvez vos liens essentiels.",
+        content=f"Bienvenue {user['first_name']} ! Retrouvez vos liens essentiels.",
         icon="briefcase",
         link=f"/messagerie?ch={rh_channel_id}",
     )
-
-    # Team channels: enroll the new user in the ones the admin selected
-    if data.get("team_channel_ids"):
-        await _sync_team_channel_membership(data["id"], [], data["team_channel_ids"])
-
-    # Return the generated password so the admin can share it
-    return {"user": {k: v for k, v in data.items() if k != "password"},
-            "temp_password": temp_pwd}
 
 
 @api.get("/admin/channels/catalog")
@@ -8189,15 +8213,24 @@ async def on_start():
 
 async def _seed_julien_bernard():
     """Insert Julien BERNARD as a new employee with a pending onboarding.
-    Also posts a welcome message from the Directeur RH into his personal
-    Service RH thread so it appears in his messagerie the first time he
-    opens it. Fully idempotent: runs once (marker) but the DM insert is
-    also guarded by an existence check."""
-    marker = await db.system_flags.find_one({"key": "onboarding_julien_v1"})
+    The Service RH welcome message is posted via the shared helper
+    `_post_rh_welcome_dm` so the exact same template (with actionable
+    links) is used as for users created via the admin wizard. Fully
+    idempotent: runs once (marker) + guards inside the helper."""
+    marker = await db.system_flags.find_one({"key": "onboarding_julien_v3"})
     if marker:
         return
 
     julien_id = "emp-julien-bernard"
+    # Purge any leftover custom message posted by the previous (v1) migration
+    await db.messages.delete_many({"channel_id": f"rh-{julien_id}"})
+    # Backfill meal_points for the pre-existing (v1) seed of Julien so the
+    # welcome message correctly displays his daily quota in the link card.
+    await db.employees.update_one(
+        {"id": julien_id, "$or": [{"meal_points": {"$exists": False}}, {"meal_points": 0}, {"meal_points": None}]},
+        {"$set": {"meal_points": 20}},
+    )
+
     existing = await db.employees.find_one({"id": julien_id}, {"_id": 0})
     if not existing:
         hire = date.today().isoformat()
@@ -8226,6 +8259,7 @@ async def _seed_julien_bernard():
             "badge_expiry": "2028-01-31",
             "badge_active": True,
             "leave_balance": {"cp_n_1": 0, "cp_n": 2.08, "rtt": 0.5},
+            "meal_points": 20,
             "contract_hours_weekly": 35,
             "weekly_pattern": {
                 "0": {"type": "shift", "start": "09:00", "end": "17:00", "pause_start": "12:30", "pause_end": "13:30"},
@@ -8250,80 +8284,14 @@ async def _seed_julien_bernard():
             "tour_completed_at": None,
         })
 
-    # ─── RH welcome DM into Julien's personal Service RH thread
-    sender_id = "emp-pierre"
-    sender = await db.employees.find_one({"id": sender_id}, {"_id": 0})
-    if sender:
-        # Ensure Pierre has service-rh access (source of truth for members)
-        await db.employees.update_one(
-            {"id": sender_id},
-            {"$addToSet": {"service_channels_access": "service-rh"}},
-        )
-        cid = f"rh-{julien_id}"
-        rh_members = await _corporate_members("service-rh")
-        members = list({julien_id, *rh_members})
-        ch = await db.channels.find_one({"id": cid}, {"_id": 0})
-        now = _now()
-        if not ch:
-            await db.channels.insert_one({
-                "id": cid,
-                "name": "Ressources Humaines",
-                "icon": "briefcase",
-                "members": len(members),
-                "members_ids": members,
-                "unread": 1,
-                "is_dm": False,
-                "is_group": True,
-                "is_official": True,
-                "is_corporate": True,
-                "corporate_key": "service-rh",
-                "archived": False,
-                "avatar": None,
-                "created_at": now,
-            })
+    # Post the official RH welcome message via the shared helper (same
+    # template + actionable links as `admin_create_user`).
+    julien = await db.employees.find_one({"id": julien_id}, {"_id": 0})
+    if julien:
+        await _post_rh_welcome_dm(julien)
 
-        # Post welcome only if no message exists yet in this thread
-        has_msg = await db.messages.find_one({"channel_id": cid})
-        if not has_msg:
-            sender_name = f"{sender.get('first_name','')} {sender.get('last_name','')}".strip()
-            body = (
-                "👋 Bienvenue chez MS Park, Julien !\n\n"
-                "Toute l'équipe Ressources Humaines est ravie de t'accueillir dans la famille MS Park. "
-                "Nous te souhaitons une intégration réussie et une belle aventure parmi nous.\n\n"
-                "📌 Pour bien démarrer :\n"
-                "• Complète ton profil (téléphone, adresse, contact d'urgence).\n"
-                "• Consulte ton planning et tes horaires de la semaine.\n"
-                "• Découvre les avantages CSE et les points repas dont tu bénéficies.\n"
-                "• N'hésite pas à répondre directement à ce message si tu as la moindre question.\n\n"
-                "Belle journée et bienvenue à bord ! 🚀\n\n"
-                f"— {sender_name}, Directeur RH"
-            )
-            await db.messages.insert_one({
-                "id": _id(),
-                "channel_id": cid,
-                "author_id": sender_id,
-                "author_name": sender_name,
-                "content": body,
-                "attachments": [],
-                "is_service_message": True,
-                "service_name": "Ressources Humaines",
-                "service_key": "service-rh",
-                "type": "text",
-                "ts": now,
-                "created_at": now,
-            })
-            await db.channels.update_one({"id": cid}, {"$set": {"last_message_ts": now}})
-            await _push_notification(
-                employee_id=julien_id,
-                type="message",
-                title="Ressources Humaines · Bienvenue !",
-                content="L'équipe RH te souhaite la bienvenue chez MS Park.",
-                icon="briefcase",
-                link=f"/messagerie?ch={cid}",
-            )
-
-    await db.system_flags.insert_one({"key": "onboarding_julien_v1", "at": _now()})
-    print("[startup] Julien BERNARD onboarding seeded (welcome popup + RH DM + guided tour ready)")
+    await db.system_flags.insert_one({"key": "onboarding_julien_v3", "at": _now()})
+    print("[startup] Julien BERNARD onboarding seeded via shared Service RH helper")
 
 
 async def _seed_birth_dates():
