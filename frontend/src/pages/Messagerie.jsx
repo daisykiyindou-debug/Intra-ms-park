@@ -202,13 +202,34 @@ export default function Messagerie() {
   }, [messages.length]);
 
   // Rich decorated list of conversations
+  const serviceAccessSet = useMemo(() => new Set(me?.service_channels_access || []), [me?.service_channels_access]);
   const conversations = useMemo(() => {
     return channels
       .filter((c) => !c.archived)
       .map((c) => {
         const isDm = c.is_dm;
-        // Resolve the "other" participant. Prefer members_ids when present,
-        // fall back to the encoded DM id pattern `dm-<employee_id>`.
+        // Corporate (service) channels: `corp-{key}-{uid}` where uid is the employee
+        // who initiated the conversation. When the current viewer is a service
+        // staff (has this canal in their access list), the sidebar row must show
+        // the SENDER (the employee), not the service. When the viewer is the
+        // employee side, the row shows the SERVICE identity.
+        const idStr = String(c.id || "");
+        const isCorp = idStr.startsWith("corp-");
+        let corpKey = null, corpInitiatorId = null, viewerIsServiceStaff = false;
+        if (isCorp) {
+          corpKey = c.corporate_key || null;
+          if (!corpKey) {
+            // Fallback parse. Employee ids may contain dashes so we detect by matching keys.
+            for (const k of ["service-rh", "communication", "managers-ops", "dept-financier", "direction"]) {
+              const prefix = `corp-${k}-`;
+              if (idStr.startsWith(prefix)) { corpKey = k; corpInitiatorId = idStr.slice(prefix.length); break; }
+            }
+          } else {
+            corpInitiatorId = idStr.slice(`corp-${corpKey}-`.length);
+          }
+          viewerIsServiceStaff = corpKey ? serviceAccessSet.has(corpKey) : false;
+        }
+        // Resolve the "other" participant.
         let otherId = null;
         if (isDm) {
           if (Array.isArray(c.members_ids)) {
@@ -218,37 +239,54 @@ export default function Messagerie() {
             const enc = c.id.slice(3);
             if (enc && enc !== me?.id) otherId = enc;
           }
+        } else if (isCorp && viewerIsServiceStaff) {
+          otherId = corpInitiatorId; // viewer sees the sender in the sidebar
         }
         const other = otherId ? findEmployee(otherId) : null;
-        // Official system channels (Service RH, etc.) keep their own name and
-        // identity — they must never be overridden with the other member's name.
         const isOfficial = c.is_official || (typeof c.id === "string" && c.id.startsWith("rh-"));
-        // For DMs we ALWAYS use the other member's identity (never c.name)
-        // so the displayed avatar and displayed name are always coherent —
-        // EXCEPT for official system channels which keep their own name.
-        const displayName = isOfficial
-          ? (c.name || "Service RH")
-          : isDm
-          ? (other ? `${other.first_name} ${other.last_name}` : (c.name || "Conversation"))
-          : (c.name || "Conversation");
-        const subtitle = isOfficial
-          ? "Ressources Humaines"
-          : isDm
-          ? (other?.role || "")
-          : (c.is_group ? `${(c.members_ids || []).length} membres` : "Conversation d'équipe");
+        let displayName, subtitle, avatar, kind;
+        if (isCorp && viewerIsServiceStaff) {
+          // Service staff view — show the employee who wrote to the service
+          displayName = other ? `${other.first_name} ${other.last_name}` : (c.name || "Conversation");
+          subtitle = other?.role || "Message reçu — Service";
+          avatar = other?.avatar || null;
+          kind = "service_thread";
+        } else if (isCorp) {
+          // Employee side — show the service identity
+          displayName = c.name || "Service";
+          subtitle = "Canal service";
+          avatar = null; // service icon rendered separately
+          kind = "corp_service";
+        } else if (isOfficial) {
+          displayName = c.name || "Service RH";
+          subtitle = "Ressources Humaines";
+          avatar = null;
+          kind = "official";
+        } else if (isDm) {
+          displayName = other ? `${other.first_name} ${other.last_name}` : (c.name || "Conversation");
+          subtitle = other?.role || "";
+          avatar = other?.avatar || null;
+          kind = "dm";
+        } else {
+          displayName = c.name || "Conversation";
+          subtitle = c.is_group ? `${(c.members_ids || []).length} membres` : "Conversation d'équipe";
+          avatar = c.avatar_url || null;
+          kind = c.is_group ? "group" : "team";
+        }
         return {
           ...c,
           _display_name: displayName,
           _subtitle: subtitle,
-          _avatar: isOfficial ? null : (isDm ? (other?.avatar || null) : (c.avatar_url || null)),
+          _avatar: avatar,
           _other: other,
           _is_official: isOfficial,
-          _kind: isOfficial ? "official" : (isDm ? "dm" : c.is_group ? "group" : "team"),
+          _is_service_thread: isCorp && viewerIsServiceStaff,
+          _kind: kind,
           _is_birthday: !isOfficial && isBirthdayToday(other),
         };
       })
       .sort((a, b) => (b.last_message_ts || b.created_at || "").localeCompare(a.last_message_ts || a.created_at || ""));
-  }, [channels, me?.id, findEmployee]);
+  }, [channels, me?.id, findEmployee, serviceAccessSet]);
 
   // "Boîte" active — personal | service-{key}. Users with service access can
   // switch between their personal messagerie and each of their service inboxes.
@@ -262,6 +300,11 @@ export default function Messagerie() {
     }).catch(() => {});
   }, []);
   const serviceAccess = me?.service_channels_access || [];
+  const scopedConversations = useMemo(() => {
+    if (mailboxMode === "personal") return conversations.filter((c) => !String(c.id || "").startsWith("corp-"));
+    const key = mailboxMode.replace(/^service-/, "");
+    return conversations.filter((c) => String(c.id || "").startsWith(`corp-${key}-`));
+  }, [conversations, mailboxMode]);
   const filtered = useMemo(() => {
     let list = conversations;
     // Mailbox split — personal excludes corp-*, service-X shows only its threads.
@@ -284,10 +327,10 @@ export default function Messagerie() {
   }, [conversations, tab, favorites, q, filterKind, mailboxMode]);
 
   const counts = useMemo(() => ({
-    all: conversations.length,
-    unread: conversations.reduce((s, c) => s + (c.unread_count || 0), 0),
-    favorites: conversations.filter((c) => favorites.has(c.id)).length,
-  }), [conversations, favorites]);
+    all: scopedConversations.length,
+    unread: scopedConversations.reduce((s, c) => s + (c.unread_count || 0), 0),
+    favorites: scopedConversations.filter((c) => favorites.has(c.id)).length,
+  }), [scopedConversations, favorites]);
 
   const currentChannel = channels.find((c) => c.id === active);
   const currentDisplay = useMemo(() => conversations.find((c) => c.id === active), [conversations, active]);
