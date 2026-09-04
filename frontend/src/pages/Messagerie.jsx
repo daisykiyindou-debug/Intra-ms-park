@@ -479,7 +479,11 @@ export default function Messagerie() {
       setDraft("");
       setPendingAttachments([]);
       setShowEmoji(false);
-      inputRef.current?.focus();
+      // Reset auto-grow textarea to a single row after sending
+      if (inputRef.current) {
+        inputRef.current.style.height = "auto";
+        inputRef.current.focus();
+      }
       loadChannels();
     } catch (err) {
       toast.error(err?.response?.data?.detail || "Impossible d'envoyer le message");
@@ -1445,6 +1449,24 @@ export default function Messagerie() {
                         // service replies.
                         const authoredByMe = m.author_id === me?.id;
                         const isSystemMsg = typeof m.author_id === "string" && m.author_id.startsWith("system-");
+                        // Pure system event (member joined, left, was added…)
+                        // Rendered as a centered pill banner — not as a chat
+                        // bubble.
+                        const isSystemEvent = m.type === "system" || m.is_system;
+                        if (isSystemEvent) {
+                          return (
+                            <div
+                              key={m.id}
+                              className="flex justify-center my-2"
+                              data-testid={`msg-system-${m.id}`}
+                            >
+                              <div className="inline-flex items-center gap-1.5 rounded-full bg-[#F1F5F9] text-[#475569] text-[11px] font-semibold px-3 py-1 ring-1 ring-[#071B34]/5">
+                                <UserMinus className="h-3 w-3" />
+                                {m.content || m.text}
+                              </div>
+                            </div>
+                          );
+                        }
                         const isFromService = !!m.is_service_message || isSystemMsg;
                         const inServiceMode = mailboxMode !== "personal";
                         const mine = inServiceMode
@@ -1625,19 +1647,33 @@ export default function Messagerie() {
                     <Paperclip className="h-4 w-4" />
                   </button>
                   <div className="flex-1 relative">
-                    <input
+                    <textarea
                       ref={inputRef}
                       value={draft}
                       onChange={(e) => setDraft(e.target.value)}
-                      onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
+                      onInput={(e) => {
+                        // Auto-grow: reset then set to scrollHeight, capped at
+                        // ~6 lines so the composer never eats the whole chat.
+                        e.target.style.height = "auto";
+                        e.target.style.height = `${Math.min(160, e.target.scrollHeight)}px`;
+                      }}
+                      onKeyDown={(e) => {
+                        // Enter → send. Shift+Enter → manual line break.
+                        if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
+                          e.preventDefault();
+                          send();
+                        }
+                      }}
+                      rows={1}
                       placeholder={
                         uploading ? "Envoi du fichier…"
                         : currentChannel?.is_service_inbox
-                        ? `Écrire au nom de ${currentChannel.name}… (signature auto)`
-                        : "Écrire un message…"
+                        ? `Écrire au nom de ${currentChannel.name}… (signature auto — Maj+Entrée pour un saut de ligne)`
+                        : "Écrire un message… (Maj+Entrée pour un saut de ligne)"
                       }
                       data-testid="msg-input"
-                      className="w-full h-11 pl-4 pr-11 rounded-xl bg-[#F4F7FA] focus:bg-white focus:ring-2 focus:ring-[#3BA4FF]/30 outline-none text-sm"
+                      className="w-full min-h-11 max-h-40 pl-4 pr-11 py-2.5 rounded-xl bg-[#F4F7FA] focus:bg-white focus:ring-2 focus:ring-[#3BA4FF]/30 outline-none text-sm resize-none leading-relaxed"
+                      style={{ overflow: "auto" }}
                     />
                     <button
                       onClick={() => setShowEmoji((s) => !s)}

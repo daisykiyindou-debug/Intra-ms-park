@@ -4552,11 +4552,17 @@ async def leave_channel(cid: str):
     emp = await db.employees.find_one({"id": uid}, {"_id": 0}) or {}
     full_name = f"{emp.get('first_name', '')} {emp.get('last_name', '')}".strip() or "Un collègue"
     await db.channels.update_one({"id": cid}, {"$pull": {"members_ids": uid}})
+    now = _now()
     await db.messages.insert_one({
-        "id": _id(), "channel_id": cid, "author_id": "system",
-        "text": f"{full_name} a quitté le groupe.", "type": "system",
-        "ts": _now(), "created_at": _now(),
+        "id": _id(), "channel_id": cid, "author_id": "system-leave",
+        "author_name": "Système",
+        "content": f"{full_name} a quitté le groupe.",
+        "text": f"{full_name} a quitté le groupe.",
+        "type": "system", "is_system": True,
+        "attachments": [],
+        "ts": now, "created_at": now,
     })
+    await db.channels.update_one({"id": cid}, {"$set": {"last_message_ts": now}})
     return {"ok": True}
 
 
