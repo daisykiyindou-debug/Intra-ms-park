@@ -214,10 +214,16 @@ export default function Messagerie() {
     }).catch(() => {});
   }, [active]);
 
-  // Auto-scroll on new messages
+  // Auto-scroll on new messages + auto mark-as-read for the currently open channel
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-  }, [messages.length]);
+    if (!active || messages.length === 0) return;
+    // Marque comme lu à chaque nouveau message reçu pendant que le canal est ouvert
+    api.post(`/channels/${active}/read`).then(() => {
+      loadChannels();
+      window.dispatchEvent(new CustomEvent("ms-notifications-refresh"));
+    }).catch(() => {});
+  }, [messages.length, active]);
 
   // Rich decorated list of conversations
   const serviceAccessSet = useMemo(() => new Set(me?.service_channels_access || []), [me?.service_channels_access]);

@@ -3230,8 +3230,23 @@ async def list_orders():
             try:
                 created = datetime.fromisoformat(it["created_at"])
                 if (now - created).total_seconds() >= 300:  # 5 minutes
-                    await db.orders.update_one({"id": it["id"]}, {"$set": {"status": "ready"}})
+                    await db.orders.update_one({"id": it["id"]}, {"$set": {"status": "ready", "ready_notified": True}})
                     it["status"] = "ready"
+                    # Notif → l'employé sait que sa commande est prête à retirer
+                    store_label = {
+                        "soccer_bar": "Soccer Bar",
+                        "donut_house": "Donut House",
+                        "stand_crepes": "Stand Crêpes",
+                        "stand_bonbons": "Stand Bonbons",
+                    }.get(it.get("pickup_point"), it.get("pickup_point"))
+                    await _push_notification(
+                        employee_id=it["employee_id"],
+                        type="order",
+                        title="🍽️ Votre commande est prête !",
+                        content=f"Votre commande #{it.get('qr_code','')[-6:]} est prête à être retirée · {store_label}",
+                        icon="check-circle",
+                        link="/restauration?tab=orders",
+                    )
             except Exception:
                 pass
     return items
@@ -4376,6 +4391,42 @@ def _normalize_notif(n: dict) -> dict:
     return n
 
 
+async def _ensure_ready_order_notifications() -> None:
+    """Auto-évolue les commandes preparing → ready après 5 min, et pousse
+    une notification à l'employé une seule fois (`ready_notified: True`).
+    Appelé lazy à chaque `GET /notifications` pour que la notif arrive même
+    si l'utilisateur ne rouvre pas la page Restauration."""
+    now = datetime.now(timezone.utc)
+    pending = await db.orders.find(
+        {"status": "preparing", "ready_notified": {"$ne": True}},
+        {"_id": 0},
+    ).to_list(200)
+    for it in pending:
+        try:
+            created = datetime.fromisoformat(it["created_at"])
+            if (now - created).total_seconds() < 300:
+                continue
+            await db.orders.update_one(
+                {"id": it["id"]}, {"$set": {"status": "ready", "ready_notified": True}}
+            )
+            store_label = {
+                "soccer_bar": "Soccer Bar",
+                "donut_house": "Donut House",
+                "stand_crepes": "Stand Crêpes",
+                "stand_bonbons": "Stand Bonbons",
+            }.get(it.get("pickup_point"), it.get("pickup_point"))
+            await _push_notification(
+                employee_id=it["employee_id"],
+                type="order",
+                title="🍽️ Votre commande est prête !",
+                content=f"Votre commande #{(it.get('qr_code') or '')[-6:]} est prête à être retirée · {store_label}",
+                icon="check-circle",
+                link="/restauration?tab=orders",
+            )
+        except Exception:
+            pass
+
+
 async def _ensure_daily_birthday_notifications() -> None:
     """Once per day, push a notification to every employee for each colleague
     whose birthday falls today. Idempotent — guarded by a `system_flags`
@@ -4429,6 +4480,10 @@ async def list_notifications():
     # celebrating gets pushed to everyone else.
     try:
         await _ensure_daily_birthday_notifications()
+    except Exception as _e:
+        pass
+    try:
+        await _ensure_ready_order_notifications()
     except Exception as _e:
         pass
     items = await db.notifications.find(
