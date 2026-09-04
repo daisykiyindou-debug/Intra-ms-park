@@ -2613,10 +2613,15 @@ async def send_birthday_wish(payload: BirthdayWish):
     # 1) Ensure a DM channel exists between the two users
     a, b = sorted([uid, payload.employee_id])
     cid = f"dm-{a}--{b}"
-    legacy_cid = f"dm-{payload.employee_id}"
     existing = await db.channels.find_one({"id": cid}, {"_id": 0})
     if not existing:
-        existing = await db.channels.find_one({"id": legacy_cid}, {"_id": 0})
+        # Legacy fallback: chercher un ancien canal DM `dm-{target}` MAIS uniquement si
+        # ses `members_ids` contiennent exactement (uid, target). Sinon on créerait un
+        # cross-post dans la conversation d'un autre collègue.
+        legacy_cid = f"dm-{payload.employee_id}"
+        legacy = await db.channels.find_one({"id": legacy_cid}, {"_id": 0})
+        if legacy and set(legacy.get("members_ids") or []) == {uid, payload.employee_id}:
+            existing = legacy
     if existing:
         cid = existing["id"]
         if not existing.get("members_ids"):
@@ -8905,6 +8910,13 @@ async def _seed_birth_dates():
         {"id": "emp-idriss-malonga"},
         {"$set": {"birth_date": today.isoformat()}},
     )
+    # Purge des wishes obsolètes vers Idriss (l'anniversaire de démo étant reshuffled
+    # à chaque redémarrage, on repart d'un état propre — sinon Marcus & co. seraient
+    # marqués "souhaité" à tort dans la page anniversaires).
+    await db.birthday_wishes.delete_many({
+        "to_id": "emp-idriss-malonga",
+        "year": today.year,
+    })
 
 
 async def _dedupe_schedules():
