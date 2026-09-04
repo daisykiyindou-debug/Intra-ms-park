@@ -29,7 +29,7 @@ import ManagementShell from "@/pages/Management";
 import Payslip from "@/pages/Payslip";
 import NewsDetail, { EventDetail } from "@/pages/NewsDetail";
 import PublicForm from "@/pages/PublicForm";
-import NewslettersList, { NewsletterDetail, NewsletterEditor, NewsletterSent } from "@/pages/Newsletters";
+import NewslettersList, { NewsletterDetail, NewsletterEditor, NewsletterSent, NewsletterStats } from "@/pages/Newsletters";
 import Salles from "@/pages/Salles";
 import SalleReserver from "@/pages/SalleReserver";
 import MesReservations from "@/pages/MesReservations";
@@ -177,6 +177,7 @@ function App() {
               <Route path="/newsletters/new" element={<NewsletterEditor />} />
               <Route path="/newsletters/:id/edit" element={<NewsletterEditor />} />
               <Route path="/newsletters/:id/sent" element={<NewsletterSent />} />
+              <Route path="/newsletters/:id/stats" element={<NewsletterStats />} />
               <Route path="/newsletters/:id" element={<NewsletterDetail />} />
               <Route path="/galerie" element={<GalerieList />} />
               <Route path="/galerie/:id" element={<GalerieAlbum />} />

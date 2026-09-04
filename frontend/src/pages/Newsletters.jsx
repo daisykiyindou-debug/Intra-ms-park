@@ -312,7 +312,7 @@ function NewsletterCard({ nl, isEditor, onChange }) {
                   </>
                 )}
                 {(nl.send_status === "sent" || nl.send_status === "published" || nl.send_status === "archived") && (
-                  <button onClick={() => { setMenu(false); navigate(`/newsletters/${nl.id}/sent`); }} data-testid={`nl-stats-${nl.id}`} className="w-full text-left px-3 py-2 hover:bg-[#F4F7FA] flex items-center gap-2 text-[#1D70B8]"><TrendingUp className="h-3.5 w-3.5" /> Voir les statistiques</button>
+                  <button onClick={() => { setMenu(false); navigate(`/newsletters/${nl.id}/stats`); }} data-testid={`nl-stats-${nl.id}`} className="w-full text-left px-3 py-2 hover:bg-[#F4F7FA] flex items-center gap-2 text-[#1D70B8]"><TrendingUp className="h-3.5 w-3.5" /> Voir les statistiques</button>
                 )}
                 {!nl.archived && (
                   <button onClick={async () => { setMenu(false); await api.post(`/admin/newsletters/${nl.id}/archive`); toast.success("Archivée"); onChange(); }} className="w-full text-left px-3 py-2 hover:bg-[#F4F7FA] flex items-center gap-2"><Archive className="h-3.5 w-3.5" /> Archiver</button>
@@ -1565,6 +1565,54 @@ function ColorPicker({ label, value, onChange }) {
 // ═══════════════════════════════════════════════════════════════════
 export function NewsletterSent() {
   const { id } = useParams();
+  const { me, adminMode } = useApp();
+  const navigate = useNavigate();
+  const canView = (me?.is_admin || me?.can_manage_communication || hasPermission(me, "manage_newsletter")) && adminMode !== false;
+  const [nl, setNl] = useState(null);
+
+  useEffect(() => {
+    if (me && !canView) navigate("/newsletters", { replace: true });
+  }, [me, canView, navigate]);
+
+  useEffect(() => {
+    api.get(`/newsletters/${id}`).then((r) => setNl(r.data)).catch(() => {});
+  }, [id]);
+
+  if (!nl) return <div className="ms-card p-10 animate-pulse h-64 max-w-xl mx-auto" />;
+
+  return (
+    <div className="max-w-xl mx-auto pt-12 ms-fade-up" data-testid="newsletter-sent-confirmation">
+      <div className="ms-card p-10 text-center overflow-hidden relative">
+        <div className="absolute -right-16 -top-16 h-48 w-48 rounded-full bg-[#10B981]/10" />
+        <div className="absolute -left-10 -bottom-10 h-40 w-40 rounded-full bg-[#3BA4FF]/5" />
+        <div className="relative">
+          <div className="h-20 w-20 mx-auto rounded-full bg-gradient-to-br from-[#10B981] to-[#059669] flex items-center justify-center shadow-xl">
+            <CheckCircle2 className="h-10 w-10 text-white" />
+          </div>
+          <div className="mt-6 text-[10px] uppercase tracking-[0.2em] font-bold text-[#10B981]">
+            Envoi confirmé
+          </div>
+          <h1 className="mt-2 text-2xl md:text-3xl font-extrabold text-[#071B34] tracking-tight" data-testid="sent-title">
+            Newsletter envoyée !
+          </h1>
+          <p className="mt-3 text-sm text-[#475569]">
+            « <strong className="text-[#071B34]">{nl.title}</strong> » a bien été envoyée à vos destinataires.
+          </p>
+          <Link
+            to="/newsletters"
+            data-testid="back-to-newsletters"
+            className="ms-btn-primary mt-8 inline-flex"
+          >
+            <ArrowLeft className="h-4 w-4" /> Retour aux newsletters
+          </Link>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function NewsletterStats() {
+  const { id } = useParams();
   const navigate = useNavigate();
   const { me, adminMode } = useApp();
   const canView = (me?.is_admin || me?.can_manage_communication || hasPermission(me, "manage_newsletter")) && adminMode !== false;
@@ -1590,9 +1638,8 @@ export function NewsletterSent() {
   };
 
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [id]);
-  // Auto-refresh stats every 20s so open / click counters progress live
   useEffect(() => {
-    const t = setInterval(() => load(), 20_000);
+    const t = setInterval(() => load(), 15_000);
     return () => clearInterval(t);
     // eslint-disable-next-line
   }, [id]);

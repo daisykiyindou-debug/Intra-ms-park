@@ -390,6 +390,11 @@ class FormField(BaseModel):
     placeholder: Optional[str] = None
     help_text: Optional[str] = None
     options: Optional[List[str]] = None  # for select/radio/checkbox
+    # Optionnel : limites de capacité par option {option_label: max_count}
+    # Ex : {"Créneau A": 15, "Créneau B": 10}. Ne s'applique qu'aux types
+    # select/radio/checkbox. Quand la limite est atteinte, l'option devient
+    # « Complet » et ne peut plus être choisie par de nouveaux répondants.
+    option_limits: Optional[dict] = None
     # Rich-text block (type=rich): HTML content preserved as-is on the employee side.
     content_html: Optional[str] = None
     # Image block (type=image): displayed banner-style with an optional caption.
@@ -2925,6 +2930,19 @@ async def create_idea(payload: IdeaCreate):
         "created_at": now,
     }
     await db.ideas.insert_one(idea.copy())
+    # Notif globale : tous les employés reçoivent la nouvelle idée
+    author_name = "Un collaborateur" if idea["is_anonymous"] else f"{me.get('first_name','')} {me.get('last_name','')}".strip()
+    try:
+        await _broadcast_notification(
+            type="idea",
+            title=f"💡 Nouvelle idée · {idea['title']}",
+            content=f"{author_name} vient de publier une idée dans la Boîte à idées.",
+            icon="lightbulb",
+            link=f"/idees/{idea['id']}",
+            exclude_ids=[me["id"]],
+        )
+    except Exception:
+        pass
     return _sanitize_idea(idea, me)
 
 
@@ -5411,6 +5429,29 @@ async def get_form(fid: str):
     existing = await db.form_responses.find_one({"form_id": fid, "employee_id": uid}, {"_id": 0})
     f["already_answered"] = bool(existing)
     f["my_response_at"] = existing.get("submitted_at") if existing else None
+    # Décorer chaque champ avec option_availability : {option: {taken, limit, is_full}}
+    # pour que le front puisse griser les options complètes.
+    limited_fields = [fld for fld in (f.get("fields") or []) if fld.get("option_limits")]
+    if limited_fields:
+        prev = await db.form_responses.find({"form_id": fid}, {"_id": 0, "answers": 1}).to_list(10000)
+        for fld in limited_fields:
+            counts = {}
+            for r in prev:
+                ans = (r.get("answers") or {}).get(fld.get("name"))
+                if isinstance(ans, list):
+                    for opt in ans:
+                        counts[opt] = counts.get(opt, 0) + 1
+                elif ans not in (None, ""):
+                    counts[ans] = counts.get(ans, 0) + 1
+            fld["option_availability"] = {
+                opt: {
+                    "taken": counts.get(opt, 0),
+                    "limit": lim,
+                    "is_full": counts.get(opt, 0) >= (int(lim) if lim else 10**9),
+                }
+                for opt, lim in (fld.get("option_limits") or {}).items()
+                if lim
+            }
     return f
 
 
@@ -5517,6 +5558,44 @@ async def submit_form(fid: str, payload: FormSubmitPayload):
     existing = await db.form_responses.find_one({"form_id": fid, "employee_id": uid}, {"_id": 0})
     if existing:
         raise HTTPException(409, "Vous avez déjà répondu à ce formulaire.")
+
+    # Quota par option : si un champ select/radio/checkbox a des option_limits,
+    # on vérifie que la ou les options choisies ne sont pas pleines.
+    prev_responses = await db.form_responses.find({"form_id": fid}, {"_id": 0, "answers": 1}).to_list(10000)
+    for fld in (f.get("fields") or []):
+        limits = fld.get("option_limits") or {}
+        if not limits:
+            continue
+        if fld.get("type") not in ("select", "radio", "checkbox"):
+            continue
+        picked = payload.answers.get(fld.get("name"))
+        if picked is None or picked == "":
+            continue
+        picks = picked if isinstance(picked, list) else [picked]
+        for choice in picks:
+            cap = limits.get(choice)
+            if cap is None:
+                continue
+            try:
+                cap = int(cap)
+            except Exception:
+                continue
+            if cap <= 0:
+                continue
+            # Compte des personnes déjà inscrites à cette option
+            count = 0
+            for r in prev_responses:
+                ans = (r.get("answers") or {}).get(fld.get("name"))
+                if isinstance(ans, list):
+                    if choice in ans:
+                        count += 1
+                elif ans == choice:
+                    count += 1
+            if count >= cap:
+                raise HTTPException(
+                    409,
+                    f"« {choice} » est complet ({cap}/{cap}). Choisissez une autre option.",
+                )
     me = await db.employees.find_one({"id": uid}, {"_id": 0})
     employee_name = f"{me['first_name']} {me['last_name']}" if me else "Anonyme"
     resp = {
@@ -5594,15 +5673,33 @@ async def admin_form_stats(fid: str):
         }
         if typ in ("select", "radio"):
             counts = {}
+            respondents = {}  # option -> [{id, name, avatar}]
             for opt in (f.get("options") or []):
                 counts[opt] = 0
-            for v in values:
-                if v in counts:
-                    counts[v] += 1
-                else:
-                    counts[v] = counts.get(v, 0) + 1
+                respondents[opt] = []
+            for r in responses:
+                v = (r.get("answers") or {}).get(name)
+                if v in (None, ""):
+                    continue
+                if v not in counts:
+                    counts[v] = 0
+                    respondents[v] = []
+                counts[v] += 1
+                respondents[v].append({
+                    "id": r.get("employee_id"),
+                    "name": r.get("employee_name"),
+                    "submitted_at": r.get("submitted_at"),
+                })
+            limits = f.get("option_limits") or {}
             options = sorted(
-                [{"option": o, "count": c, "percent": _pct(c, answered)} for o, c in counts.items()],
+                [{
+                    "option": o,
+                    "count": c,
+                    "percent": _pct(c, answered),
+                    "limit": limits.get(o),
+                    "is_full": bool(limits.get(o)) and c >= int(limits.get(o) or 0),
+                    "respondents": respondents.get(o) or [],
+                } for o, c in counts.items()],
                 key=lambda x: -x["count"],
             )
             q["options"] = options
@@ -5610,14 +5707,30 @@ async def admin_form_stats(fid: str):
             q["bottom"] = options[-1] if len(options) > 1 else None
         elif typ == "checkbox":
             counts = {}
+            respondents = {}
             for opt in (f.get("options") or []):
                 counts[opt] = 0
-            for v in values:
+                respondents[opt] = []
+            for r in responses:
+                v = (r.get("answers") or {}).get(name)
                 if isinstance(v, list):
                     for opt in v:
                         counts[opt] = counts.get(opt, 0) + 1
+                        respondents.setdefault(opt, []).append({
+                            "id": r.get("employee_id"),
+                            "name": r.get("employee_name"),
+                            "submitted_at": r.get("submitted_at"),
+                        })
+            limits = f.get("option_limits") or {}
             options = sorted(
-                [{"option": o, "count": c, "percent": _pct(c, answered)} for o, c in counts.items()],
+                [{
+                    "option": o,
+                    "count": c,
+                    "percent": _pct(c, answered),
+                    "limit": limits.get(o),
+                    "is_full": bool(limits.get(o)) and c >= int(limits.get(o) or 0),
+                    "respondents": respondents.get(o) or [],
+                } for o, c in counts.items()],
                 key=lambda x: -x["count"],
             )
             q["options"] = options
@@ -9210,13 +9323,18 @@ async def get_newsletter(nid: str):
     # Audience gate — 404 for non-authorized users (also blocks direct URLs)
     if n.get("published") and n.get("author_id") != me["id"] and not _user_matches_audience(me, n.get("recipient_statuses")):
         raise HTTPException(404, "Newsletter introuvable")
-    # Auto-mark as read on detail fetch
+    # Auto-mark as read on detail fetch + increment unique open counter
     if n.get("published"):
         await db.newsletter_reads.update_one(
             {"employee_id": me["id"], "newsletter_id": nid},
             {"$set": {"employee_id": me["id"], "newsletter_id": nid, "read_at": _now()}},
             upsert=True,
         )
+        # Unique open : n'incrémente que la première fois par employé (auteur inclus)
+        existing_open = await db.newsletter_opens.find_one({"newsletter_id": nid, "employee_id": me["id"]})
+        if not existing_open:
+            await db.newsletter_opens.insert_one({"newsletter_id": nid, "employee_id": me["id"], "ts": _now()})
+            await db.newsletters.update_one({"id": nid}, {"$inc": {"open_count": 1}})
     r = await db.newsletter_reads.find_one({"employee_id": me["id"], "newsletter_id": nid})
     n["me_read"] = bool(r)
     return n
@@ -9388,12 +9506,30 @@ async def track_open(nid: str):
     return {"ok": True}
 
 
+class NewsletterClickPayload(BaseModel):
+    link_id: Optional[str] = None
+    url: Optional[str] = None
+    label: Optional[str] = None
+
+
 @api.post("/newsletters/{nid}/click")
-async def track_click(nid: str):
-    """Increment click counter."""
+async def track_click(nid: str, payload: Optional[NewsletterClickPayload] = None):
+    """Increment click counter (unique par user+link)."""
     uid = current_user()
-    await db.newsletter_clicks.insert_one({"newsletter_id": nid, "employee_id": uid, "ts": _now()})
-    await db.newsletters.update_one({"id": nid}, {"$inc": {"click_count": 1}})
+    link_id = (payload.link_id if payload else None) or (payload.url if payload else None) or "generic"
+    url = payload.url if payload else None
+    label = payload.label if payload else None
+    # dédup : un clic unique par employé+link
+    existing = await db.newsletter_clicks.find_one({
+        "newsletter_id": nid, "employee_id": uid, "link_id": link_id,
+    })
+    if not existing:
+        await db.newsletter_clicks.insert_one({
+            "newsletter_id": nid, "employee_id": uid,
+            "link_id": link_id, "url": url, "label": label,
+            "ts": _now(),
+        })
+        await db.newsletters.update_one({"id": nid}, {"$inc": {"click_count": 1}})
     return {"ok": True}
 
 

@@ -784,10 +784,33 @@ function FieldRow({ field, index, total, onChange, onRemove, onMove }) {
                   onChange({ options: arr });
                 }}
                 placeholder={`Option ${i + 1}`}
-                className="ms-input !py-1 !text-xs"
+                className="ms-input !py-1 !text-xs flex-1"
+              />
+              <input
+                type="number"
+                min={0}
+                value={(field.option_limits || {})[opt] ?? ""}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  const limits = { ...(field.option_limits || {}) };
+                  if (v === "" || v === "0") delete limits[opt]; else limits[opt] = parseInt(v, 10);
+                  onChange({ option_limits: limits });
+                }}
+                placeholder="Max"
+                title="Nombre maximum de participants pour cette option (laisser vide = illimité)"
+                data-testid={`opt-limit-${i}`}
+                className="ms-input !py-1 !text-xs w-16 text-center"
               />
               <button
-                onClick={() => onChange({ options: (field.options || []).filter((_, j) => j !== i) })}
+                onClick={() => {
+                  const removed = (field.options || [])[i];
+                  const limits = { ...(field.option_limits || {}) };
+                  delete limits[removed];
+                  onChange({
+                    options: (field.options || []).filter((_, j) => j !== i),
+                    option_limits: limits,
+                  });
+                }}
                 className="flex h-6 w-6 items-center justify-center rounded hover:bg-[#FEE2E2] text-[#EF4444] shrink-0"
               >
                 <X className="h-3 w-3" />
@@ -800,6 +823,9 @@ function FieldRow({ field, index, total, onChange, onRemove, onMove }) {
           >
             + Ajouter une option
           </button>
+          <p className="text-[10px] text-[#94A3B8] mt-1.5 leading-relaxed">
+            💡 Renseignez « Max » pour limiter le nombre de participants par option (inscriptions à créneaux). Vide = illimité.
+          </p>
         </div>
       )}
 
@@ -994,6 +1020,7 @@ function SummaryCard({ label, value, accent, muted }) {
 }
 
 function QuestionStats({ q }) {
+  const [openOpt, setOpenOpt] = useState(null);
   return (
     <div className="rounded-2xl border border-[#071B34]/5 p-4">
       <div className="flex items-start justify-between gap-2 mb-3">
@@ -1013,19 +1040,53 @@ function QuestionStats({ q }) {
             <div className="text-xs text-[#94A3B8] italic">Aucune donnée à afficher.</div>
           ) : (
             <div className="space-y-2">
-              {q.options.map((opt) => (
-                <div key={opt.option}>
-                  <div className="flex items-center justify-between text-xs mb-1">
-                    <span className="font-semibold text-[#334155]">{opt.option}</span>
-                    <span className="tabular-nums text-[#475569]">
-                      <strong className="text-[#071B34]">{opt.percent}%</strong> — {opt.count} réponse{opt.count > 1 ? "s" : ""}
-                    </span>
+              {q.options.map((opt) => {
+                const isOpen = openOpt === opt.option;
+                const canOpen = (opt.respondents || []).length > 0;
+                return (
+                  <div key={opt.option}>
+                    <button
+                      type="button"
+                      disabled={!canOpen}
+                      onClick={() => setOpenOpt(isOpen ? null : opt.option)}
+                      data-testid={`opt-toggle-${opt.option}`}
+                      className={`w-full flex items-center justify-between text-xs mb-1 text-left ${canOpen ? "cursor-pointer hover:text-[#3BA4FF]" : "cursor-default"}`}
+                    >
+                      <span className="font-semibold text-[#334155] flex items-center gap-1.5">
+                        {opt.option}
+                        {opt.is_full && (
+                          <span className="rounded-full bg-[#EF4444]/10 text-[#B91C1C] px-1.5 py-0.5 text-[9px] font-bold uppercase">Complet</span>
+                        )}
+                        {opt.limit && !opt.is_full && (
+                          <span className="text-[10px] text-[#94A3B8] font-normal">/ {opt.limit} max</span>
+                        )}
+                      </span>
+                      <span className="tabular-nums text-[#475569]">
+                        <strong className="text-[#071B34]">{opt.percent}%</strong> — {opt.count} réponse{opt.count > 1 ? "s" : ""}
+                        {canOpen && <span className="ml-1 text-[#3BA4FF]">{isOpen ? "▲" : "▼"}</span>}
+                      </span>
+                    </button>
+                    <div className="h-2 rounded-full bg-[#F4F7FA] overflow-hidden">
+                      <div className={`h-full transition-all ${opt.is_full ? "bg-gradient-to-r from-[#EF4444] to-[#B91C1C]" : "bg-gradient-to-r from-[#3BA4FF] to-[#1D70B8]"}`} style={{ width: `${opt.percent}%` }} />
+                    </div>
+                    {isOpen && (
+                      <div className="mt-2 rounded-xl bg-[#F8FAFC] p-2 space-y-1" data-testid={`respondents-${opt.option}`}>
+                        {(opt.respondents || []).map((r) => (
+                          <div key={r.id} className="text-[11px] text-[#334155] flex items-center gap-2 px-1">
+                            <span className="h-1.5 w-1.5 rounded-full bg-[#3BA4FF]" />
+                            <span className="font-semibold">{r.name}</span>
+                            {r.submitted_at && (
+                              <span className="text-[9px] text-[#94A3B8] ml-auto">
+                                {new Date(r.submitted_at).toLocaleDateString("fr-FR")}
+                              </span>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
-                  <div className="h-2 rounded-full bg-[#F4F7FA] overflow-hidden">
-                    <div className="h-full bg-gradient-to-r from-[#3BA4FF] to-[#1D70B8] transition-all" style={{ width: `${opt.percent}%` }} />
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
           {q.top && q.top.count > 0 && (

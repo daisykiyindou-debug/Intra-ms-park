@@ -299,6 +299,7 @@ function FieldRenderer({ field, value, onChange, onToggle }) {
   }
 
   if (field.type === "select") {
+    const avail = field.option_availability || {};
     return (
       <div>
         {label}
@@ -309,9 +310,15 @@ function FieldRenderer({ field, value, onChange, onToggle }) {
           className="ms-input"
         >
           <option value="">— Choisir —</option>
-          {(field.options || []).map((o) => (
-            <option key={o} value={o}>{o}</option>
-          ))}
+          {(field.options || []).map((o) => {
+            const a = avail[o];
+            const full = a?.is_full && value !== o;
+            return (
+              <option key={o} value={o} disabled={full}>
+                {o}{a?.limit ? ` — ${a.taken}/${a.limit}${full ? " (COMPLET)" : ""}` : ""}
+              </option>
+            );
+          })}
         </select>
         {helper}
       </div>
@@ -319,29 +326,42 @@ function FieldRenderer({ field, value, onChange, onToggle }) {
   }
 
   if (field.type === "radio") {
+    const avail = field.option_availability || {};
     return (
       <div>
         {label}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
-          {(field.options || []).map((o) => (
-            <label
-              key={o}
-              className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm cursor-pointer transition-colors ${
-                value === o
-                  ? "bg-[#3BA4FF]/10 border-[#3BA4FF] text-[#1D70B8] font-semibold"
-                  : "bg-white border-[#071B34]/10 hover:border-[#3BA4FF]/40 text-[#475569]"
-              }`}
-            >
-              <input
-                type="radio"
-                name={field.name}
-                checked={value === o}
-                onChange={() => onChange(o)}
-                className="h-4 w-4 accent-[#3BA4FF]"
-              />
-              {o}
-            </label>
-          ))}
+          {(field.options || []).map((o) => {
+            const a = avail[o];
+            const full = a?.is_full && value !== o;
+            return (
+              <label
+                key={o}
+                className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm transition-colors ${
+                  full
+                    ? "bg-[#F4F7FA] border-[#071B34]/5 text-[#94A3B8] cursor-not-allowed"
+                    : value === o
+                    ? "bg-[#3BA4FF]/10 border-[#3BA4FF] text-[#1D70B8] font-semibold cursor-pointer"
+                    : "bg-white border-[#071B34]/10 hover:border-[#3BA4FF]/40 text-[#475569] cursor-pointer"
+                }`}
+              >
+                <input
+                  type="radio"
+                  name={field.name}
+                  checked={value === o}
+                  disabled={full}
+                  onChange={() => onChange(o)}
+                  className="h-4 w-4 accent-[#3BA4FF]"
+                />
+                <span className="flex-1">{o}</span>
+                {a?.limit && (
+                  <span className={`text-[10px] font-bold ${full ? "text-[#EF4444]" : "text-[#94A3B8]"}`}>
+                    {full ? "COMPLET" : `${a.taken}/${a.limit}`}
+                  </span>
+                )}
+              </label>
+            );
+          })}
         </div>
         {helper}
       </div>
@@ -350,28 +370,41 @@ function FieldRenderer({ field, value, onChange, onToggle }) {
 
   if (field.type === "checkbox") {
     const arr = Array.isArray(value) ? value : [];
+    const avail = field.option_availability || {};
     return (
       <div>
         {label}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
-          {(field.options || []).map((o) => (
-            <label
-              key={o}
-              className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm cursor-pointer transition-colors ${
-                arr.includes(o)
-                  ? "bg-[#3BA4FF]/10 border-[#3BA4FF] text-[#1D70B8] font-semibold"
-                  : "bg-white border-[#071B34]/10 hover:border-[#3BA4FF]/40 text-[#475569]"
-              }`}
-            >
-              <input
-                type="checkbox"
-                checked={arr.includes(o)}
-                onChange={() => onToggle(o)}
-                className="h-4 w-4 accent-[#3BA4FF]"
-              />
-              {o}
-            </label>
-          ))}
+          {(field.options || []).map((o) => {
+            const a = avail[o];
+            const full = a?.is_full && !arr.includes(o);
+            return (
+              <label
+                key={o}
+                className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm transition-colors ${
+                  full
+                    ? "bg-[#F4F7FA] border-[#071B34]/5 text-[#94A3B8] cursor-not-allowed"
+                    : arr.includes(o)
+                    ? "bg-[#3BA4FF]/10 border-[#3BA4FF] text-[#1D70B8] font-semibold cursor-pointer"
+                    : "bg-white border-[#071B34]/10 hover:border-[#3BA4FF]/40 text-[#475569] cursor-pointer"
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  checked={arr.includes(o)}
+                  disabled={full}
+                  onChange={() => onToggle(o)}
+                  className="h-4 w-4 accent-[#3BA4FF]"
+                />
+                <span className="flex-1">{o}</span>
+                {a?.limit && (
+                  <span className={`text-[10px] font-bold ${full ? "text-[#EF4444]" : "text-[#94A3B8]"}`}>
+                    {full ? "COMPLET" : `${a.taken}/${a.limit}`}
+                  </span>
+                )}
+              </label>
+            );
+          })}
         </div>
         {helper}
       </div>
