@@ -4474,8 +4474,29 @@ async def list_channels():
     """Return every conversation with a live-computed `unread` count
     based on the caller's `channel_reads` timestamp for that channel.
     Only channels where the caller is a member are returned — new users
-    start with a strictly empty messagerie."""
+    start with a strictly empty messagerie.
+
+    Service canal auto-enrollment: any user whose `service_channels_access`
+    lists a corporate key is automatically added (idempotent) as member of
+    every existing `corp-{key}-*` and `rh-{key}-*` thread of that service.
+    This backfills members retroactively so a newly-attached staff sees ALL
+    prior threads immediately, not only messages posted after they joined.
+    """
     uid = current_user()
+    me = await db.employees.find_one({"id": uid}, {"_id": 0}) or {}
+    access = list(me.get("service_channels_access") or [])
+    if access:
+        # For each service key the user is staff of, enroll them in every
+        # matching corp/rh thread they aren't yet in. The source of truth is
+        # the channel's `corporate_key` field so this works for both
+        # `service-rh` (thread ids: `rh-{uid}`) and other keys like
+        # `communication`, `managers-ops`, `direction` (thread ids:
+        # `corp-{key}-{uid}`).
+        for key in access:
+            await db.channels.update_many(
+                {"corporate_key": key, "members_ids": {"$ne": uid}},
+                {"$addToSet": {"members_ids": uid}},
+            )
     all_channels = await db.channels.find({}, {"_id": 0}).to_list(200)
 
     def _is_member(c):
@@ -4607,6 +4628,33 @@ async def post_message(cid: str, payload: MessageCreate):
     if not (payload.content or "").strip() and not (payload.attachments or []):
         raise HTTPException(400, "Message vide")
     ch, _uid = await _require_channel_member(cid)
+    # ─── Service-canal membership sync: for corp-{key}-* and rh-{uid}
+    # threads, refresh members_ids to the sender + all current staff of
+    # that service just before we compute the notification recipients.
+    # This guarantees that any staff added AFTER the thread was created
+    # (e.g. Camille attached to Communication weeks later) receives every
+    # NEW message automatically, and can see the thread in their inbox.
+    canal_key = ch.get("corporate_key")
+    cid_str = str(ch.get("id", ""))
+    is_corp_thread = cid_str.startswith("corp-") or cid_str.startswith("rh-")
+    if is_corp_thread and canal_key:
+        staff = await _corporate_members(canal_key)
+        # The initiator (owner of the personal thread) also stays a member
+        initiator = None
+        if cid_str.startswith("corp-"):
+            initiator = cid_str[len(f"corp-{canal_key}-"):]
+        elif cid_str.startswith("rh-"):
+            initiator = cid_str[len("rh-"):]
+        base = list({*staff, current_user()})
+        if initiator:
+            base = list({*base, initiator})
+        await db.channels.update_one(
+            {"id": cid},
+            {"$set": {"members_ids": base, "members": len(base)}},
+        )
+        # Refresh in-memory copy so the notification loop below uses the
+        # updated members list.
+        ch["members_ids"] = base
     author = await db.employees.find_one({"id": current_user()}, {"_id": 0})
     author_name = (
         f"{author.get('first_name', '')} {author.get('last_name', '')}".strip()

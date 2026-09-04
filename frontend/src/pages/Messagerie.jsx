@@ -88,6 +88,8 @@ export default function Messagerie() {
   const initialCh = searchParams.get("ch") || null;
   const [active, setActive] = useState(initialCh);
   const [messages, setMessages] = useState([]);
+  const [editingMsgId, setEditingMsgId] = useState(null);
+  const [editingDraft, setEditingDraft] = useState("");
   const [draft, setDraft] = useState("");
   const [tab, setTab] = useState("all"); // all | unread | favorites
   const [q, setQ] = useState("");
@@ -1519,8 +1521,64 @@ export default function Messagerie() {
                                   {m.service_name || "Service"}
                                 </div>
                               )}
-                              {m.content && (
-                                <div className="whitespace-pre-wrap break-words">{m.content}</div>
+                              {editingMsgId === m.id ? (
+                                <div className="space-y-1.5" data-testid="msg-edit-inline">
+                                  <textarea
+                                    value={editingDraft}
+                                    onChange={(e) => setEditingDraft(e.target.value)}
+                                    onInput={(e) => { e.target.style.height = "auto"; e.target.style.height = `${Math.min(240, e.target.scrollHeight)}px`; }}
+                                    onKeyDown={async (e) => {
+                                      if (e.key === "Escape") { setEditingMsgId(null); return; }
+                                      if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
+                                        e.preventDefault();
+                                        const c = editingDraft.trim();
+                                        if (!c || c === m.content) { setEditingMsgId(null); return; }
+                                        try {
+                                          await api.put(`/messages/${m.id}`, { content: c });
+                                          setEditingMsgId(null);
+                                          reload();
+                                        } catch (err) {
+                                          toast.error(err?.response?.data?.detail || "Impossible de modifier ce message");
+                                        }
+                                      }
+                                    }}
+                                    autoFocus
+                                    rows={1}
+                                    data-testid={`msg-edit-textarea-${m.id}`}
+                                    className={`w-full resize-none rounded-lg bg-white/95 text-[#0B2545] text-sm p-2 outline-none ring-2 ${mine ? "ring-white/60" : "ring-[#3BA4FF]/40"} whitespace-pre-wrap leading-relaxed`}
+                                  />
+                                  <div className={`flex items-center gap-2 text-[11px] font-semibold ${mine ? "text-white/90" : "text-[#475569]"}`}>
+                                    <button
+                                      onClick={async () => {
+                                        const c = editingDraft.trim();
+                                        if (!c || c === m.content) { setEditingMsgId(null); return; }
+                                        try {
+                                          await api.put(`/messages/${m.id}`, { content: c });
+                                          setEditingMsgId(null);
+                                          reload();
+                                        } catch (err) {
+                                          toast.error(err?.response?.data?.detail || "Impossible de modifier ce message");
+                                        }
+                                      }}
+                                      data-testid={`msg-edit-save-${m.id}`}
+                                      className={`inline-flex items-center gap-1 rounded-md px-2 py-1 ${mine ? "bg-white/25 hover:bg-white/40" : "bg-[#3BA4FF] text-white hover:bg-[#1D70B8]"} transition-colors`}
+                                    >
+                                      Enregistrer
+                                    </button>
+                                    <button
+                                      onClick={() => setEditingMsgId(null)}
+                                      data-testid={`msg-edit-cancel-${m.id}`}
+                                      className={`${mine ? "hover:text-white" : "hover:text-[#0B2545]"} transition-colors`}
+                                    >
+                                      Annuler
+                                    </button>
+                                    <span className={`ml-auto italic ${mine ? "text-white/70" : "text-[#94A3B8]"}`}>Entrée pour valider · Maj+Entrée = saut de ligne · Échap pour annuler</span>
+                                  </div>
+                                </div>
+                              ) : (
+                                m.content && (
+                                  <div className="whitespace-pre-wrap break-words">{m.content}</div>
+                                )
                               )}
                               {(m.attachments || []).length > 0 && (
                                 <div className={`${m.content ? "mt-2" : ""} space-y-1.5`}>
@@ -1554,7 +1612,13 @@ export default function Messagerie() {
                               )}
                             </div>
                             {/* Hover-only actions row (like + edit), rendered OUTSIDE the bubble for a subtle look */}
-                            <MessageActions m={m} mine={mine} onChanged={reload} />
+                            <MessageActions
+                              m={m}
+                              mine={mine}
+                              onChanged={reload}
+                              onStartEdit={() => { setEditingDraft(m.content || ""); setEditingMsgId(m.id); }}
+                              isEditing={editingMsgId === m.id}
+                            />
                             {mine && (
                               showServiceAvatar
                                 ? <div className="h-7 w-7 rounded-full bg-gradient-to-br from-[#7C3AED] to-[#A78BFA] text-white flex items-center justify-center shrink-0" title={m.service_name || "Service"} data-testid="msg-avatar-service-mine">
@@ -2106,10 +2170,8 @@ export default function Messagerie() {
   );
 }
 
-function MessageActions({ m, mine, onChanged }) {
+function MessageActions({ m, mine, onChanged, onStartEdit, isEditing }) {
   const { me } = useApp();
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(m.content || "");
   const likedByMe = (m.liked_by || []).includes(me?.id);
   const likeCount = m.like_count || (m.liked_by || []).length;
   // Editable window: within 10 minutes of creation
@@ -2123,30 +2185,9 @@ function MessageActions({ m, mine, onChanged }) {
     } catch (_) { /* ignore */ }
   };
 
-  const saveEdit = async () => {
-    const c = (draft || "").trim();
-    if (!c || c === m.content) { setEditing(false); return; }
-    try {
-      await api.put(`/messages/${m.id}`, { content: c });
-      setEditing(false);
-      onChanged?.();
-    } catch (e) {
-      const msg = e?.response?.data?.detail || "Impossible de modifier ce message";
-      window.alert(msg);
-    }
-  };
-
-  if (editing) {
-    return (
-      <div className="mt-1 flex items-center gap-2" data-testid="msg-edit-form">
-        <input value={draft} onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter") saveEdit(); if (e.key === "Escape") setEditing(false); }}
-          className="ms-input text-xs flex-1" autoFocus />
-        <button onClick={saveEdit} className="text-[10px] font-semibold text-[#1D70B8]" data-testid="msg-edit-save">Enregistrer</button>
-        <button onClick={() => setEditing(false)} className="text-[10px] text-[#475569]">Annuler</button>
-      </div>
-    );
-  }
+  // While the parent bubble is in edit mode, hide the hover actions — the
+  // inline editor exposes its own Enregistrer / Annuler controls.
+  if (isEditing) return null;
 
   return (
     <div className="opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity flex items-center gap-1 text-[#94A3B8]" data-testid="msg-actions">
@@ -2160,7 +2201,7 @@ function MessageActions({ m, mine, onChanged }) {
       </button>
       {canEdit && (
         <button
-          onClick={() => { setDraft(m.content || ""); setEditing(true); }}
+          onClick={onStartEdit}
           data-testid="msg-edit-btn"
           title="Modifier"
           className="inline-flex items-center justify-center h-7 w-7 rounded-full hover:bg-[#F4F7FA] hover:text-[#3BA4FF] transition-colors"
