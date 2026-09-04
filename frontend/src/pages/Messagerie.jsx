@@ -418,7 +418,11 @@ export default function Messagerie() {
     if (conversations.length === 0) return;
     if (active) {
       const conv = conversations.find((c) => c.id === active);
-      if (conv && conv._is_service_thread) {
+      // Auto-switch to the service canal only for pure service threads. If
+      // the thread is the viewer's OWN corp thread (`_is_own_corp_thread`),
+      // it is intentionally visible in BOTH mailboxes — do NOT override the
+      // user's manual "Ma messagerie" selection.
+      if (conv && conv._is_service_thread && !conv._is_own_corp_thread) {
         const idStr = String(conv.id || "");
         const key =
           conv.corporate_key ||
