@@ -262,7 +262,13 @@ export default function Messagerie() {
         // service staff AND did NOT initiate the thread themselves. If they
         // did initiate it, they are writing to their own service as an
         // employee — show it as an employee POV in the sidebar.
-        const viewerActsAsStaff = viewerIsServiceStaff && corpInitiatorId !== me?.id;
+        // Staff view is applied whenever the viewer is service staff of the
+        // canal — INCLUDING when they are themselves the initiator of the
+        // thread. This way, the service canal treats every thread (their own
+        // included) as "a conversation with an employee": the row and header
+        // read `Camille BOUAZZA / role` instead of `Communication / Canal
+        // service`.
+        const viewerActsAsStaff = viewerIsServiceStaff;
         if (isDm) {
           if (Array.isArray(c.members_ids)) {
             otherId = c.members_ids.find((id) => id !== me?.id);
@@ -278,18 +284,17 @@ export default function Messagerie() {
         const isOfficial = c.is_official || (typeof c.id === "string" && c.id.startsWith("rh-"));
         let displayName, subtitle, avatar, kind;
         if (isCorp && viewerActsAsStaff) {
-          // Service staff view — show the employee who wrote to the service.
-          // When the initiator IS the viewer themselves, label it clearly so
-          // they see "Moi" instead of the service name (ambiguous).
-          if (corpInitiatorId === me?.id) {
-            displayName = "Moi (ma boîte personnelle)";
-            subtitle = "Vos échanges avec ce canal";
-            avatar = me?.avatar || null;
-          } else {
-            displayName = other ? `${other.first_name} ${other.last_name}` : (c.name || "Conversation");
-            subtitle = other?.role || "Message reçu — Service";
-            avatar = other?.avatar || null;
-          }
+          // Service staff view — the thread is labelled with the initiator's
+          // identity (an employee writing to the service). When the initiator
+          // IS the viewer themselves, treat them like any other employee and
+          // display THEIR OWN name (not the service name) so the row and the
+          // header read exactly like a conversation with that person.
+          const initiator = corpInitiatorId === me?.id ? me : other;
+          displayName = initiator
+            ? `${initiator.first_name} ${initiator.last_name}`
+            : (c.name || "Conversation");
+          subtitle = initiator?.role || "Message reçu — Service";
+          avatar = initiator?.avatar || null;
           kind = "service_thread";
         } else if (isCorp) {
           // Employee side (including self-initiated by service staff) —
