@@ -1096,7 +1096,7 @@ function WeekEditor({ employee, weekStart, existingEntries, onClose, onSaved }) 
   };
 
   const totalMinutes = rows.reduce((sum, r) => {
-    if ((r.type !== "shift" && r.type !== "remote") || !r.start || !r.end) return sum;
+    if ((r.type !== "shift" && r.type !== "remote" && r.type !== "school") || !r.start || !r.end) return sum;
     const [sh, sm] = r.start.split(":").map(Number);
     const [eh, em] = r.end.split(":").map(Number);
     let endMin = eh * 60 + em;
@@ -1118,10 +1118,10 @@ function WeekEditor({ employee, weekStart, existingEntries, onClose, onSaved }) 
   const contractH = employee.contract_hours_weekly || 35;
   const diff = totalMinutes / 60 - contractH;
 
-  // Row-level validation: block save if any shift/remote row is incoherent.
+  // Row-level validation: block save if any shift/remote/school row is incoherent.
   const validateRow = (r) => {
     if (r._locked_leave) return null;
-    if (r.type !== "shift" && r.type !== "remote") return null;
+    if (r.type !== "shift" && r.type !== "remote" && r.type !== "school") return null;
     if (!r.start || !r.end) return null;
     const toMin = (x) => { const [h, m] = (x || "").split(":").map(Number); return h * 60 + m; };
     const s = toMin(r.start);
@@ -1339,7 +1339,7 @@ const WEEK_TYPES = [
 
 function WeekRow({ dayLabel, dayDate, row, onChange, canDuplicate, dayLabels, dayIndex, onDuplicate, lockedIndexes }) {
   const isLocked = row._locked_leave;
-  const isShift = row.type === "shift" || row.type === "remote";
+  const isShift = row.type === "shift" || row.type === "remote" || row.type === "school";
   const meta = WEEK_TYPES.find((t) => t.v === row.type) || WEEK_TYPES[0];
   const [dupOpen, setDupOpen] = useState(false);
   const [dupTargets, setDupTargets] = useState(() => new Set());
@@ -1640,9 +1640,9 @@ function EntryEditor({ entry, employeeName, onClose, onSave }) {
           ))}
         </div>
 
-        {(form.type === "shift" || form.type === "remote" || form.type === "training") && (
+        {(form.type === "shift" || form.type === "remote" || form.type === "training" || form.type === "school") && (
           <>
-            {(form.type === "shift" || form.type === "remote") ? (
+            {(form.type === "shift" || form.type === "remote" || form.type === "school") ? (
               <div className="grid grid-cols-2 gap-2">
                 <div>
                   <label className="ms-overline">Début shift</label>
@@ -1794,8 +1794,8 @@ function EntryEditor({ entry, employeeName, onClose, onSave }) {
           </button>
           <button
             onClick={() => {
-              // Validate before submit for shift/remote entries
-              if (form.type === "shift" || form.type === "remote") {
+              // Validate before submit for shift/remote/school entries
+              if (form.type === "shift" || form.type === "remote" || form.type === "school") {
                 if (form.start && form.end) {
                   const toMin = (x) => { const [h, m] = (x || "").split(":").map(Number); return h * 60 + m; };
                   const s = toMin(form.start);

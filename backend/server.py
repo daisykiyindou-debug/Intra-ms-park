@@ -7112,43 +7112,40 @@ def _shift_minutes(entry: dict) -> int:
 
 def _covered_minutes(entry: dict) -> int:
     """Minutes that count toward contract fulfilment.
-    Uses explicit `covered_minutes` field if set (for leave/rtt that no longer store start/end),
-    otherwise computes from start/end minus pause."""
+    - Pour shift/remote/training/school : calcul depuis start/end - pause si horaires renseignés.
+    - Fallback `covered_minutes` (leave, rtt, école générée en récurrence sans horaires).
+    """
+    t = entry.get("type")
+    if t not in ("shift", "remote", "leave", "rtt", "training", "school"):
+        return 0
+    # Priorité : calcul depuis horaires si start ET end présents
+    if entry.get("start") and entry.get("end"):
+        try:
+            s = datetime.strptime(entry["start"], "%H:%M")
+            e = datetime.strptime(entry["end"], "%H:%M")
+            if e <= s:
+                e = e + timedelta(days=1)
+            m = int((e - s).total_seconds() // 60)
+            if entry.get("pause_start") and entry.get("pause_end"):
+                ps = datetime.strptime(entry["pause_start"], "%H:%M")
+                pe = datetime.strptime(entry["pause_end"], "%H:%M")
+                if pe < ps:
+                    pe = pe + timedelta(days=1)
+                if ps < s:
+                    ps = ps + timedelta(days=1)
+                    if pe < ps:
+                        pe = pe + timedelta(days=1)
+                m -= int((pe - ps).total_seconds() // 60)
+            return max(0, m)
+        except Exception:
+            pass
+    # Fallback : covered_minutes explicite (leave/rtt/école bulk)
     if entry.get("covered_minutes") is not None:
         try:
             return max(0, int(entry["covered_minutes"]))
         except Exception:
             pass
-    if entry.get("type") not in ("shift", "remote", "leave", "rtt", "training", "school"):
-        return 0
-    if entry.get("type") == "school":
-        # École: comptabiliser les heures contrat de la journée comme travaillées
-        try:
-            return max(0, int(entry.get("covered_minutes") or 0))
-        except Exception:
-            return 0
-    if not entry.get("start") or not entry.get("end"):
-        return 0
-    try:
-        s = datetime.strptime(entry["start"], "%H:%M")
-        e = datetime.strptime(entry["end"], "%H:%M")
-        # Cross-midnight support: parc closes late (e.g. 02:00 the next day)
-        if e <= s:
-            e = e + timedelta(days=1)
-        m = int((e - s).total_seconds() // 60)
-        if entry.get("pause_start") and entry.get("pause_end"):
-            ps = datetime.strptime(entry["pause_start"], "%H:%M")
-            pe = datetime.strptime(entry["pause_end"], "%H:%M")
-            if pe < ps:
-                pe = pe + timedelta(days=1)
-            if ps < s:
-                ps = ps + timedelta(days=1)
-                if pe < ps:
-                    pe = pe + timedelta(days=1)
-            m -= int((pe - ps).total_seconds() // 60)
-        return max(0, m)
-    except Exception:
-        return 0
+    return 0
 
 
 MEAL_POINTS_BY_STATUS = {
@@ -7400,8 +7397,8 @@ async def admin_upsert_schedule(payload: AdminScheduleEntry):
     if payload.type == "shift":
         if not payload.start or not payload.end:
             raise HTTPException(400, "Horaires début/fin requis pour un shift")
-    # Coherence checks for shift/remote entries — same rules as the week editor
-    if payload.type in ("shift", "remote") and payload.start and payload.end:
+    # Coherence checks for shift/remote/school entries — same rules as the week editor
+    if payload.type in ("shift", "remote", "school") and payload.start and payload.end:
         def _tmin(v):
             try:
                 h, m = v.split(":")
@@ -7841,7 +7838,7 @@ async def admin_save_week(payload: BulkWeekPayload):
         except Exception:
             return None
     for e in payload.entries:
-        if e.type not in ("shift", "remote"):
+        if e.type not in ("shift", "remote", "school"):
             continue
         if not e.start or not e.end:
             continue
@@ -7872,9 +7869,9 @@ async def admin_save_week(payload: BulkWeekPayload):
         week_offset = timedelta(days=7 * w)
         for e in payload.entries:
             day_iso = (base + week_offset + timedelta(days=e.day_offset)).isoformat()
-            is_shift_like = e.type in ("shift", "remote")
+            is_shift_like = e.type in ("shift", "remote", "school")
             if is_shift_like and (not e.start or not e.end):
-                # Skip incomplete shift/remote rows (admin left them blank)
+                # Skip incomplete shift/remote/school rows (admin left them blank)
                 continue
             record = {
                 "employee_id": payload.employee_id,
@@ -7885,7 +7882,7 @@ async def admin_save_week(payload: BulkWeekPayload):
                 "pause_start": e.pause_start if is_shift_like else None,
                 "pause_end": e.pause_end if is_shift_like else None,
                 "break_minutes": e.break_minutes if is_shift_like else 0,
-                "location": e.location,
+                "location": e.location if e.type != "school" else (e.location or "École"),
                 "service": e.service,
                 "note": e.note,
             }
