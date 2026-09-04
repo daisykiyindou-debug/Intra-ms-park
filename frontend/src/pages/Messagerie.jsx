@@ -278,10 +278,18 @@ export default function Messagerie() {
         const isOfficial = c.is_official || (typeof c.id === "string" && c.id.startsWith("rh-"));
         let displayName, subtitle, avatar, kind;
         if (isCorp && viewerActsAsStaff) {
-          // Service staff view — show the employee who wrote to the service
-          displayName = other ? `${other.first_name} ${other.last_name}` : (c.name || "Conversation");
-          subtitle = other?.role || "Message reçu — Service";
-          avatar = other?.avatar || null;
+          // Service staff view — show the employee who wrote to the service.
+          // When the initiator IS the viewer themselves, label it clearly so
+          // they see "Moi" instead of the service name (ambiguous).
+          if (corpInitiatorId === me?.id) {
+            displayName = "Moi (ma boîte personnelle)";
+            subtitle = "Vos échanges avec ce canal";
+            avatar = me?.avatar || null;
+          } else {
+            displayName = other ? `${other.first_name} ${other.last_name}` : (c.name || "Conversation");
+            subtitle = other?.role || "Message reçu — Service";
+            avatar = other?.avatar || null;
+          }
           kind = "service_thread";
         } else if (isCorp) {
           // Employee side (including self-initiated by service staff) —
@@ -313,14 +321,16 @@ export default function Messagerie() {
           _avatar: avatar,
           _other: other,
           _is_official: isOfficial,
-          // A corp/rh channel is a "service thread" (belongs to the service
-          // inbox switcher, hidden from personal messagerie) only when the
-          // viewer is service staff AND is NOT the initiator of that thread.
-          // If the viewer IS the initiator, the thread lives in their
-          // personal messagerie (they are writing AS an employee to the service).
+          // A corp/rh channel is a "service thread" (visible in the
+          // corresponding service inbox switcher) whenever the viewer is
+          // service staff of that key. When the viewer is ALSO the initiator
+          // of that thread (their own `corp-{key}-{me}` thread), it stays
+          // ALSO visible on the personal side — so they see their own
+          // broadcast in their personal inbox and can review it alongside
+          // the others' threads on the service side.
           _is_service_thread:
-            (isCorp && viewerIsServiceStaff && corpInitiatorId !== me?.id) ||
-            c.is_service_inbox === true,
+            (isCorp && viewerIsServiceStaff) || c.is_service_inbox === true,
+          _is_own_corp_thread: isCorp && corpInitiatorId === me?.id,
           _kind: kind,
           _is_birthday: !isOfficial && isBirthdayToday(other),
         };
@@ -343,11 +353,14 @@ export default function Messagerie() {
   const serviceAccess = me?.service_channels_access || [];
   const scopedConversations = useMemo(() => {
     if (mailboxMode === "personal") {
-      // Personal mailbox = every conversation EXCEPT service threads for which
-      // the user is service staff (those live in the corresponding service
-      // boîte). Corporate threads where the user is the employee-initiator
-      // stay here so they still receive the service replies in their inbox.
-      return conversations.filter((c) => !c._is_service_thread);
+      // Personal mailbox = every conversation EXCEPT service threads for
+      // which the user is service staff — with ONE exception: threads the
+      // viewer initiated themselves (`corp-{key}-{me}`) stay here even if
+      // they are also service threads, so the viewer sees their own
+      // broadcast / requests in their personal inbox.
+      return conversations.filter(
+        (c) => !c._is_service_thread || c._is_own_corp_thread,
+      );
     }
     const key = mailboxMode.replace(/^service-/, "");
     return conversations.filter((c) => {
@@ -434,7 +447,7 @@ export default function Messagerie() {
     // Mailbox split — personal excludes service threads (where user is staff),
     // service-X shows only its threads.
     if (mailboxMode === "personal") {
-      list = list.filter((c) => !c._is_service_thread);
+      list = list.filter((c) => !c._is_service_thread || c._is_own_corp_thread);
     } else {
       const key = mailboxMode.replace(/^service-/, "");
       list = list.filter((c) => {
