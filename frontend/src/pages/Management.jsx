@@ -386,6 +386,7 @@ function PlanningManager() {
   const [contract, setContract] = useState(null);
   const [editEntry, setEditEntry] = useState(null);
   const [weekEditorOpen, setWeekEditorOpen] = useState(false);
+  const [schoolRecurrenceOpen, setSchoolRecurrenceOpen] = useState(false);
 
   useEffect(() => {
     api.get("/admin/employees").then((r) => {
@@ -519,6 +520,15 @@ function PlanningManager() {
             >
               <CalendarClock className="h-3.5 w-3.5" /> Éditer la semaine complète
             </button>
+            <button
+              onClick={() => setSchoolRecurrenceOpen(true)}
+              data-testid="school-recurrence-open"
+              className="ms-btn-outline"
+              disabled={!selectedId}
+              title="Générer des journées École en série (alternance)"
+            >
+              🎓 Récurrence École
+            </button>
             {contract && selectedEmp && (
             <div
               data-testid="contract-alert"
@@ -617,9 +627,343 @@ function PlanningManager() {
           }}
         />
       )}
+
+      {schoolRecurrenceOpen && selectedEmp && (
+        <SchoolRecurrenceModal
+          employee={selectedEmp}
+          onClose={() => setSchoolRecurrenceOpen(false)}
+          onSaved={() => {
+            setSchoolRecurrenceOpen(false);
+            loadWeek();
+            notifyLiveRefresh(["schedule", "me"]);
+          }}
+        />
+      )}
     </div>
   );
 }
+
+// ───────────────────────── Modale récurrence « École » (alternance)
+
+const WEEKDAY_LABELS = ["L", "Ma", "Me", "J", "V", "S", "D"];
+const WEEKDAY_LONG = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche"];
+
+function SchoolRecurrenceModal({ employee, onClose, onSaved }) {
+  const today = new Date();
+  const iso = (d) => d.toISOString().slice(0, 10);
+  const [mode, setMode] = useState("weekly");
+  const [startDate, setStartDate] = useState(iso(today));
+  const [endDate, setEndDate] = useState(iso(new Date(today.getFullYear(), today.getMonth() + 3, today.getDate())));
+  const [weekdays, setWeekdays] = useState(new Set([4])); // vendredi par défaut
+  const [everyN, setEveryN] = useState(1);
+  const [nth, setNth] = useState(1);
+  const [monthlyWeekday, setMonthlyWeekday] = useState(0);
+  const [customDates, setCustomDates] = useState("");
+  const [preview, setPreview] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  const toggleWd = (i) => {
+    const n = new Set(weekdays);
+    if (n.has(i)) n.delete(i); else n.add(i);
+    setWeekdays(n);
+  };
+
+  const buildPayload = () => {
+    const base = {
+      employee_id: employee.id,
+      start_date: startDate,
+      end_date: endDate,
+      mode,
+      note: "École (alternance)",
+    };
+    if (mode === "weekly") {
+      return { ...base, weekdays: Array.from(weekdays), every_n_weeks: Number(everyN) || 1 };
+    }
+    if (mode === "full-week") {
+      return { ...base, weekdays: [0, 1, 2, 3, 4], every_n_weeks: Number(everyN) || 1 };
+    }
+    if (mode === "monthly-nth") {
+      return { ...base, nth: Number(nth), weekday: Number(monthlyWeekday) };
+    }
+    if (mode === "custom") {
+      return {
+        ...base,
+        custom_dates: customDates.split(/[\s,;\n]+/).map((s) => s.trim()).filter(Boolean),
+      };
+    }
+    return base;
+  };
+
+  const doPreview = async () => {
+    setBusy(true);
+    try {
+      // Dry-run via même endpoint = renvoie dates générées (idempotent : upsert)
+      // Pour ne pas polluer, on annule tout de suite après (delete range) — non !
+      // Plus propre : appeler save si validé. Ici preview = calcul côté client.
+      const p = buildPayload();
+      // Simulation côté client : approximation pour l'affichage
+      const dates = clientSideGenerate(p);
+      setPreview(dates);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const doSave = async () => {
+    if (!startDate || !endDate) {
+      toast.error("Renseignez une date de début et de fin");
+      return;
+    }
+    if (endDate < startDate) {
+      toast.error("La date de fin doit être postérieure à la date de début");
+      return;
+    }
+    setBusy(true);
+    try {
+      const p = buildPayload();
+      const { data } = await api.post("/admin/schedule/school-recurrence", p);
+      toast.success(`🎓 ${data.count} journées d'école planifiées`, {
+        description: data.skipped?.length
+          ? `${data.skipped.length} jour(s) ignoré(s) (congés/RTT approuvés)`
+          : "Le planning du collaborateur est à jour",
+      });
+      onSaved?.();
+    } catch (e) {
+      toast.error("Impossible de générer les journées", {
+        description: e.response?.data?.detail || "Vérifiez les paramètres",
+      });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const doClearRange = async () => {
+    if (!window.confirm(`Supprimer toutes les journées École entre ${startDate} et ${endDate} ?`)) return;
+    setBusy(true);
+    try {
+      const { data } = await api.delete(
+        `/admin/school-recurrence?employee_id=${employee.id}&start_date=${startDate}&end_date=${endDate}`
+      );
+      toast.success(`${data.removed} journées École supprimées`);
+      onSaved?.();
+    } catch (e) {
+      toast.error("Suppression impossible", { description: e.response?.data?.detail || "" });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <PortalModal onClose={onClose}>
+      <div className="w-full max-w-lg bg-white rounded-2xl p-5 shadow-2xl" data-testid="school-recurrence-modal">
+        <div className="flex items-start justify-between mb-4">
+          <div>
+            <div className="text-lg font-bold text-[#071B34]">🎓 Récurrence École</div>
+            <div className="text-xs text-[#475569]">{employee.first_name} {employee.last_name}</div>
+          </div>
+          <button onClick={onClose} className="flex h-9 w-9 items-center justify-center rounded-xl hover:bg-[#071B34]/5" data-testid="school-recurrence-close">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        {/* Période */}
+        <div className="grid grid-cols-2 gap-2">
+          <div>
+            <label className="ms-overline">Début</label>
+            <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)}
+              className="ms-input mt-2" data-testid="school-start-date" />
+          </div>
+          <div>
+            <label className="ms-overline">Fin</label>
+            <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)}
+              className="ms-input mt-2" data-testid="school-end-date" />
+          </div>
+        </div>
+
+        {/* Mode */}
+        <label className="ms-overline mt-4 block">Type de récurrence</label>
+        <div className="grid grid-cols-2 gap-1.5 mt-2">
+          {[
+            ["weekly", "Jour(s) de la semaine"],
+            ["full-week", "Semaine complète toutes les N sem."],
+            ["monthly-nth", "Nième jour du mois"],
+            ["custom", "Dates personnalisées"],
+          ].map(([v, l]) => (
+            <button
+              key={v}
+              onClick={() => setMode(v)}
+              data-testid={`school-mode-${v}`}
+              className={`text-[11px] font-semibold rounded-lg py-2 px-2 text-left transition-colors ${
+                mode === v ? "bg-[#071B34] text-white" : "bg-[#F4F7FA] text-[#475569] hover:bg-[#071B34]/5"
+              }`}
+            >
+              {l}
+            </button>
+          ))}
+        </div>
+
+        {/* Paramètres selon mode */}
+        {mode === "weekly" && (
+          <div className="mt-4 space-y-3">
+            <div>
+              <label className="ms-overline">Jours concernés</label>
+              <div className="flex gap-1.5 mt-2 flex-wrap">
+                {WEEKDAY_LABELS.map((l, i) => (
+                  <button
+                    key={i}
+                    onClick={() => toggleWd(i)}
+                    data-testid={`weekday-${i}`}
+                    className={`h-9 w-9 rounded-lg text-xs font-bold ${
+                      weekdays.has(i) ? "bg-[#0EA5E9] text-white" : "bg-[#F4F7FA] text-[#475569]"
+                    }`}
+                  >{l}</button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <label className="ms-overline">Toutes les</label>
+              <div className="flex items-center gap-2 mt-2">
+                <input type="number" min={1} max={12} value={everyN}
+                  onChange={(e) => setEveryN(e.target.value)}
+                  className="ms-input w-20" data-testid="every-n-weeks" />
+                <span className="text-sm text-[#475569]">semaine(s)</span>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {mode === "full-week" && (
+          <div className="mt-4">
+            <label className="ms-overline">Une semaine complète (Lun-Ven) toutes les</label>
+            <div className="flex items-center gap-2 mt-2">
+              <input type="number" min={1} max={12} value={everyN}
+                onChange={(e) => setEveryN(e.target.value)}
+                className="ms-input w-20" data-testid="fw-every-n" />
+              <span className="text-sm text-[#475569]">semaine(s)</span>
+            </div>
+            <p className="text-[11px] text-[#475569] mt-2">La 1ère semaine part du lundi de la date de début.</p>
+          </div>
+        )}
+
+        {mode === "monthly-nth" && (
+          <div className="mt-4 grid grid-cols-2 gap-2">
+            <div>
+              <label className="ms-overline">Position</label>
+              <select value={nth} onChange={(e) => setNth(e.target.value)}
+                className="ms-input mt-2" data-testid="monthly-nth">
+                <option value={1}>1er</option>
+                <option value={2}>2e</option>
+                <option value={3}>3e</option>
+                <option value={4}>4e</option>
+                <option value={-1}>Dernier</option>
+              </select>
+            </div>
+            <div>
+              <label className="ms-overline">Jour</label>
+              <select value={monthlyWeekday} onChange={(e) => setMonthlyWeekday(e.target.value)}
+                className="ms-input mt-2" data-testid="monthly-weekday">
+                {WEEKDAY_LONG.map((l, i) => <option key={i} value={i}>{l}</option>)}
+              </select>
+            </div>
+          </div>
+        )}
+
+        {mode === "custom" && (
+          <div className="mt-4">
+            <label className="ms-overline">Dates (YYYY-MM-DD, séparées par virgule/espace/retour ligne)</label>
+            <textarea value={customDates} onChange={(e) => setCustomDates(e.target.value)}
+              rows={4} className="ms-input mt-2 font-mono text-xs" data-testid="custom-dates"
+              placeholder="2026-11-04, 2026-11-05&#10;2026-12-08" />
+          </div>
+        )}
+
+        {/* Preview */}
+        {preview && (
+          <div className="mt-4 p-3 rounded-xl bg-[#E0F2FE]/60 border border-[#0EA5E9]/30 text-[11px]" data-testid="school-preview">
+            <div className="font-bold text-[#0369A1] mb-1">Aperçu : {preview.length} journée(s)</div>
+            <div className="text-[#475569] leading-relaxed">
+              {preview.slice(0, 10).join(", ")}{preview.length > 10 ? "…" : ""}
+            </div>
+          </div>
+        )}
+
+        <div className="mt-5 flex gap-2 flex-wrap">
+          <button onClick={onClose} className="ms-btn-outline flex-1" data-testid="school-cancel">Annuler</button>
+          <button onClick={doPreview} disabled={busy} className="ms-btn-outline flex-1" data-testid="school-preview-btn">
+            Aperçu
+          </button>
+          <button onClick={doClearRange} disabled={busy} className="ms-btn-outline flex-1 text-[#B91C1C]" data-testid="school-clear">
+            Supprimer
+          </button>
+          <button onClick={doSave} disabled={busy} className="ms-btn-primary flex-[1.4]" data-testid="school-save">
+            <Save className="h-4 w-4" /> Générer
+          </button>
+        </div>
+      </div>
+    </PortalModal>
+  );
+}
+
+// Générateur client-side (aperçu uniquement — doit rester aligné avec backend)
+function clientSideGenerate(p) {
+  const out = [];
+  const start = new Date(p.start_date);
+  const end = new Date(p.end_date);
+  if (isNaN(start) || isNaN(end) || end < start) return out;
+  const jsWd = (d) => (d.getDay() + 6) % 7; // 0=Lun … 6=Dim
+  if (p.mode === "custom") {
+    (p.custom_dates || []).forEach((s) => {
+      const d = new Date(s);
+      if (!isNaN(d) && d >= start && d <= end) out.push(s);
+    });
+  } else if (p.mode === "weekly") {
+    const wds = new Set(p.weekdays || []);
+    const n = Math.max(1, p.every_n_weeks || 1);
+    const anchor = new Date(start); anchor.setDate(anchor.getDate() - jsWd(anchor));
+    const d = new Date(start);
+    while (d <= end) {
+      const ws = new Date(d); ws.setDate(ws.getDate() - jsWd(ws));
+      const delta = Math.floor((ws - anchor) / (7 * 86400000));
+      if (delta % n === 0 && wds.has(jsWd(d))) out.push(d.toISOString().slice(0, 10));
+      d.setDate(d.getDate() + 1);
+    }
+  } else if (p.mode === "full-week") {
+    const wds = new Set(p.weekdays && p.weekdays.length ? p.weekdays : [0, 1, 2, 3, 4]);
+    const n = Math.max(1, p.every_n_weeks || 1);
+    const anchor = new Date(start); anchor.setDate(anchor.getDate() - jsWd(anchor));
+    const cur = new Date(anchor);
+    while (cur <= end) {
+      Array.from(wds).sort().forEach((wd) => {
+        const day = new Date(cur); day.setDate(day.getDate() + wd);
+        if (day >= start && day <= end) out.push(day.toISOString().slice(0, 10));
+      });
+      cur.setDate(cur.getDate() + 7 * n);
+    }
+  } else if (p.mode === "monthly-nth") {
+    const nth = Number(p.nth || 1);
+    const wd = Number(p.weekday || 0);
+    let y = start.getFullYear(), m = start.getMonth();
+    while (y * 12 + m <= end.getFullYear() * 12 + end.getMonth()) {
+      let target = null;
+      if (nth === -1) {
+        const lastDay = new Date(y, m + 1, 0);
+        const delta = (jsWd(lastDay) - wd + 7) % 7;
+        target = new Date(y, m, lastDay.getDate() - delta);
+      } else {
+        const first = new Date(y, m, 1);
+        const delta = (wd - jsWd(first) + 7) % 7;
+        target = new Date(y, m, 1 + delta + 7 * (nth - 1));
+        if (target.getMonth() !== m) target = null;
+      }
+      if (target && target >= start && target <= end) out.push(target.toISOString().slice(0, 10));
+      m++;
+      if (m === 12) { m = 0; y++; }
+    }
+  }
+  return Array.from(new Set(out)).sort();
+}
+
+
 
 function EntryCard({ entry, onEdit, onDelete }) {
   const typeMeta = {
@@ -629,6 +973,7 @@ function EntryCard({ entry, onEdit, onDelete }) {
     leave: { color: "#7C3AED", bg: "#A78BFA22", label: "Congé" },
     rtt: { color: "#1D70B8", bg: "#DBEAFE", label: "RTT" },
     training: { color: "#B45309", bg: "#FEF3C7", label: "Formation" },
+    school: { color: "#0EA5E9", bg: "#E0F2FE", label: "🎓 École" },
     cleared: { color: "#94A3B8", bg: "#F8FAFC", label: "Vide" },
   };
   const m = typeMeta[entry.type] || typeMeta.shift;
@@ -652,6 +997,9 @@ function EntryCard({ entry, onEdit, onDelete }) {
       )}
       {entry.type === "training" && entry.note && (
         <div className="text-[11px] text-[#B45309] font-semibold truncate">{entry.note}</div>
+      )}
+      {entry.type === "school" && (
+        <div className="text-[11px] text-[#0369A1] font-semibold truncate">{entry.note || "École (alternance)"}</div>
       )}
       <div className="mt-auto flex gap-1 pt-2">
         <button
@@ -985,6 +1333,7 @@ const WEEK_TYPES = [
   { v: "remote", label: "Télétravail", color: "#059669", bg: "#D1FAE5" },
   { v: "off", label: "OFF", color: "#64748B", bg: "#F1F5F9" },
   { v: "training", label: "Formation", color: "#B45309", bg: "#FEF3C7" },
+  { v: "school", label: "🎓 École", color: "#0EA5E9", bg: "#E0F2FE" },
   { v: "cleared", label: "Vide", color: "#94A3B8", bg: "#F8FAFC" },
 ];
 
@@ -1267,13 +1616,14 @@ function EntryEditor({ entry, employeeName, onClose, onSave }) {
         </div>
 
         <label className="ms-overline">Type</label>
-        <div className="grid grid-cols-5 gap-1.5 mt-2 mb-3">
+        <div className="grid grid-cols-6 gap-1.5 mt-2 mb-3">
           {[
             ["shift", "Shift"],
             ["remote", "Télétravail"],
             ["off", "OFF"],
             ["leave", "Congé"],
             ["training", "Formation"],
+            ["school", "🎓 École"],
           ].map(([v, l]) => (
             <button
               key={v}
@@ -1420,7 +1770,7 @@ function EntryEditor({ entry, employeeName, onClose, onSave }) {
           </div>
         )}
 
-        {(form.type === "training" || form.type === "leave") && (
+        {(form.type === "training" || form.type === "leave" || form.type === "school") && (
           <div className="mt-3">
             <label className="ms-overline">Note</label>
             <input
@@ -1429,6 +1779,12 @@ function EntryEditor({ entry, employeeName, onClose, onSave }) {
               className="ms-input mt-2"
               placeholder="Précision…"
             />
+          </div>
+        )}
+        {form.type === "school" && (
+          <div className="mt-3 rounded-xl bg-[#E0F2FE]/60 border border-[#0EA5E9]/30 p-3 text-[11px] text-[#0369A1] leading-relaxed" data-testid="school-day-hint">
+            <strong>🎓 Journée d'école</strong> — pas de badgeage, pas de commande resto, absent de MS Park.
+            Les heures contrat de la journée sont comptabilisées comme travaillées.
           </div>
         )}
 

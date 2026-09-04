@@ -1,4 +1,4 @@
-import { X, Check, Bell, FileText, MessageCircle, Calendar, Megaphone, CheckCircle2 } from "lucide-react";
+import { X, Check, Bell, FileText, MessageCircle, Calendar, Megaphone, CheckCircle2, Cake } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useApp } from "@/contexts/AppContext";
 import { api } from "@/lib/api";
@@ -10,6 +10,7 @@ const icons = {
   megaphone: Megaphone,
   "file-text": FileText,
   "message-circle": MessageCircle,
+  cake: Cake,
   bell: Bell,
 };
 

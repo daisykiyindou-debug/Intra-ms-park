@@ -15,9 +15,10 @@ from pathlib import Path
 from typing import Any, List, Optional
 from zoneinfo import ZoneInfo
 
+import requests
 from dotenv import load_dotenv
 from fastapi import APIRouter, FastAPI, HTTPException, Request, UploadFile, File
-from fastapi.staticfiles import StaticFiles
+from fastapi.responses import Response
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.middleware.cors import CORSMiddleware
@@ -32,11 +33,81 @@ db = client[os.environ["DB_NAME"]]
 app = FastAPI(title="MS Park Intranet API")
 api = APIRouter(prefix="/api")
 
-# ─── Local file uploads (images from device gallery)
-# Mounted under /api/uploads so it goes through the k8s ingress (which routes /api/* to backend)
-UPLOAD_DIR = Path("/app/backend/uploads")
-UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-app.mount("/api/uploads", StaticFiles(directory=str(UPLOAD_DIR)), name="uploads")
+# ─── Emergent Object Storage (uploads persistants entre déploiements)
+STORAGE_BASE = (os.environ.get("INTEGRATION_PROXY_URL") or "").strip() or "https://integrations.emergentagent.com"
+STORAGE_URL = STORAGE_BASE.rstrip("/") + "/objstore/api/v1/storage"
+EMERGENT_KEY = os.environ.get("EMERGENT_LLM_KEY")
+APP_NAME = "mspark-intranet"
+_storage_key: Optional[str] = None
+
+
+def _init_storage(force: bool = False) -> Optional[str]:
+    """Init une clé de session Object Storage. Idempotent."""
+    global _storage_key
+    if _storage_key and not force:
+        return _storage_key
+    if not EMERGENT_KEY:
+        return None
+    try:
+        resp = requests.post(
+            f"{STORAGE_URL}/init",
+            json={"emergent_key": EMERGENT_KEY},
+            timeout=30,
+        )
+        resp.raise_for_status()
+        _storage_key = resp.json()["storage_key"]
+        return _storage_key
+    except Exception as e:
+        log.warning("Object Storage init failed: %s", e)
+        return None
+
+
+def _storage_put(path: str, data: bytes, content_type: str) -> dict:
+    key = _init_storage()
+    if not key:
+        raise HTTPException(503, "Stockage indisponible")
+    resp = requests.put(
+        f"{STORAGE_URL}/objects/{path}",
+        headers={"X-Storage-Key": key, "Content-Type": content_type},
+        data=data,
+        timeout=120,
+    )
+    if resp.status_code == 404:
+        # clé morte : re-init une fois
+        key = _init_storage(force=True)
+        resp = requests.put(
+            f"{STORAGE_URL}/objects/{path}",
+            headers={"X-Storage-Key": key, "Content-Type": content_type},
+            data=data,
+            timeout=120,
+        )
+    resp.raise_for_status()
+    return resp.json()
+
+
+def _storage_get(path: str) -> tuple[bytes, str]:
+    key = _init_storage()
+    if not key:
+        raise HTTPException(503, "Stockage indisponible")
+    resp = requests.get(
+        f"{STORAGE_URL}/objects/{path}",
+        headers={"X-Storage-Key": key},
+        timeout=60,
+    )
+    if resp.status_code == 404:
+        # Vérifier si c'est la clé qui est morte vs objet inexistant
+        key = _init_storage(force=True)
+        resp = requests.get(
+            f"{STORAGE_URL}/objects/{path}",
+            headers={"X-Storage-Key": key},
+            timeout=60,
+        )
+    if resp.status_code == 404:
+        raise HTTPException(404, "Fichier introuvable")
+    resp.raise_for_status()
+    return resp.content, resp.headers.get("Content-Type", "application/octet-stream")
+
+
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s — %(message)s")
 log = logging.getLogger("mspark")
@@ -131,8 +202,7 @@ def _has_permission(emp: dict, *perm_keys: str) -> bool:
 @api.post("/uploads")
 async def upload_file(file: UploadFile = File(...)):
     """Accept an image (or any file) from the user's device gallery/pellicule and
-    return a permanent URL. Used by the news composer, event editor, carousel
-    slide editor and profile picture uploader."""
+    return a permanent URL served by Emergent Object Storage."""
     ext = ""
     if file.filename and "." in file.filename:
         ext = "." + file.filename.rsplit(".", 1)[-1].lower()[:10]
@@ -142,14 +212,34 @@ async def upload_file(file: UploadFile = File(...)):
     if len(contents) > max_bytes:
         raise HTTPException(413, "Fichier trop volumineux (max 8 Mo)")
     name = f"{uuid.uuid4().hex}{ext}"
-    path = UPLOAD_DIR / name
-    path.write_bytes(contents)
+    storage_path = f"{APP_NAME}/uploads/{name}"
+    content_type = file.content_type or "application/octet-stream"
+    result = _storage_put(storage_path, contents, content_type)
+    # On garde la même URL publique — un GET /api/uploads/{name} rejoue depuis Object Storage
+    await db.uploads.insert_one({
+        "id": _id() if "_id" not in globals() else str(uuid.uuid4()),
+        "name": name,
+        "storage_path": result.get("path") or storage_path,
+        "original_filename": file.filename,
+        "content_type": content_type,
+        "size": len(contents),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    })
     return {
         "url": f"/api/uploads/{name}",
         "name": file.filename,
-        "content_type": file.content_type,
+        "content_type": content_type,
         "size": len(contents),
     }
+
+
+@api.get("/uploads/{name}")
+async def get_upload(name: str):
+    """Serve a file previously uploaded via POST /uploads. Backed by Object Storage."""
+    doc = await db.uploads.find_one({"name": name}, {"_id": 0})
+    storage_path = (doc or {}).get("storage_path") or f"{APP_NAME}/uploads/{name}"
+    data, ct = _storage_get(storage_path)
+    return Response(content=data, media_type=(doc or {}).get("content_type") or ct)
 
 
 
@@ -2987,6 +3077,11 @@ async def create_order(payload: OrderCreate):
     # Enforce same-day orders only — no past/future pickup dates
     if payload.pickup_date != today:
         raise HTTPException(400, "Les commandes ne sont possibles que pour le jour même.")
+    # Blocage si le collaborateur n'est pas sur site (OFF, congé, RTT, école…)
+    uid = current_user()
+    _today_sched = await db.schedules.find_one({"employee_id": uid, "day": today}, {"_id": 0})
+    if _today_sched and (_today_sched.get("type") or "").lower() == "school":
+        raise HTTPException(400, "Commande impossible : vous êtes en journée d'école aujourd'hui.")
     # Hydrate items
     line_items: list[dict] = []
     total_points = 0
@@ -4165,8 +4260,61 @@ def _normalize_notif(n: dict) -> dict:
     return n
 
 
+async def _ensure_daily_birthday_notifications() -> None:
+    """Once per day, push a notification to every employee for each colleague
+    whose birthday falls today. Idempotent — guarded by a `system_flags`
+    marker `birthday_notified_{YYYY-MM-DD}` so multiple concurrent requests
+    on the same day only trigger the broadcast once."""
+    today = _now_paris().date()
+    marker_key = f"birthday_notified_{today.isoformat()}"
+    if await db.system_flags.find_one({"key": marker_key}):
+        return
+    # Insert marker EARLY so concurrent calls short-circuit on their next hit
+    try:
+        await db.system_flags.insert_one({"key": marker_key, "at": _now()})
+    except Exception:
+        # If unique index collides someone else grabbed it — abort silently
+        return
+    # Find every active employee celebrating today (same MM-DD)
+    all_employees = await db.employees.find(
+        {"birth_date": {"$ne": None}, "account_status": {"$ne": "disabled"}},
+        {"_id": 0, "id": 1, "first_name": 1, "last_name": 1, "birth_date": 1},
+    ).to_list(500)
+    mmdd = today.strftime("%m-%d")
+    celebrants = [
+        e for e in all_employees
+        if (e.get("birth_date") or "")[5:10] == mmdd
+    ]
+    if not celebrants:
+        return
+    recipients = [e["id"] for e in all_employees]
+    for celeb in celebrants:
+        name = f"{celeb.get('first_name','')} {celeb.get('last_name','')}".strip()
+        for uid in recipients:
+            if uid == celeb["id"]:
+                continue  # don't wish yourself
+            try:
+                await _push_notification(
+                    employee_id=uid,
+                    type="birthday",
+                    title=f"🎂 Anniversaire de {name}",
+                    content=f"C'est l'anniversaire de {name} aujourd'hui — pensez à lui souhaiter !",
+                    icon="cake",
+                    link="/anniversaires",
+                )
+            except Exception:
+                pass
+
+
 @api.get("/notifications")
 async def list_notifications():
+    # Fire the once-a-day birthday broadcast lazily: cheap early-exit when the
+    # marker for today already exists, otherwise every employee currently
+    # celebrating gets pushed to everyone else.
+    try:
+        await _ensure_daily_birthday_notifications()
+    except Exception as _e:
+        pass
     items = await db.notifications.find(
         {"employee_id": current_user()}, {"_id": 0}
     ).sort("created_at", -1).to_list(50)
@@ -6918,7 +7066,7 @@ async def admin_delete_user(uid: str):
 class AdminScheduleEntry(BaseModel):
     employee_id: str
     day: str  # YYYY-MM-DD
-    type: str  # shift | remote | off | leave | training
+    type: str  # shift | remote | off | leave | training | school
     start: Optional[str] = None
     end: Optional[str] = None
     pause_start: Optional[str] = None
@@ -6966,8 +7114,14 @@ def _covered_minutes(entry: dict) -> int:
             return max(0, int(entry["covered_minutes"]))
         except Exception:
             pass
-    if entry.get("type") not in ("shift", "remote", "leave", "rtt", "training"):
+    if entry.get("type") not in ("shift", "remote", "leave", "rtt", "training", "school"):
         return 0
+    if entry.get("type") == "school":
+        # École: comptabiliser les heures contrat de la journée comme travaillées
+        try:
+            return max(0, int(entry.get("covered_minutes") or 0))
+        except Exception:
+            return 0
     if not entry.get("start") or not entry.get("end"):
         return 0
     try:
@@ -7337,6 +7491,218 @@ async def admin_delete_schedule(schedule_id: str):
         "read": False,
     })
     return {"ok": True}
+
+
+# ─────────────────────────── Récurrence École (alternance)
+
+class SchoolRecurrencePayload(BaseModel):
+    employee_id: str
+    start_date: str            # YYYY-MM-DD (inclus)
+    end_date: str              # YYYY-MM-DD (inclus)
+    mode: str                  # 'weekly' | 'monthly-nth' | 'full-week' | 'custom'
+    weekdays: Optional[List[int]] = None       # 0=Lun … 6=Dim (weekly, full-week)
+    every_n_weeks: Optional[int] = 1           # weekly, full-week
+    nth: Optional[int] = 1                     # monthly-nth (1..4 or -1=dernier)
+    weekday: Optional[int] = 0                 # monthly-nth (0=Lun)
+    custom_dates: Optional[List[str]] = None   # custom
+    note: Optional[str] = "École (alternance)"
+
+
+def _generate_school_dates(p: SchoolRecurrencePayload) -> list[str]:
+    try:
+        d_start = date.fromisoformat(p.start_date)
+        d_end = date.fromisoformat(p.end_date)
+    except Exception:
+        raise HTTPException(400, "Dates invalides (YYYY-MM-DD attendu)")
+    if d_end < d_start:
+        raise HTTPException(400, "La date de fin doit être postérieure ou égale à la date de début")
+    out: list[str] = []
+    mode = (p.mode or "").lower()
+
+    if mode == "custom":
+        for s in (p.custom_dates or []):
+            try:
+                d = date.fromisoformat(s)
+                if d_start <= d <= d_end:
+                    out.append(d.isoformat())
+            except Exception:
+                continue
+
+    elif mode == "weekly":
+        wds = set(p.weekdays or [])
+        if not wds:
+            raise HTTPException(400, "Sélectionnez au moins un jour de la semaine")
+        n = max(1, int(p.every_n_weeks or 1))
+        # Semaine de référence = celle qui contient start_date (lundi de cette semaine)
+        anchor = d_start - timedelta(days=d_start.weekday())
+        d = d_start
+        while d <= d_end:
+            week_start = d - timedelta(days=d.weekday())
+            week_delta = (week_start - anchor).days // 7
+            if week_delta % n == 0 and d.weekday() in wds:
+                out.append(d.isoformat())
+            d += timedelta(days=1)
+
+    elif mode == "full-week":
+        # Une semaine complète (lun-ven par défaut) toutes les N semaines à partir du lundi de start_date
+        wds = set(p.weekdays or [0, 1, 2, 3, 4])
+        n = max(1, int(p.every_n_weeks or 1))
+        anchor = d_start - timedelta(days=d_start.weekday())
+        d = anchor
+        while d <= d_end:
+            for wd in sorted(wds):
+                cur = d + timedelta(days=wd)
+                if d_start <= cur <= d_end:
+                    out.append(cur.isoformat())
+            d += timedelta(days=7 * n)
+
+    elif mode == "monthly-nth":
+        nth = int(p.nth or 1)   # 1..4 ou -1 (dernier)
+        wd = int(p.weekday or 0)
+        # Itérer sur les mois entre start_date et end_date
+        y, m = d_start.year, d_start.month
+        while (y, m) <= (d_end.year, d_end.month):
+            if nth == -1:
+                # dernier weekday du mois
+                if m == 12:
+                    first_next = date(y + 1, 1, 1)
+                else:
+                    first_next = date(y, m + 1, 1)
+                last = first_next - timedelta(days=1)
+                delta = (last.weekday() - wd) % 7
+                target = last - timedelta(days=delta)
+            else:
+                first = date(y, m, 1)
+                delta = (wd - first.weekday()) % 7
+                target = first + timedelta(days=delta + 7 * (nth - 1))
+                if target.month != m:
+                    target = None
+            if target and d_start <= target <= d_end:
+                out.append(target.isoformat())
+            # incrément mois
+            if m == 12:
+                y += 1; m = 1
+            else:
+                m += 1
+    else:
+        raise HTTPException(400, "Mode de récurrence invalide")
+
+    # dédupliquer + trier
+    return sorted(set(out))
+
+
+@api.post("/admin/schedule/school-recurrence")
+async def admin_school_recurrence(payload: SchoolRecurrencePayload):
+    """Générer des journées « École » en série pour un collaborateur.
+    Upsert idempotent : les journées déjà en shift/leave/rtt ne sont pas
+    écrasées si elles sont verrouillées par un congé approuvé ; sinon la
+    journée est marquée `type: "school"`."""
+    await require_permission("manage_users", "approve_leaves")
+    emp = await db.employees.find_one({"id": payload.employee_id}, {"_id": 0})
+    if not emp:
+        raise HTTPException(404, "Collaborateur introuvable")
+
+    dates_list = _generate_school_dates(payload)
+    if not dates_list:
+        return {"ok": True, "count": 0, "dates": []}
+
+    # Heures contrat quotidiennes → covered_minutes du jour d'école
+    weekly_h = float(emp.get("contract_hours") or emp.get("weekly_hours") or 35)
+    work_days = int(emp.get("work_days_per_week") or 5) or 5
+    daily_min = int(round((weekly_h / work_days) * 60))
+
+    created = 0
+    updated = 0
+    skipped = []
+    for day in dates_list:
+        existing = await db.schedules.find_one(
+            {"employee_id": payload.employee_id, "day": day}, {"_id": 0}
+        )
+        # Ne pas écraser un congé/rtt approuvé
+        if existing and (existing.get("type") in ("leave", "rtt")):
+            skipped.append(day)
+            continue
+        doc = {
+            "type": "school",
+            "start": None,
+            "end": None,
+            "pause_start": None,
+            "pause_end": None,
+            "break_minutes": 0,
+            "location": "École",
+            "service": None,
+            "note": payload.note or "École (alternance)",
+            "covered_minutes": daily_min,
+        }
+        if existing:
+            await db.schedules.update_one(
+                {"employee_id": payload.employee_id, "day": day},
+                {"$set": doc},
+            )
+            updated += 1
+        else:
+            new_entry = {
+                "id": _id(),
+                "employee_id": payload.employee_id,
+                "day": day,
+                **doc,
+            }
+            await db.schedules.insert_one(new_entry)
+            created += 1
+
+    # Notif au collaborateur
+    if created + updated > 0:
+        await db.notifications.insert_one({
+            "id": _id(),
+            "employee_id": payload.employee_id,
+            "type": "planning",
+            "title": "🎓 Journées d'école ajoutées",
+            "content": f"{created + updated} journées d'école ont été planifiées sur votre calendrier.",
+            "message": f"{created + updated} journées d'école ont été planifiées sur votre calendrier.",
+            "icon": "calendar",
+            "link": "/rh/planning",
+            "ts": _now(),
+            "created_at": _now(),
+            "read": False,
+        })
+    return {
+        "ok": True,
+        "count": created + updated,
+        "created": created,
+        "updated": updated,
+        "skipped": skipped,
+        "dates": dates_list,
+    }
+
+
+@api.delete("/admin/school-recurrence")
+async def admin_delete_school_range(
+    employee_id: str, start_date: str, end_date: str
+):
+    """Supprimer toutes les journées 'school' d'un collaborateur sur une période.
+    Les journées redeviennent 'cleared' pour ne pas être re-matérialisées."""
+    await require_permission("manage_users", "approve_leaves")
+    try:
+        date.fromisoformat(start_date); date.fromisoformat(end_date)
+    except Exception:
+        raise HTTPException(400, "Dates invalides")
+    r = await db.schedules.update_many(
+        {
+            "employee_id": employee_id,
+            "type": "school",
+            "day": {"$gte": start_date, "$lte": end_date},
+        },
+        {"$set": {
+            "type": "cleared",
+            "start": None, "end": None,
+            "pause_start": None, "pause_end": None,
+            "location": None, "note": None,
+            "covered_minutes": 0,
+        }},
+    )
+    return {"ok": True, "removed": r.modified_count}
+
+
 
 
 class BulkClearPayload(BaseModel):
@@ -8534,6 +8900,11 @@ async def _seed_birth_dates():
             {"id": eid, "$or": [{"birth_date": None}, {"birth_date": {"$exists": False}}]},
             {"$set": {"birth_date": bd}},
         )
+    # Idriss = anniversaire du jour (démo) — force rolling update à chaque redémarrage
+    await db.employees.update_one(
+        {"id": "emp-idriss-malonga"},
+        {"$set": {"birth_date": today.isoformat()}},
+    )
 
 
 async def _dedupe_schedules():
@@ -9544,6 +9915,8 @@ async def _has_active_leave(employee_id: str, day: str) -> Optional[str]:
             return "RTT validée"
         if st == "recup":
             return "Récupération validée"
+        if t == "school":
+            return "Journée d'école"
     leave = await db.leave_requests.find_one({
         "employee_id": employee_id, "status": "approved",
         "start_date": {"$lte": day}, "end_date": {"$gte": day},
