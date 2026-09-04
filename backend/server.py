@@ -5976,10 +5976,14 @@ async def corporate_broadcast(payload: CorporateBroadcast):
         targeted = [e for e in active if _user_matches_audience(e, payload.audience_statuses)]
     else:
         targeted = active
-    # Never send to self as recipient — the sender already has the thread on
-    # the service side and would just spam themselves.
+    # Broadcast reaches every targeted employee — including the sender
+    # themselves and other service staff — as long as they match the audience
+    # filter. Each recipient gets the message in their PERSONAL
+    # `corp-{key}-{recipient}` thread (their own inbox row). The sender then
+    # sees the copy addressed to them on the "personal" side and every other
+    # copy on the "service" side.
     service_staff = set(await _corporate_members(key))
-    recipients = [e for e in targeted if e["id"] != sender_id and e["id"] not in service_staff]
+    recipients = targeted
     now = _now()
     for e in recipients:
         cid = _corporate_channel_id(key, e["id"])
