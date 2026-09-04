@@ -112,14 +112,22 @@ export default function Dashboard() {
           </div>
           <div className="flex-1 min-w-0">
             <div className="ms-overline">Prise de poste du jour</div>
-            {data.today_schedule && data.today_schedule.type === "shift" ? (
+            {data.today_schedule && (data.today_schedule.type === "shift" || data.today_schedule.type === "remote") ? (
               <div className="mt-1 text-sm text-[#071B34]">
                 <strong className="text-base">
                   {data.today_schedule.start} – {data.today_schedule.end}
                 </strong>
-                <span className="text-[#475569] ml-2 text-xs">
-                  · pause {data.today_schedule.pause_start}–{data.today_schedule.pause_end}
-                </span>
+                {data.today_schedule.type === "remote" && (
+                  <span className="ms-chip bg-[#3BA4FF]/12 text-[#1D70B8] ml-2">Télétravail</span>
+                )}
+                {data.today_schedule.pause_start && data.today_schedule.pause_end && (
+                  <span className="text-[#475569] ml-2 text-xs">
+                    · pause {data.today_schedule.pause_start}–{data.today_schedule.pause_end}
+                  </span>
+                )}
+                {data.today_schedule.service && (
+                  <div className="text-xs text-[#475569] mt-0.5">{data.today_schedule.service}</div>
+                )}
               </div>
             ) : data.today_schedule && data.today_schedule.type === "off" ? (
               <div className="mt-1 inline-flex items-center gap-2 text-base font-bold text-[#475569]">
@@ -131,6 +139,10 @@ export default function Dashboard() {
             ) : data.today_schedule && data.today_schedule.type === "training" ? (
               <div className="mt-1 text-sm text-[#B45309]">
                 <strong>Formation</strong> · {data.today_schedule.start} – {data.today_schedule.end}
+              </div>
+            ) : data.today_schedule && data.today_schedule.type === "school" ? (
+              <div className="mt-1 text-sm text-[#8B5CF6]">
+                <strong>Jour école</strong>{data.today_schedule.start ? ` · ${data.today_schedule.start} – ${data.today_schedule.end}` : ""}
               </div>
             ) : (
               <div className="mt-1 text-sm text-[#475569]">Aucun planning aujourd'hui</div>

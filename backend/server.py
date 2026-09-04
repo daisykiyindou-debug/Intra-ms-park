@@ -1637,6 +1637,9 @@ async def _is_user_absent_today(uid: str) -> tuple[bool, str]:
     """Return (is_absent, reason) for a given employee based on:
     - manual toggle covering today (highest priority)
     - approved leave / OFF day from their planning
+    Materializes the schedule for today from `weekly_pattern` when missing so
+    the live planning (including admin edits made a second ago) is always the
+    source of truth.
     """
     emp = await db.employees.find_one({"id": uid}, {"_id": 0})
     if not emp:
@@ -1660,9 +1663,18 @@ async def _is_user_absent_today(uid: str) -> tuple[bool, str]:
         }, {"_id": 0})
         if leave:
             return True, "leave"
-        # OFF day: no work shift scheduled for today
+        # Materialize today's schedule from weekly_pattern if missing so the
+        # OFF-day check reflects the CURRENT planning, not a stale absence.
+        today_d = date.fromisoformat(today)
+        try:
+            await _ensure_range(uid, today_d, today_d)
+        except Exception:
+            pass
+        # OFF day: no work / remote shift scheduled for today
         sched = await db.schedules.find_one(
-            {"employee_id": uid, "day": today, "type": "shift"}, {"_id": 0}
+            {"employee_id": uid, "day": today,
+             "type": {"$in": ["shift", "remote"]}},
+            {"_id": 0},
         )
         if not sched:
             return True, "off"
@@ -1673,13 +1685,29 @@ async def _is_user_absent_today(uid: str) -> tuple[bool, str]:
 @api.get("/dashboard")
 async def dashboard():
     today = _now_paris().date().isoformat()
-    emp = await db.employees.find_one({"id": current_user()}, {"_id": 0})
+    uid = current_user()
+    # Ensure today ± 7d are materialized from `weekly_pattern` so the
+    # dashboard "Prise de poste du jour" ALWAYS matches "Mon planning" —
+    # single source of truth, live-synced with admin edits.
+    today_d = date.fromisoformat(today)
+    try:
+        await _ensure_range(uid, today_d - timedelta(days=1), today_d + timedelta(days=7))
+    except Exception:
+        pass
+    emp = await db.employees.find_one({"id": uid}, {"_id": 0})
     today_schedule = await db.schedules.find_one(
-        {"employee_id": current_user(), "day": today}, {"_id": 0}
+        {"employee_id": uid, "day": today}, {"_id": 0}
     )
     # Use the same intelligent live badging as `/badging` so the Dashboard
     # card and the Badge page display exactly the same 4 timestamps.
-    today_badge = _compute_today_badging(today_schedule, current_user()) if today_schedule else None
+    # Priority: real badging entry from `db.badging` (source of truth for the
+    # Badge page) > simulated live badging from the shift.
+    real_badge = await db.badging.find_one(
+        {"employee_id": uid, "day": today}, {"_id": 0}
+    )
+    today_badge = real_badge or (
+        _compute_today_badging(today_schedule, uid) if today_schedule else None
+    )
 
     # Compute live status
     status = "off"  # off | service | pause | end | hors_site
