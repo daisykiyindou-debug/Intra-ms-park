@@ -282,13 +282,16 @@ export default function Messagerie() {
         }
         const other = otherId ? findEmployee(otherId) : null;
         const isOfficial = c.is_official || (typeof c.id === "string" && c.id.startsWith("rh-"));
+        // Compute display metadata for BOTH sides:
+        //  - Staff perspective (service view): each thread reads as a
+        //    conversation with the initiator, including the viewer themselves.
+        //  - Employee perspective (personal view): the viewer's own thread
+        //    keeps the service label ("Communication / Canal service") so
+        //    they immediately know it's THEIR outgoing conversation to the
+        //    service.
         let displayName, subtitle, avatar, kind;
+        let personalDisplayName = null, personalAvatar = null, personalSubtitle = null;
         if (isCorp && viewerActsAsStaff) {
-          // Service staff view — the thread is labelled with the initiator's
-          // identity (an employee writing to the service). When the initiator
-          // IS the viewer themselves, treat them like any other employee and
-          // display THEIR OWN name (not the service name) so the row and the
-          // header read exactly like a conversation with that person.
           const initiator = corpInitiatorId === me?.id ? me : other;
           displayName = initiator
             ? `${initiator.first_name} ${initiator.last_name}`
@@ -296,6 +299,14 @@ export default function Messagerie() {
           subtitle = initiator?.role || "Message reçu — Service";
           avatar = initiator?.avatar || null;
           kind = "service_thread";
+          // When the viewer is also the initiator, prepare a personal-view
+          // variant so the sidebar row / header switch back to the service
+          // label in "Ma messagerie".
+          if (corpInitiatorId === me?.id) {
+            personalDisplayName = c.name || "Service";
+            personalSubtitle = "Canal service";
+            personalAvatar = null;
+          }
         } else if (isCorp) {
           // Employee side (including self-initiated by service staff) —
           // show the service identity
@@ -336,6 +347,9 @@ export default function Messagerie() {
           _is_service_thread:
             (isCorp && viewerIsServiceStaff) || c.is_service_inbox === true,
           _is_own_corp_thread: isCorp && corpInitiatorId === me?.id,
+          _personal_display_name: personalDisplayName,
+          _personal_subtitle: personalSubtitle,
+          _personal_avatar: personalAvatar,
           _kind: kind,
           _is_birthday: !isOfficial && isBirthdayToday(other),
         };
@@ -356,6 +370,17 @@ export default function Messagerie() {
     }).catch(() => {});
   }, []);
   const serviceAccess = me?.service_channels_access || [];
+  // Choose the label variant depending on the active mailbox view:
+  // - "Ma messagerie" (personal): if the row has a personal alias
+  //   (their own corp thread), fall back to the service-side label so it
+  //   reads "Communication / Canal service" instead of the viewer's own name.
+  // - Service canal view: always use the initiator-based label.
+  const nameOf = (c) => (mailboxMode === "personal" && c?._personal_display_name) || c?._display_name;
+  const subtitleOf = (c) => (mailboxMode === "personal" && c?._personal_subtitle) || c?._subtitle;
+  const avatarOf = (c) => {
+    if (mailboxMode === "personal" && c?._is_own_corp_thread) return null;
+    return c?._avatar || null;
+  };
   const scopedConversations = useMemo(() => {
     if (mailboxMode === "personal") {
       // Personal mailbox = every conversation EXCEPT service threads for
@@ -1045,24 +1070,24 @@ export default function Messagerie() {
                 {!selectMode && active === c.id && (
                   <span className="absolute left-0 top-2 bottom-2 w-1 rounded-r-full bg-[#3BA4FF]" />
                 )}
-                {c._avatar ? (
-                  <img src={c._avatar} alt="" className="h-11 w-11 rounded-full object-cover shrink-0" />
+                {avatarOf(c) ? (
+                  <img src={avatarOf(c)} alt="" className="h-11 w-11 rounded-full object-cover shrink-0" />
                 ) : c._kind === "group" || c._kind === "team" ? (
                   <div className="h-11 w-11 rounded-full bg-[#EEF2FF] text-[#4338CA] flex items-center justify-center shrink-0">
                     <Users className="h-5 w-5" />
                   </div>
                 ) : (
                   <div className="h-11 w-11 rounded-full bg-[#3BA4FF]/15 text-[#1D70B8] flex items-center justify-center font-bold shrink-0">
-                    {initials(c._display_name)}
+                    {initials(nameOf(c))}
                   </div>
                 )}
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between gap-2">
                     <div className={`text-sm truncate inline-flex items-center gap-1.5 ${c.unread_count > 0 ? "text-[#071B34] font-extrabold" : `font-semibold ${active === c.id ? "text-[#0B2545]" : "text-[#334155]"}`}`}>
-                      {c._display_name}
+                      {nameOf(c)}
                       {c._is_birthday && (
                         <span
-                          title={`Anniversaire de ${c._display_name} aujourd'hui !`}
+                          title={`Anniversaire de ${nameOf(c)} aujourd'hui !`}
                           className="inline-flex items-center justify-center h-4 w-4 rounded-full bg-gradient-to-br from-[#F0ABFC] to-[#A78BFA] text-white"
                         >
                           <Cake className="h-2.5 w-2.5" />
@@ -1075,7 +1100,7 @@ export default function Messagerie() {
                   </div>
                   <div className="mt-0.5 flex items-center justify-between gap-2">
                     <div className={`text-xs truncate ${c.unread_count > 0 ? "text-[#071B34] font-semibold" : "text-[#94A3B8]"}`}>
-                      {c.last_message_preview || (c._subtitle || "Nouveau contact")}
+                      {c.last_message_preview || (subtitleOf(c) || "Nouveau contact")}
                     </div>
                     {c.unread_count > 0 && (
                       <span
@@ -1158,20 +1183,17 @@ export default function Messagerie() {
                 >
                   <ArrowLeft className="h-4 w-4" />
                 </button>
-                {currentDisplay._avatar ? (
+                {avatarOf(currentDisplay) ? (
                   <div className="relative">
-                    <img src={currentDisplay._avatar} alt="" className="h-11 w-11 rounded-full object-cover" />
-                    {currentDisplay._kind === "dm" && currentDisplay._other?.is_online && (
-                      <span
-                        data-testid="msg-header-online-dot"
-                        className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full bg-[#10B981] ring-2 ring-white"
-                      />
+                    <img src={avatarOf(currentDisplay)} alt="" className="h-11 w-11 rounded-full object-cover" />
+                    {currentDisplay._other?.is_online && (
+                      <span data-testid="msg-header-online-dot" className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full bg-[#10B981] ring-2 ring-white" />
                     )}
                   </div>
                 ) : currentDisplay._kind === "dm" ? (
                   <div className="relative">
                     <div className="h-11 w-11 rounded-full bg-[#3BA4FF]/15 text-[#1D70B8] flex items-center justify-center font-bold">
-                      {initials(currentDisplay._display_name)}
+                      {initials(nameOf(currentDisplay))}
                     </div>
                     {currentDisplay._other?.is_online && (
                       <span
@@ -1188,10 +1210,10 @@ export default function Messagerie() {
                 <div className="flex-1 min-w-0 cursor-pointer" onClick={() => setShowMembers(true)} data-testid="msg-header-open-members">
                   <div className="flex items-center gap-2">
                     <h2 className="text-base font-bold text-[#071B34] truncate inline-flex items-center gap-1.5">
-                      {currentDisplay._display_name}
+                      {nameOf(currentDisplay)}
                       {currentDisplay._is_birthday && (
                         <span
-                          title={`Anniversaire de ${currentDisplay._display_name} aujourd'hui !`}
+                          title={`Anniversaire de ${nameOf(currentDisplay)} aujourd'hui !`}
                           className="inline-flex items-center justify-center h-5 w-5 rounded-full bg-gradient-to-br from-[#F0ABFC] to-[#A78BFA] text-white shadow-sm animate-pulse"
                           data-testid={`msg-header-cake-${currentDisplay.id}`}
                         >
