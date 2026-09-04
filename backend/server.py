@@ -3490,10 +3490,70 @@ async def add_comment(post_id: str, payload: CommentCreate):
         "author_id": current_user(),
         "content": payload.content,
         "created_at": _now(),
+        "likes": [],
         "replies": [],
     }
-    await db.posts.update_one({"id": post_id}, {"$push": {"comments": comment}})
+    if payload.parent_id:
+        # Reply to an existing comment — push into the parent's replies array
+        # We use array filters to target the correct comment in place.
+        r = await db.posts.update_one(
+            {"id": post_id, "comments.id": payload.parent_id},
+            {"$push": {"comments.$.replies": comment}},
+        )
+        if r.matched_count == 0:
+            raise HTTPException(404, "Commentaire parent introuvable")
+        # Notify parent comment author (if not self)
+        parent = next((c for c in p.get("comments") or [] if c.get("id") == payload.parent_id), None)
+        if parent and parent.get("author_id") and parent["author_id"] != current_user():
+            await _push_notification(
+                employee_id=parent["author_id"],
+                type="post",
+                title="💬 Nouvelle réponse à votre commentaire",
+                content=(payload.content or "")[:140],
+                icon="message-circle",
+                link=f"/actualites/{post_id}",
+            )
+    else:
+        await db.posts.update_one({"id": post_id}, {"$push": {"comments": comment}})
     return comment
+
+
+@api.post("/posts/{post_id}/comments/{comment_id}/like")
+async def toggle_comment_like(post_id: str, comment_id: str):
+    """Toggle like sur un commentaire ou une réponse. Cherche d'abord dans
+    `comments`, puis dans `comments.replies` si non trouvé."""
+    p = await db.posts.find_one({"id": post_id}, {"_id": 0})
+    if not p:
+        raise HTTPException(404, "Post not found")
+    uid = current_user()
+    comments = p.get("comments") or []
+    found = False
+    for c in comments:
+        if c.get("id") == comment_id:
+            likes = set(c.get("likes") or [])
+            if uid in likes:
+                likes.discard(uid)
+            else:
+                likes.add(uid)
+            c["likes"] = list(likes)
+            found = True
+            break
+        for r in c.get("replies") or []:
+            if r.get("id") == comment_id:
+                likes = set(r.get("likes") or [])
+                if uid in likes:
+                    likes.discard(uid)
+                else:
+                    likes.add(uid)
+                r["likes"] = list(likes)
+                found = True
+                break
+        if found:
+            break
+    if not found:
+        raise HTTPException(404, "Commentaire introuvable")
+    await db.posts.update_one({"id": post_id}, {"$set": {"comments": comments}})
+    return {"ok": True}
 
 
 # ─── Requests

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import {
   Heart, MessageCircle, Send, Filter, Eye, EyeOff,
   Image as ImageIcon, Paperclip, Link2, Smile, Sparkles, Trash2, X, Pencil,
@@ -74,9 +74,30 @@ export default function Actualites() {
   const [filter, setFilter] = useState("all");
   const [editingPost, setEditingPost] = useState(null);
   const [lightbox, setLightbox] = useState(null); // { images: [url], index: number } | null
+  const [searchParams, setSearchParams] = useSearchParams();
+  const highlightId = searchParams.get("post");
+  const [highlightPulse, setHighlightPulse] = useState(null);
 
   const refresh = () => api.get("/posts").then((r) => setPosts(r.data));
   useLiveData(refresh, ["posts", "news"]);
+
+  // Scroll + surbrillance quand on arrive avec `?post=<id>` (depuis carrousel / notif)
+  useEffect(() => {
+    if (!highlightId || posts.length === 0) return;
+    const el = document.querySelector(`[data-testid="post-${highlightId}"]`);
+    if (el) {
+      // "Éviter la catégorie" — désactiver le filtre si le post n'est pas dedans
+      const target = posts.find((p) => p.id === highlightId);
+      if (target && filter !== "all" && target.category !== filter) {
+        setFilter("all");
+        return;
+      }
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      setHighlightPulse(highlightId);
+      const t = setTimeout(() => setHighlightPulse(null), 2400);
+      return () => clearTimeout(t);
+    }
+  }, [highlightId, posts, filter]);
 
   const like = async (id) => {
     await api.post(`/posts/${id}/like`);
@@ -142,6 +163,8 @@ export default function Actualites() {
             setEditingPost={setEditingPost}
             setLightbox={setLightbox}
             canModerate={canPublishAsMSPark}
+            autoOpenComments={p.id === highlightId}
+            pulseHighlight={p.id === highlightPulse}
           />
         ))}
       </div>
@@ -743,7 +766,7 @@ function ToolBtn({ active, onClick, testid, children }) {
 
 // ────────────────────── Post card
 
-function PostCard({ post, me, onLike, findEmployee, refresh, setEditingPost, setLightbox, canModerate = true }) {
+function PostCard({ post, me, onLike, findEmployee, refresh, setEditingPost, setLightbox, canModerate = true, autoOpenComments = false, pulseHighlight = false }) {
   const authorFromDb = findEmployee(post.author_id);
   const isOfficial = post.posted_as === "official";
   const author = isOfficial
@@ -760,9 +783,15 @@ function PostCard({ post, me, onLike, findEmployee, refresh, setEditingPost, set
         avatar: "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=200",
       };
   const liked = me ? post.likes.includes(me.id) : false;
-  const [showComments, setShowComments] = useState(false);
+  const [showComments, setShowComments] = useState(autoOpenComments);
   const [commentDraft, setCommentDraft] = useState("");
   const [contentExpanded, setContentExpanded] = useState(false);
+  const [replyingTo, setReplyingTo] = useState(null); // parent comment id
+  const [replyDraft, setReplyDraft] = useState("");
+
+  useEffect(() => {
+    if (autoOpenComments) setShowComments(true);
+  }, [autoOpenComments]);
 
   // Heuristic: if the plain-text version is long enough, we display a truncated
   // block with "En voir plus" like Facebook/LinkedIn.
@@ -779,8 +808,24 @@ function PostCard({ post, me, onLike, findEmployee, refresh, setEditingPost, set
     refresh();
   };
 
+  const sendReply = async (parentId) => {
+    if (!replyDraft.trim()) return;
+    await api.post(`/posts/${post.id}/comments`, { content: replyDraft, parent_id: parentId });
+    setReplyDraft("");
+    setReplyingTo(null);
+    refresh();
+  };
+
+  const toggleCommentLike = async (commentId) => {
+    await api.post(`/posts/${post.id}/comments/${commentId}/like`);
+    refresh();
+  };
+
   return (
-    <article className="ms-card overflow-hidden" data-testid={`post-${post.id}`}>
+    <article
+      className={`ms-card overflow-hidden transition-shadow duration-500 ${pulseHighlight ? "ring-4 ring-[#3BA4FF]/60 shadow-2xl" : ""}`}
+      data-testid={`post-${post.id}`}
+    >
       <div className="p-5">
         <div className="flex items-start gap-3">
           <div className="relative shrink-0">
@@ -979,20 +1024,102 @@ function PostCard({ post, me, onLike, findEmployee, refresh, setEditingPost, set
         <div className="px-5 pb-5 space-y-3">
           {post.comments.map((c) => {
             const ca = findEmployee(c.author_id) || { first_name: "?", avatar: "" };
+            const cLikes = c.likes || [];
+            const cLiked = me ? cLikes.includes(me.id) : false;
             return (
-              <div key={c.id} className="flex items-start gap-3">
-                <img src={ca.avatar} alt="" className="h-8 w-8 rounded-full object-cover" />
-                <div className="flex-1 rounded-2xl bg-[#F4F7FA] px-4 py-2">
-                  <div className="text-xs font-semibold text-[#071B34]">
-                    {ca.first_name} {ca.last_name}
+              <div key={c.id} className="space-y-2">
+                <div className="flex items-start gap-3">
+                  <img src={ca.avatar} alt="" className="h-8 w-8 rounded-full object-cover shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <div className="rounded-2xl bg-[#F4F7FA] px-4 py-2">
+                      <div className="text-xs font-semibold text-[#071B34]">
+                        {ca.first_name} {ca.last_name}
+                      </div>
+                      <div className="text-sm text-[#071B34] whitespace-pre-wrap break-words">{c.content}</div>
+                    </div>
+                    <div className="flex items-center gap-3 mt-1 pl-2 text-[11px] font-semibold text-[#475569]">
+                      <button
+                        onClick={() => toggleCommentLike(c.id)}
+                        data-testid={`comment-like-${c.id}`}
+                        className={`inline-flex items-center gap-1 hover:text-[#EF4444] transition-colors ${cLiked ? "text-[#EF4444]" : ""}`}
+                      >
+                        <Heart className={`h-3.5 w-3.5 ${cLiked ? "fill-current" : ""}`} />
+                        {cLikes.length > 0 && <span>{cLikes.length}</span>}
+                        <span>{cLiked ? "Aimé" : "J'aime"}</span>
+                      </button>
+                      <button
+                        onClick={() => { setReplyingTo(replyingTo === c.id ? null : c.id); setReplyDraft(""); }}
+                        data-testid={`comment-reply-${c.id}`}
+                        className="hover:text-[#3BA4FF] transition-colors"
+                      >
+                        Répondre
+                      </button>
+                    </div>
+                    {/* Replies */}
+                    {(c.replies || []).length > 0 && (
+                      <div className="mt-2 space-y-2 pl-3 border-l-2 border-[#071B34]/5">
+                        {c.replies.map((r) => {
+                          const ra = findEmployee(r.author_id) || { first_name: "?", avatar: "" };
+                          const rLikes = r.likes || [];
+                          const rLiked = me ? rLikes.includes(me.id) : false;
+                          return (
+                            <div key={r.id} className="flex items-start gap-2">
+                              <img src={ra.avatar} alt="" className="h-7 w-7 rounded-full object-cover shrink-0" />
+                              <div className="flex-1 min-w-0">
+                                <div className="rounded-2xl bg-[#F4F7FA] px-3.5 py-1.5">
+                                  <div className="text-[11px] font-semibold text-[#071B34]">
+                                    {ra.first_name} {ra.last_name}
+                                  </div>
+                                  <div className="text-sm text-[#071B34] whitespace-pre-wrap break-words">{r.content}</div>
+                                </div>
+                                <div className="mt-0.5 pl-2">
+                                  <button
+                                    onClick={() => toggleCommentLike(r.id)}
+                                    data-testid={`reply-like-${r.id}`}
+                                    className={`inline-flex items-center gap-1 text-[11px] font-semibold hover:text-[#EF4444] transition-colors ${rLiked ? "text-[#EF4444]" : "text-[#475569]"}`}
+                                  >
+                                    <Heart className={`h-3 w-3 ${rLiked ? "fill-current" : ""}`} />
+                                    {rLikes.length > 0 && <span>{rLikes.length}</span>}
+                                    <span>{rLiked ? "Aimé" : "J'aime"}</span>
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                    {/* Reply composer */}
+                    {replyingTo === c.id && me && (
+                      <form
+                        onSubmit={(e) => { e.preventDefault(); sendReply(c.id); }}
+                        className="mt-2 flex items-center gap-2"
+                      >
+                        <img src={me.avatar} alt="" className="h-7 w-7 rounded-full object-cover shrink-0" />
+                        <input
+                          value={replyDraft}
+                          onChange={(e) => setReplyDraft(e.target.value)}
+                          autoFocus
+                          placeholder={`Répondre à ${ca.first_name}…`}
+                          data-testid={`reply-input-${c.id}`}
+                          className="ms-input flex-1 text-sm"
+                        />
+                        <button
+                          type="submit"
+                          data-testid={`reply-send-${c.id}`}
+                          className="flex h-8 w-8 items-center justify-center rounded-xl bg-[#3BA4FF] text-white hover:bg-[#2A8DE0]"
+                        >
+                          <Send className="h-3 w-3" />
+                        </button>
+                      </form>
+                    )}
                   </div>
-                  <div className="text-sm text-[#071B34]">{c.content}</div>
                 </div>
               </div>
             );
           })}
           {me && (
-            <form onSubmit={sendComment} className="flex items-center gap-2">
+            <form onSubmit={sendComment} className="flex items-center gap-2 pt-1">
               <img src={me.avatar} alt="" className="h-8 w-8 rounded-full object-cover" />
               <input
                 value={commentDraft}
