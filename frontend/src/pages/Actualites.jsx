@@ -273,7 +273,14 @@ function AdminComposer({ me, onPublished, canUseOfficial = true }) {
   const [showLinkInput, setShowLinkInput] = useState(false);
   const [showSchedule, setShowSchedule] = useState(false);
   const [publishAt, setPublishAt] = useState(""); // datetime-local value
+  const [documentsLib, setDocumentsLib] = useState([]);
   const textareaRef = useRef(null);
+
+  // Live-sync la liste des documents disponibles (page Documents)
+  useEffect(() => {
+    if (!showAttachments) return;
+    api.get("/documents").then((r) => setDocumentsLib(r.data || []));
+  }, [showAttachments]);
 
   const publish = async () => {
     if (!title.trim()) {
@@ -616,23 +623,47 @@ function AdminComposer({ me, onPublished, canUseOfficial = true }) {
       {/* Attachments library */}
       {showAttachments && (
         <div className="rounded-xl bg-[#F8FAFC] p-3">
-          <div className="text-[10px] uppercase tracking-wider text-[#475569] font-semibold mb-2">
-            Documents ({attachments.length} joint{attachments.length > 1 ? "s" : ""})
+          <div className="flex items-center justify-between mb-2">
+            <div className="text-[10px] uppercase tracking-wider text-[#475569] font-semibold">
+              Documents disponibles ({documentsLib.length}) — {attachments.length} joint{attachments.length > 1 ? "s" : ""}
+            </div>
+            <button
+              type="button"
+              onClick={() => api.get("/documents").then((r) => setDocumentsLib(r.data || []))}
+              className="text-[10px] font-semibold text-[#3BA4FF] hover:underline"
+              data-testid="attachments-refresh"
+            >
+              Rafraîchir
+            </button>
           </div>
-          <div className="space-y-1">
-            {ATTACHMENTS_LIBRARY.map((a, i) => {
-              const sel = attachments.find((x) => x.url === a.url && x.name === a.name);
+          <div className="space-y-1 max-h-64 overflow-y-auto">
+            {documentsLib.length === 0 && (
+              <div className="text-xs text-[#475569] italic px-2 py-3 text-center">
+                Aucun document disponible pour votre profil.
+              </div>
+            )}
+            {documentsLib.map((d) => {
+              const name = d.title || d.name || "Document";
+              const url = d.file_url || d.url || (d.id ? `/documents/${d.id}/download` : "#");
+              const type = (d.file_type || (name.split(".").pop() || "PDF")).toUpperCase().slice(0, 4);
+              const sel = attachments.find((x) => x.url === url && x.name === name);
               return (
                 <button
-                  key={i}
-                  onClick={() => toggleAttachment(a)}
+                  key={d.id}
+                  onClick={() => toggleAttachment({ name, url, type: type.toLowerCase() })}
+                  data-testid={`doc-lib-${d.id}`}
                   className={`w-full flex items-center gap-2 rounded-lg px-3 py-2 text-left transition-colors ${
                     sel ? "bg-[#3BA4FF]/15" : "bg-white hover:bg-[#F4F7FA]"
                   }`}
                 >
                   <FileText className="h-4 w-4 text-[#3BA4FF] shrink-0" />
-                  <div className="flex-1 text-xs font-medium text-[#071B34] truncate">{a.name}</div>
-                  <span className="text-[9px] uppercase font-bold text-[#475569]">{a.type}</span>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-xs font-medium text-[#071B34] truncate">{name}</div>
+                    {d.category && (
+                      <div className="text-[10px] text-[#475569] truncate">{d.category}</div>
+                    )}
+                  </div>
+                  <span className="text-[9px] uppercase font-bold text-[#475569] shrink-0">{type}</span>
                 </button>
               );
             })}

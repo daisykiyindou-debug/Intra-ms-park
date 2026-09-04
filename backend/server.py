@@ -235,29 +235,33 @@ async def upload_file(file: UploadFile = File(...)):
 
 @api.get("/uploads/{name}")
 async def get_upload(name: str):
-    """Serve a file previously uploaded via POST /uploads. Backed by Object Storage.
-    Fallback : lit le legacy disk local pour les uploads antérieurs à la migration."""
+    """Serve a file previously uploaded via POST /uploads.
+    Fast path : legacy disk local (les uploads pré-migration = 230+ fichiers).
+    Object Storage utilisé uniquement pour les nouveaux uploads référencés en base."""
+    # 1) Cherche en base : si présent → forcément un upload post-migration → Object Storage
     doc = await db.uploads.find_one({"name": name}, {"_id": 0})
-    storage_path = (doc or {}).get("storage_path") or f"{APP_NAME}/uploads/{name}"
-    try:
-        data, ct = _storage_get(storage_path)
-        return Response(content=data, media_type=(doc or {}).get("content_type") or ct)
-    except HTTPException as e:
-        if e.status_code != 404:
-            raise
-        # Legacy fallback : essayer le disque local (uploads pré-migration)
-        legacy = Path("/app/backend/uploads") / name
-        if legacy.is_file():
-            ct_guess = "application/octet-stream"
-            ext = name.rsplit(".", 1)[-1].lower() if "." in name else ""
-            ct_map = {
-                "png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg",
-                "gif": "image/gif", "webp": "image/webp", "svg": "image/svg+xml",
-                "pdf": "application/pdf",
-            }
-            ct_guess = ct_map.get(ext, ct_guess)
-            return Response(content=legacy.read_bytes(), media_type=ct_guess)  # noqa: ephemeral-upload-storage — legacy read only
-        raise HTTPException(404, "Fichier introuvable")
+    if doc:
+        try:
+            data, ct = _storage_get(doc.get("storage_path") or f"{APP_NAME}/uploads/{name}")
+            return Response(content=data, media_type=doc.get("content_type") or ct)
+        except HTTPException as e:
+            if e.status_code != 404:
+                raise
+            # Fallthrough vers disque
+    # 2) Fast path disque (legacy) — pas d'appel réseau
+    legacy = Path("/app/backend/uploads") / name
+    if legacy.is_file():
+        ext = name.rsplit(".", 1)[-1].lower() if "." in name else ""
+        ct_map = {
+            "png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg",
+            "gif": "image/gif", "webp": "image/webp", "svg": "image/svg+xml",
+            "pdf": "application/pdf",
+        }
+        return Response(  # noqa: ephemeral-upload-storage — legacy read only
+            content=legacy.read_bytes(),
+            media_type=ct_map.get(ext, "application/octet-stream"),
+        )
+    raise HTTPException(404, "Fichier introuvable")
 
 
 
@@ -469,6 +473,7 @@ class OrderCreate(BaseModel):
     pickup_point: str
     pickup_date: str  # YYYY-MM-DD
     pickup_time: str  # HH:MM
+    dining_mode: Optional[str] = None  # "dine_in" | "takeaway" — obligatoire pour soccer_bar
 
 
 class Order(BaseModel):
@@ -481,6 +486,7 @@ class Order(BaseModel):
     pickup_point: str
     pickup_date: str
     pickup_time: str
+    dining_mode: Optional[str] = None  # "dine_in" | "takeaway"
     qr_code: str
     status: str = "preparing"  # preparing | ready | picked_up | cancelled
     created_at: str
@@ -3132,6 +3138,14 @@ async def create_order(payload: OrderCreate):
         total_points += sub_pts
         total_eur += sub_eur
 
+    # Soccer Bar : dining_mode obligatoire (sur place ou à emporter)
+    dining_mode = (payload.dining_mode or "").lower() if payload.dining_mode else None
+    if pickup_point == "soccer_bar":
+        if dining_mode not in ("dine_in", "takeaway"):
+            raise HTTPException(400, "Choisissez « Sur place » ou « À emporter » pour le Soccer Bar.")
+    else:
+        dining_mode = None  # ignore hors Soccer Bar
+
     # Compute meal points balance
     info = await meal_points_today()
     remaining = info["remaining"]
@@ -3157,6 +3171,7 @@ async def create_order(payload: OrderCreate):
         "pickup_point": pickup_point,
         "pickup_date": payload.pickup_date,
         "pickup_time": payload.pickup_time,
+        "dining_mode": dining_mode,
         "qr_code": f"MSPARK-ORDER-{order_id[:8].upper()}",
         "status": "preparing",
         "created_at": _now(),

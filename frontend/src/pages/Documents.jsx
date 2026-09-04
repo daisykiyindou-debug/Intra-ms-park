@@ -1,5 +1,5 @@
 import { useMemo, useState, useEffect, useRef } from "react";
-import { FileText, Download, Eye, Search, X, Receipt, Star, Upload, Plus, Edit3, Trash2 } from "lucide-react";
+import { FileText, Download, Eye, Search, X, Receipt, Star, Upload, Plus, Edit3, Trash2, Link2 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { api, formatDateFr } from "@/lib/api";
@@ -257,6 +257,25 @@ function DocCard({ d, isFav, onFav, onPreview, isAdmin, onEdit, onDelete }) {
           )}
           <button onClick={onFav} className={`h-8 w-8 rounded-lg ${isFav ? "text-[#F59E0B]" : "text-[#94A3B8]"} hover:bg-[#F4F7FA]`}>
             <Star className={`h-4 w-4 ${isFav ? "fill-[#F59E0B]" : ""}`} />
+          </button>
+          <button
+            onClick={() => {
+              const path = d.kind === "rich" ? d.link
+                : d.raw?.is_payslip
+                  ? `/documents/payslip/${d.raw.target_employee_id}/${d.raw.payslip_year}/${d.raw.payslip_month}`
+                  : d.url;
+              if (!path) return;
+              const full = /^https?:\/\//i.test(path) ? path : `${window.location.origin}${path.startsWith("/") ? path : "/" + path}`;
+              navigator.clipboard.writeText(full).then(
+                () => toast.success("Lien copié dans le presse-papier"),
+                () => toast.error("Impossible de copier le lien")
+              );
+            }}
+            data-testid={`doc-copy-link-${d.id}`}
+            title="Copier le lien de partage"
+            className="h-8 w-8 rounded-lg text-[#475569] hover:bg-[#3BA4FF]/10 hover:text-[#3BA4FF] inline-flex items-center justify-center"
+          >
+            <Link2 className="h-4 w-4" />
           </button>
         </div>
       </div>

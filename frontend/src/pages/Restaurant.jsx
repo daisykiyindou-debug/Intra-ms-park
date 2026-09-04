@@ -53,6 +53,7 @@ export default function Restaurant() {
   const [cartOpen, setCartOpen] = useState(false);
   const [dayInfo, setDayInfo] = useState(null);
   const [selectedOrder, setSelectedOrder] = useState(null);
+  const [diningMode, setDiningMode] = useState(""); // "dine_in" | "takeaway" — required for soccer_bar
 
   const refreshBalance = () => api.get("/meal-points/today").then((r) => setBalance(r.data));
   const refreshOrders = () => api.get("/orders").then((r) => setOrders(r.data));
@@ -138,15 +139,23 @@ export default function Restaurant() {
       });
       return;
     }
+    if (cartStore === "soccer_bar" && !diningMode) {
+      toast.error("Choisissez votre mode de consommation", {
+        description: "Sur place ou À emporter : c'est obligatoire pour le Soccer Bar.",
+      });
+      return;
+    }
     try {
       const { data } = await api.post("/orders", {
         items: cartItems.map((ci) => ({ product_id: ci.product.id, quantity: ci.qty })),
         pickup_point: cartStore,
         pickup_date: pickupDate,
         pickup_time: pickupTime,
+        dining_mode: cartStore === "soccer_bar" ? diningMode : null,
       });
       setOrderConfirm(data);
       setCart({});
+      setDiningMode("");
       setCartOpen(false);
       await refreshBalance();
       await refreshOrders();
@@ -339,6 +348,8 @@ export default function Restaurant() {
         dayInfo={dayInfo}
         updateQty={updateQty}
         placeOrder={placeOrder}
+        diningMode={diningMode}
+        setDiningMode={setDiningMode}
       />
 
       {/* Order confirmation modal */}
@@ -373,6 +384,7 @@ function CartModal({
   open, onClose, cartItems, cartStore, balance, pointsUsable, pointsUsed, pointsToPayEur,
   totalPoints, totalEur, pickupTime, setPickupTime,
   minPickupTime, timeTooSoon, canOrder, dayInfo, updateQty, placeOrder,
+  diningMode, setDiningMode,
 }) {
   if (!open) return null;
 
@@ -509,6 +521,47 @@ function CartModal({
             </div>
           )}
 
+          {cartStore === "soccer_bar" && (
+            <div data-testid="dining-mode-picker">
+              <div className="text-[10px] uppercase tracking-wider font-semibold text-[#475569] mb-1.5">
+                Mode de consommation <span className="text-[#EF4444]">*</span>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setDiningMode("dine_in")}
+                  data-testid="dining-mode-dine_in"
+                  className={`flex flex-col items-center justify-center gap-1 rounded-xl px-3 py-3 text-xs font-bold transition-all ${
+                    diningMode === "dine_in"
+                      ? "bg-[#3BA4FF] text-white ring-2 ring-[#3BA4FF]/40"
+                      : "bg-[#F4F7FA] text-[#475569] hover:bg-[#3BA4FF]/10"
+                  }`}
+                >
+                  <span className="text-lg">🍽️</span>
+                  Sur place
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDiningMode("takeaway")}
+                  data-testid="dining-mode-takeaway"
+                  className={`flex flex-col items-center justify-center gap-1 rounded-xl px-3 py-3 text-xs font-bold transition-all ${
+                    diningMode === "takeaway"
+                      ? "bg-[#3BA4FF] text-white ring-2 ring-[#3BA4FF]/40"
+                      : "bg-[#F4F7FA] text-[#475569] hover:bg-[#3BA4FF]/10"
+                  }`}
+                >
+                  <span className="text-lg">🛍️</span>
+                  À emporter
+                </button>
+              </div>
+              {!diningMode && (
+                <div className="mt-1.5 text-[10px] text-[#B45309] font-semibold">
+                  ⚠ Choisissez un mode avant de valider votre commande.
+                </div>
+              )}
+            </div>
+          )}
+
           <div className="rounded-xl bg-[#F4F7FA] p-3 space-y-1 text-sm">
             <Row label="Total commande" value={`${totalPoints} pts (${totalEur.toFixed(2)} €)`} />
             <Row
@@ -523,12 +576,12 @@ function CartModal({
 
           <button
             onClick={placeOrder}
-            disabled={cartItems.length === 0 || !canOrder || timeTooSoon}
+            disabled={cartItems.length === 0 || !canOrder || timeTooSoon || (cartStore === "soccer_bar" && !diningMode)}
             data-testid="place-order"
             className="ms-btn-primary w-full disabled:opacity-40 disabled:cursor-not-allowed"
           >
             <CheckCircle2 className="h-4 w-4" />
-            {!canOrder ? "Indisponible (jour OFF)" : timeTooSoon ? "Heure trop tôt" : "Valider la commande"}
+            {!canOrder ? "Indisponible (jour OFF)" : timeTooSoon ? "Heure trop tôt" : (cartStore === "soccer_bar" && !diningMode) ? "Choisir sur place / à emporter" : "Valider la commande"}
           </button>
         </div>
       </div>
@@ -626,6 +679,20 @@ function OrderQRModal({ order, onClose, onPickup, onCancel, onSeeOrders, isDetai
           <Mini label="Heure">{order.pickup_time}</Mini>
           <Mini label="Lieu">{STORE_LABEL[order.pickup_point] || order.pickup_point}</Mini>
         </div>
+
+        {order.dining_mode && (
+          <div
+            data-testid="dining-mode-badge"
+            className={`mt-3 rounded-xl px-3 py-2.5 text-sm font-bold flex items-center gap-2 ${
+              order.dining_mode === "dine_in"
+                ? "bg-[#3BA4FF]/12 text-[#1D70B8]"
+                : "bg-[#F59E0B]/15 text-[#B45309]"
+            }`}
+          >
+            <span className="text-lg">{order.dining_mode === "dine_in" ? "🍽️" : "🛍️"}</span>
+            {order.dining_mode === "dine_in" ? "Sur place — Espace Soccer Bar" : "À emporter — Emballage transport"}
+          </div>
+        )}
 
         <div className="mt-4 rounded-xl bg-[#F4F7FA] p-3 text-left space-y-1">
           {order.items.map((it, i) => (
