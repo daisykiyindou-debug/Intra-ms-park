@@ -4924,6 +4924,44 @@ async def list_events():
             visible.append(e); continue
         if current_user() in emp_ids:
             visible.append(e); continue
+
+    # ─── Merge in personal meeting reservations from Salles de réunion so
+    # the agenda shows every meeting the user organized OR was invited to.
+    # This keeps the two features (Salles / Agenda) in sync without
+    # duplicating the data.
+    uid = current_user()
+    reservations = await db.room_reservations.find(
+        {"$or": [{"organizer_id": uid}, {"participants_ids": uid}],
+         "status": {"$ne": "cancelled"}},
+        {"_id": 0},
+    ).to_list(500)
+    if reservations:
+        # Preload room names for the location line
+        room_ids = list({r["room_id"] for r in reservations})
+        rooms = await db.meeting_rooms.find(
+            {"id": {"$in": room_ids}}, {"_id": 0}
+        ).to_list(200)
+        room_by_id = {r["id"]: r for r in rooms}
+        for r in reservations:
+            try:
+                s = _parse_iso(r["start_ts"]).astimezone(PARIS_TZ)
+                e = _parse_iso(r["end_ts"]).astimezone(PARIS_TZ)
+            except Exception:
+                continue
+            room = room_by_id.get(r.get("room_id")) or {}
+            visible.append({
+                "id": f"resv-{r['id']}",
+                "title": r.get("title") or "Réunion",
+                "description": r.get("description") or "",
+                "date": s.date().isoformat(),
+                "start_time": s.strftime("%H:%M"),
+                "end_time": e.strftime("%H:%M"),
+                "location": room.get("name") or "Salle de réunion",
+                "kind": "meeting",
+                "meeting_type": r.get("meeting_type"),
+                "reservation_id": r["id"],
+                "organizer_id": r.get("organizer_id"),
+            })
     return visible
 
 

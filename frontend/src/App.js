@@ -5,6 +5,7 @@ import { Toaster } from "@/components/ui/sonner";
 import Layout from "@/components/Layout";
 import WelcomePopup from "@/components/WelcomePopup";
 import OnboardingTour from "@/components/OnboardingTour";
+import TodayEventsPopup from "@/components/TodayEventsPopup";
 import { AppContext } from "@/contexts/AppContext";
 import { api } from "@/lib/api";
 import useLiveData from "@/hooks/useLiveData";
@@ -49,6 +50,7 @@ function ProtectedShell() {
       <Layout />
       <WelcomePopup />
       <OnboardingTour />
+      <TodayEventsPopup />
     </>
   );
 }
