@@ -235,11 +235,29 @@ async def upload_file(file: UploadFile = File(...)):
 
 @api.get("/uploads/{name}")
 async def get_upload(name: str):
-    """Serve a file previously uploaded via POST /uploads. Backed by Object Storage."""
+    """Serve a file previously uploaded via POST /uploads. Backed by Object Storage.
+    Fallback : lit le legacy disk local pour les uploads antérieurs à la migration."""
     doc = await db.uploads.find_one({"name": name}, {"_id": 0})
     storage_path = (doc or {}).get("storage_path") or f"{APP_NAME}/uploads/{name}"
-    data, ct = _storage_get(storage_path)
-    return Response(content=data, media_type=(doc or {}).get("content_type") or ct)
+    try:
+        data, ct = _storage_get(storage_path)
+        return Response(content=data, media_type=(doc or {}).get("content_type") or ct)
+    except HTTPException as e:
+        if e.status_code != 404:
+            raise
+        # Legacy fallback : essayer le disque local (uploads pré-migration)
+        legacy = Path("/app/backend/uploads") / name
+        if legacy.is_file():
+            ct_guess = "application/octet-stream"
+            ext = name.rsplit(".", 1)[-1].lower() if "." in name else ""
+            ct_map = {
+                "png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg",
+                "gif": "image/gif", "webp": "image/webp", "svg": "image/svg+xml",
+                "pdf": "application/pdf",
+            }
+            ct_guess = ct_map.get(ext, ct_guess)
+            return Response(content=legacy.read_bytes(), media_type=ct_guess)  # noqa: ephemeral-upload-storage — legacy read only
+        raise HTTPException(404, "Fichier introuvable")
 
 
 
