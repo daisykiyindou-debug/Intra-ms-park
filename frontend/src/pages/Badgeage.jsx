@@ -717,6 +717,15 @@ function PunchHistorySection() {
                     <span className={`inline-block rounded-full px-2 py-0.5 text-[11px] font-semibold ${STATUS_STYLE[r.status] || "bg-[#F4F7FA] text-[#475569]"}`}>
                       {r.status}
                     </span>
+                    {r.admin_edited && (
+                      <div
+                        className="mt-1 inline-flex items-center gap-1 text-[9px] text-[#1D70B8] font-semibold"
+                        title="Horaire régularisé par un administrateur"
+                        data-testid={`admin-edited-${r.day}`}
+                      >
+                        ✎ Modifié par un administrateur
+                      </div>
+                    )}
                   </td>
                 </tr>
               );

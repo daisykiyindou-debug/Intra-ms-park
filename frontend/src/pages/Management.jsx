@@ -36,6 +36,7 @@ import OvertimeManager from "@/pages/OvertimeManager";
 import { FormationsManager } from "@/pages/Formations";
 import SupportITList from "@/pages/Support";
 import RestaurationManager from "@/pages/RestaurationManager";
+import Pointages from "@/pages/Pointages";
 import PayslipsManager from "@/pages/PayslipsManager";
 import IdeasAdmin from "@/pages/IdeasAdmin";
 import PartnersManager from "@/pages/PartnersManager";
@@ -55,6 +56,7 @@ const subNav = [
   { to: "/management/heures-supp", label: "Heures supp.", icon: FileText },
   { to: "/management/notes-de-frais", label: "Notes de frais", icon: FileText },
   { to: "/management/planning", label: "Plannings", icon: ClipboardList },
+  { to: "/management/pointages", label: "Gestion des pointages", icon: ClipboardList, perms: ["manage_badging", "manage_users", "full_admin"] },
   { to: "/management/documents-editor", label: "Rédiger documents", icon: FileText },
   { to: "/management/restauration", label: "Restauration", icon: UtensilsCrossed },
   { to: "/management/attributions", label: "RTT / CP", icon: Gift },
@@ -85,7 +87,7 @@ export default function ManagementShell() {
     ["publish_news", "edit_news", "manage_carousel", "manage_newsletter", "create_events",
       "edit_events", "manage_documents", "publish_documents", "view_payslips", "create_forms",
       "view_tickets", "reply_tickets", "manage_users", "approve_leaves", "approve_recovery",
-      "view_expenses", "approve_expenses", "export_data", "view_stats", "full_admin", "add_gallery"].includes(p)
+      "view_expenses", "approve_expenses", "export_data", "view_stats", "full_admin", "add_gallery", "manage_badging"].includes(p)
   );
 
   // Block users with neither admin nor communication rights nor granular perms
@@ -117,6 +119,7 @@ export default function ManagementShell() {
         const path = s.to.split("/").pop();
         if (path === "management" || s.end) return has("view_stats");
         if (path === "planning") return has("manage_users", "approve_leaves");
+        if (path === "pointages") return has("manage_badging", "manage_users");
         if (path === "demandes") return has("approve_leaves", "approve_recovery");
         if (path === "attributions") return has("approve_leaves");
         if (path === "notes-de-frais") return has("view_expenses", "approve_expenses");
@@ -184,6 +187,7 @@ export default function ManagementShell() {
       <Routes>
         {(isAdmin || has("view_stats")) && <Route index element={<Overview />} />}
         {(isAdmin || has("manage_users", "approve_leaves")) && <Route path="planning" element={<PlanningManager />} />}
+        {(isAdmin || has("manage_badging", "manage_users")) && <Route path="pointages" element={<Pointages />} />}
         {(isAdmin || has("approve_leaves", "approve_recovery")) && <Route path="demandes" element={<RequestsManager />} />}
         {(isAdmin || has("approve_leaves")) && <Route path="attributions" element={<LeaveGrantManager />} />}
         {(isAdmin || isComm || has("manage_carousel")) && <Route path="carrousel" element={<NewsManager />} />}

@@ -57,6 +57,7 @@ const PERMISSIONS = [
   { k: "view_tickets", l: "Voir les tickets support" },
   { k: "reply_tickets", l: "Répondre aux tickets" },
   { k: "manage_users", l: "Gérer les utilisateurs" },
+  { k: "manage_badging", l: "Gestion des pointages" },
   { k: "approve_leaves", l: "Valider les congés" },
   { k: "approve_recovery", l: "Valider les récupérations" },
   { k: "view_expenses", l: "Voir les notes de frais" },
@@ -87,7 +88,7 @@ const PERMISSION_GROUPS = [
     icon: "briefcase",
     color: "#7C3AED",
     perms: ["view_payslips", "approve_leaves", "approve_recovery",
-            "manage_documents", "manage_users", "view_expenses", "approve_expenses"],
+            "manage_documents", "manage_users", "manage_badging", "view_expenses", "approve_expenses"],
   },
   {
     k: "finance",

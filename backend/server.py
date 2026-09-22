@@ -8718,6 +8718,157 @@ async def admin_accrue_monthly():
     return {"ok": True, "month": month_key, "accrued_count": len(accrued)}
 
 
+
+# ─── Admin — Gestion des pointages (correction des badges d'un employé)
+
+class AdminPunchEditIn(BaseModel):
+    clock_in: Optional[str] = None      # "HH:MM" ou "" pour retirer
+    break_out: Optional[str] = None
+    break_in: Optional[str] = None
+    clock_out: Optional[str] = None
+    reason: Optional[str] = "Oubli de badge"
+    comment: Optional[str] = ""
+
+
+@api.get("/admin/pointages/week")
+async def admin_pointages_week(employee_id: str, week_start: str):
+    """Retourne les 7 jours de la semaine avec agrégation des punches
+    (entrée, pause, retour, sortie), status, type de journée, etc."""
+    await require_permission("manage_badging", "manage_users")
+    emp = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not emp:
+        raise HTTPException(404, "Employé introuvable")
+    try:
+        w_start = date.fromisoformat(week_start)
+    except Exception:
+        raise HTTPException(400, "week_start invalide (YYYY-MM-DD)")
+    rows = []
+    for i in range(7):
+        d = (w_start + timedelta(days=i)).isoformat()
+        p_list = await db.punches.find({"employee_id": employee_id, "day": d}, {"_id": 0}).sort("ts", 1).to_list(50)
+        agg = _aggregate_day(p_list)
+        sched = await db.schedules.find_one({"employee_id": employee_id, "day": d}, {"_id": 0})
+        meta = await _day_status(employee_id, d, sched, agg)
+        rows.append({
+            "day": d,
+            **agg,
+            **meta,
+            "sched_type": (sched or {}).get("type"),
+            "sched_start": (sched or {}).get("start"),
+            "sched_end": (sched or {}).get("end"),
+            "sched_pause_start": (sched or {}).get("pause_start"),
+            "sched_pause_end": (sched or {}).get("pause_end"),
+        })
+    return {"employee": emp, "week_start": week_start, "rows": rows}
+
+
+@api.put("/admin/pointages/{employee_id}/{day}")
+async def admin_edit_pointage(employee_id: str, day: str, payload: AdminPunchEditIn):
+    """Remplace les pointages du jour pour un employé (entrée, pause,
+    retour, sortie). Une notif est envoyée à l'employé et un audit trail est
+    conservé dans `db.punch_audits`."""
+    admin = await require_permission("manage_badging", "manage_users")
+    emp = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not emp:
+        raise HTTPException(404, "Employé introuvable")
+    try:
+        date.fromisoformat(day)
+    except Exception:
+        raise HTTPException(400, "Date invalide (YYYY-MM-DD)")
+
+    def _valid_hm(v: Optional[str]) -> Optional[str]:
+        if v is None or v == "":
+            return None
+        v = v.strip()
+        try:
+            datetime.strptime(v, "%H:%M")
+            return v
+        except Exception:
+            raise HTTPException(400, f"Heure invalide : {v} (HH:MM attendu)")
+
+    ci = _valid_hm(payload.clock_in)
+    bo = _valid_hm(payload.break_out)
+    bi = _valid_hm(payload.break_in)
+    co = _valid_hm(payload.clock_out)
+
+    # Audit avant remplacement
+    prev = await db.punches.find({"employee_id": employee_id, "day": day}, {"_id": 0}).to_list(50)
+    await db.punch_audits.insert_one({
+        "id": _id(),
+        "employee_id": employee_id,
+        "day": day,
+        "admin_id": admin["id"],
+        "admin_name": f"{admin.get('first_name','')} {admin.get('last_name','')}".strip(),
+        "reason": payload.reason or "Modification admin",
+        "comment": payload.comment or "",
+        "previous_punches": prev,
+        "new_values": {"clock_in": ci, "break_out": bo, "break_in": bi, "clock_out": co},
+        "ts": _now(),
+    })
+
+    # Remplacement complet des punches du jour
+    await db.punches.delete_many({"employee_id": employee_id, "day": day})
+
+    def _mk(t: str, hm: str) -> dict:
+        return {
+            "id": _id(),
+            "employee_id": employee_id,
+            "day": day,
+            "type": t,
+            "time": hm,
+            "ts": _now(),
+            "admin_edited": True,
+            "admin_id": admin["id"],
+            "reason": payload.reason or "Modification admin",
+        }
+
+    to_insert = []
+    if ci:
+        to_insert.append(_mk("clock_in", ci))
+    if bo:
+        to_insert.append(_mk("break_out", bo))
+    if bi:
+        to_insert.append(_mk("break_in", bi))
+    if co:
+        to_insert.append(_mk("clock_out", co))
+    if to_insert:
+        await db.punches.insert_many(to_insert)
+
+    # Notif employé
+    pretty_date = date.fromisoformat(day).strftime("%d %B %Y")
+    fr_months = {
+        "January":"janvier","February":"février","March":"mars","April":"avril",
+        "May":"mai","June":"juin","July":"juillet","August":"août",
+        "September":"septembre","October":"octobre","November":"novembre","December":"décembre",
+    }
+    for en, fr in fr_months.items():
+        pretty_date = pretty_date.replace(en, fr)
+    await _push_notification(
+        employee_id=employee_id,
+        type="badging",
+        title="🕐 Votre badgeage a été régularisé",
+        content=f"Votre horaire de badgeage du {pretty_date} a été modifié par un administrateur.",
+        icon="check-circle",
+        link=f"/badgeage?day={day}",
+    )
+
+    # Retourne l'agrégat mis à jour
+    fresh = await db.punches.find({"employee_id": employee_id, "day": day}, {"_id": 0}).sort("ts", 1).to_list(50)
+    agg = _aggregate_day(fresh)
+    return {"ok": True, "day": day, **agg}
+
+
+@api.get("/admin/pointages/{employee_id}/{day}/audit")
+async def admin_pointage_audit(employee_id: str, day: str):
+    """Historique des modifications admin d'un jour."""
+    await require_permission("manage_badging", "manage_users")
+    audits = await db.punch_audits.find(
+        {"employee_id": employee_id, "day": day}, {"_id": 0}
+    ).sort("ts", -1).to_list(50)
+    return audits
+
+
+
 # ─── Auto-badging generation (backend regenerates badging based on planning)
 @api.post("/admin/badging/regenerate/{employee_id}")
 async def admin_regenerate_badging(employee_id: str):
@@ -10218,9 +10369,12 @@ def _aggregate_day(punches: List[dict]) -> dict:
     break_out = None
     break_in = None
     clock_out = None
+    admin_edited = False
     for p in punches:
         t = p.get("type")
         hm = p.get("time")
+        if p.get("admin_edited"):
+            admin_edited = True
         if t == "clock_in" and clock_in is None:
             clock_in = hm
         elif t == "break_out":
@@ -10244,6 +10398,7 @@ def _aggregate_day(punches: List[dict]) -> dict:
         "clock_out": clock_out,
         "worked_minutes": worked,
         "is_closed": bool(clock_out),
+        "admin_edited": admin_edited,
     }
 
 
