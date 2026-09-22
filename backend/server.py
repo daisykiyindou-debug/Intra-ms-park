@@ -9163,18 +9163,6 @@ async def _seed_birth_dates():
             {"id": eid, "$or": [{"birth_date": None}, {"birth_date": {"$exists": False}}]},
             {"$set": {"birth_date": bd}},
         )
-    # Idriss = anniversaire du jour (démo) — force rolling update à chaque redémarrage
-    await db.employees.update_one(
-        {"id": "emp-idriss-malonga"},
-        {"$set": {"birth_date": today.isoformat()}},
-    )
-    # Purge des wishes obsolètes vers Idriss (l'anniversaire de démo étant reshuffled
-    # à chaque redémarrage, on repart d'un état propre — sinon Marcus & co. seraient
-    # marqués "souhaité" à tort dans la page anniversaires).
-    await db.birthday_wishes.delete_many({
-        "to_id": "emp-idriss-malonga",
-        "year": today.year,
-    })
 
 
 async def _dedupe_schedules():
@@ -10276,11 +10264,13 @@ async def _day_status(employee_id: str, day: str, sched: Optional[dict], agg: di
             sched_type = "recup"
         elif t == "training":
             sched_type = "training"
+        elif t == "school":
+            sched_type = "school"
         else:
             sched_type = "shift"
     scheduled_start = None
     scheduled_end = None
-    if sched_type in ("shift", "training"):
+    if sched_type in ("shift", "training", "school"):
         scheduled_start = sched.get("start_time") or sched.get("start")
         scheduled_end = sched.get("end_time") or sched.get("end")
     late_min = 0
@@ -10302,6 +10292,8 @@ async def _day_status(employee_id: str, day: str, sched: Optional[dict], agg: di
         status = "rtt"
     elif sched_type == "recup":
         status = "récup"
+    elif sched_type == "school":
+        status = "école"
     elif not agg["clock_in"]:
         status = "à venir" if not sched or sched_type not in ("shift", "training") else "absent"
     elif not agg["is_closed"]:
@@ -11412,7 +11404,7 @@ async def room_availability(rid: str, date: Optional[str] = None):
     return {"date": day, "reservations": out, "room": room}
 
 
-async def _notify_participants(res: dict, action: str):
+async def _notify_participants(res: dict, action: str, extra_hint: str = ""):
     """Notify participants of a reservation about creation / update / cancellation."""
     organizer = await db.employees.find_one({"id": res.get("organizer_id")}, {"_id": 0})
     org_name = f"{organizer.get('first_name', '')} {organizer.get('last_name', '')}".strip() if organizer else "Un collègue"
@@ -11426,7 +11418,7 @@ async def _notify_participants(res: dict, action: str):
         "cancelled": f"Réunion annulée · {room_name}",
     }
     contents = {
-        "created": f"{org_name} vous a invité(e) à \"{res.get('title')}\" — {when}",
+        "created": f"{org_name} vous a invité(e) à \"{res.get('title')}\" — {when}{extra_hint}",
         "updated": f"{org_name} a modifié \"{res.get('title')}\" — {when}",
         "cancelled": f"{org_name} a annulé \"{res.get('title')}\" — {when}",
     }
@@ -11501,7 +11493,7 @@ async def create_reservation(payload: MeetingReservationIn):
     organizer_id = payload.organizer_id or uid
     series_id = _id() if len(occurrences) > 1 else None
     created: list[dict] = []
-    for os_iso, oe_iso in occurrences:
+    for idx, (os_iso, oe_iso) in enumerate(occurrences):
         res_id = _id()
         doc = {
             "id": res_id,
@@ -11528,8 +11520,16 @@ async def create_reservation(payload: MeetingReservationIn):
         if series_id:
             doc["series_id"] = series_id
             doc["recurrence_frequency"] = freq
+            doc["series_index"] = idx
+            doc["series_total"] = len(occurrences)
         await db.room_reservations.insert_one(doc.copy())
-        await _notify_participants(doc, "created")
+        # Recurrence : n'envoie qu'UNE seule notif de création (sur la 1ʳᵉ occurrence)
+        # avec un contenu qui mentionne le nombre total de séances.
+        if idx == 0:
+            await _notify_participants(
+                doc, "created",
+                extra_hint=(f" (série de {len(occurrences)} séances)" if series_id else ""),
+            )
         created.append(doc)
     if len(created) == 1:
         return created[0]
@@ -11643,7 +11643,7 @@ class RespondIn(BaseModel):
 
 
 @api.post("/reservations/{res_id}/respond")
-async def respond_to_reservation(res_id: str, payload: RespondIn):
+async def respond_to_reservation(res_id: str, payload: RespondIn, apply_to_series: bool = True):
     r = await db.room_reservations.find_one({"id": res_id}, {"_id": 0})
     if not r:
         raise HTTPException(404, "Réservation introuvable")
@@ -11654,57 +11654,76 @@ async def respond_to_reservation(res_id: str, payload: RespondIn):
     if resp not in ("confirmed", "declined"):
         raise HTTPException(400, "Réponse invalide")
 
-    responses = dict(r.get("participant_responses") or {})
-    responses[uid] = resp
-    await db.room_reservations.update_one(
-        {"id": res_id}, {"$set": {"participant_responses": responses}}
-    )
-
-    # Agenda sync: add an event visible only to the current employee if
-    # confirmed, remove any previous personal event if declined.
-    agenda_event_id = f"meeting-{res_id}-{uid}"
-    if resp == "confirmed":
-        room = await db.meeting_rooms.find_one({"id": r["room_id"]}, {"_id": 0}) or {}
-        organizer = await db.employees.find_one({"id": r.get("organizer_id")}, {"_id": 0}) or {}
-        start_dt = _parse_iso(r["start_ts"]).astimezone(PARIS_TZ)
-        end_dt = _parse_iso(r["end_ts"]).astimezone(PARIS_TZ)
-        await db.events.update_one(
-            {"id": agenda_event_id},
-            {"$set": {
-                "id": agenda_event_id,
-                "title": r.get("title") or "Réunion",
-                "date": start_dt.date().isoformat(),
-                "start_time": start_dt.strftime("%H:%M"),
-                "end_time": end_dt.strftime("%H:%M"),
-                "location": f"{room.get('name', 'Salle')} · {room.get('floor') or ''}".strip(" ·"),
-                "summary": r.get("description") or f"Réunion invitée par {organizer.get('first_name', '')} {organizer.get('last_name', '')}".strip(),
-                "type": "meeting",
-                "category": "meeting",
-                "icon": "calendar",
-                "group_targets": ["employee-only"],
-                "employee_targets": [uid],
-                "linked_reservation_id": res_id,
-                "created_at": _now(),
-            }},
-            upsert=True,
-        )
+    # Récurrence : appliquer la réponse à TOUTES les occurrences de la série
+    # (sauf si le front demande explicitement `apply_to_series=false`).
+    series_id = r.get("series_id") if apply_to_series else None
+    if series_id:
+        siblings = await db.room_reservations.find(
+            {"series_id": series_id, "participants_ids": uid}, {"_id": 0}
+        ).to_list(200)
     else:
-        await db.events.delete_one({"id": agenda_event_id})
+        siblings = [r]
 
-    # Notify the organizer of the response (skip if organizer responded)
+    series_count = len(siblings)
+    for sib in siblings:
+        responses = dict(sib.get("participant_responses") or {})
+        responses[uid] = resp
+        await db.room_reservations.update_one(
+            {"id": sib["id"]}, {"$set": {"participant_responses": responses}}
+        )
+        # Agenda sync per occurrence
+        agenda_event_id = f"meeting-{sib['id']}-{uid}"
+        if resp == "confirmed":
+            room = await db.meeting_rooms.find_one({"id": sib["room_id"]}, {"_id": 0}) or {}
+            organizer = await db.employees.find_one({"id": sib.get("organizer_id")}, {"_id": 0}) or {}
+            start_dt = _parse_iso(sib["start_ts"]).astimezone(PARIS_TZ)
+            end_dt = _parse_iso(sib["end_ts"]).astimezone(PARIS_TZ)
+            await db.events.update_one(
+                {"id": agenda_event_id},
+                {"$set": {
+                    "id": agenda_event_id,
+                    "title": sib.get("title") or "Réunion",
+                    "date": start_dt.date().isoformat(),
+                    "start_time": start_dt.strftime("%H:%M"),
+                    "end_time": end_dt.strftime("%H:%M"),
+                    "location": f"{room.get('name', 'Salle')} · {room.get('floor') or ''}".strip(" ·"),
+                    "summary": sib.get("description") or f"Réunion invitée par {organizer.get('first_name', '')} {organizer.get('last_name', '')}".strip(),
+                    "type": "meeting",
+                    "category": "meeting",
+                    "icon": "calendar",
+                    "group_targets": ["employee-only"],
+                    "employee_targets": [uid],
+                    "linked_reservation_id": sib["id"],
+                    "created_at": _now(),
+                }},
+                upsert=True,
+            )
+        else:
+            await db.events.delete_one({"id": agenda_event_id})
+
+    # UNE seule notif à l'organisateur (au lieu de N pour toute la série)
     if uid != r.get("organizer_id"):
         me = await db.employees.find_one({"id": uid}, {"_id": 0}) or {}
         who = f"{me.get('first_name', '')} {me.get('last_name', '')}".strip() or "Un(e) collègue"
         action_label = "a confirmé sa présence" if resp == "confirmed" else "a décliné l'invitation"
+        series_hint = f" (série de {series_count} séances)" if series_count > 1 else ""
         await _push_notification(
             employee_id=r["organizer_id"],
             type="meeting-response",
             title=f"Réponse · {r.get('title')}",
-            content=f"{who} {action_label}.",
+            content=f"{who} {action_label}{series_hint}.",
             icon="calendar",
             link=f"/salles/mes-reservations",
         )
-    return {"ok": True, "response": resp, "participant_responses": responses}
+    # Retour : les responses agrégées du meeting demandé
+    final = await db.room_reservations.find_one({"id": res_id}, {"_id": 0})
+    return {
+        "ok": True,
+        "response": resp,
+        "participant_responses": (final or {}).get("participant_responses") or {},
+        "applied_to_series": bool(series_id),
+        "occurrences_updated": series_count,
+    }
 
 
 # ── Admin — rooms CRUD + view all reservations

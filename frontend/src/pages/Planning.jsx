@@ -11,6 +11,7 @@ const typeStyles = {
   leave: { bg: "#EDE9FE", color: "#7C3AED", label: "Congé" },
   rtt: { bg: "#DBEAFE", color: "#1D70B8", label: "RTT" },
   training: { bg: "#FEF3C7", color: "#B45309", label: "Formation" },
+  school: { bg: "#E0F2FE", color: "#0369A1", label: "École" },
   meeting: { bg: "#FCE7F3", color: "#BE185D", label: "Réunion" },
 };
 
@@ -59,19 +60,22 @@ export default function Planning() {
   const monthMins = useMemo(() => {
     let mins = 0;
     data.forEach((s) => {
-      if ((s.type === "shift" || s.type === "remote") && s.start && s.end) {
+      if ((s.type === "shift" || s.type === "remote" || s.type === "school") && s.start && s.end) {
         const [sh, sm] = s.start.split(":").map(Number);
         const [eh, em] = s.end.split(":").map(Number);
-        mins += eh * 60 + em - sh * 60 - sm - s.break_minutes;
+        mins += eh * 60 + em - sh * 60 - sm - (s.break_minutes || 0);
+      } else if (s.type === "school" && s.covered_minutes) {
+        // Ecole en récurrence sans horaires explicites
+        mins += Number(s.covered_minutes) || 0;
       }
     });
     return mins;
   }, [data]);
 
-  // Find next upcoming shift (site or remote)
+  // Find next upcoming shift (site, remote or school)
   const todayIso = iso(today);
   const nextShift = useMemo(() => {
-    return data.find((s) => s.day >= todayIso && (s.type === "shift" || s.type === "remote"));
+    return data.find((s) => s.day >= todayIso && (s.type === "shift" || s.type === "remote" || s.type === "school"));
   }, [data, todayIso]);
 
   const monthLabel = `${fr.months[month.m].charAt(0).toUpperCase() + fr.months[month.m].slice(1)} ${month.y}`;
@@ -301,23 +305,43 @@ export default function Planning() {
                 <X className="h-4 w-4" />
               </button>
             </div>
-            {(selected.type === "shift" || selected.type === "remote") ? (
+            {(selected.type === "shift" || selected.type === "remote" || selected.type === "school") ? (
               <div className="mt-4 space-y-3">
                 {selected.type === "remote" && (
                   <div className="rounded-xl bg-[#10B981]/10 text-[#065F46] px-3 py-2 text-xs font-semibold">
                     Journée en télétravail
                   </div>
                 )}
-                <Detail icon={Clock} label="Horaires">
-                  <strong>
-                    {selected.start}–{selected.pause_start} / {selected.pause_end}–{selected.end}
-                  </strong>
-                  <br />
-                  Pause {selected.break_minutes}min de {selected.pause_start} à {selected.pause_end}
-                </Detail>
-                <Detail icon={MapPin} label={selected.type === "remote" ? "Lieu (télétravail)" : "Lieu de poste"}>{selected.location}</Detail>
-                <Detail icon={User} label="Manager référent">{selected.manager}</Detail>
-                <Detail icon={MapPin} label="Service">{selected.service}</Detail>
+                {selected.type === "school" && (
+                  <div className="rounded-xl bg-[#E0F2FE] text-[#0369A1] px-3 py-2 text-xs font-semibold">
+                    🎓 Journée d'école — pas de badgeage, heures comptabilisées automatiquement
+                  </div>
+                )}
+                {selected.start && selected.end ? (
+                  <Detail icon={Clock} label="Horaires">
+                    <strong>
+                      {selected.pause_start && selected.pause_end
+                        ? `${selected.start}–${selected.pause_start} / ${selected.pause_end}–${selected.end}`
+                        : `${selected.start} – ${selected.end}`}
+                    </strong>
+                    {selected.pause_start && selected.pause_end && (
+                      <>
+                        <br />
+                        Pause de {selected.pause_start} à {selected.pause_end}
+                      </>
+                    )}
+                  </Detail>
+                ) : selected.type === "school" ? (
+                  <Detail icon={Clock} label="Horaires">Journée complète (contrat)</Detail>
+                ) : null}
+                {selected.location && (
+                  <Detail icon={MapPin} label={
+                    selected.type === "remote" ? "Lieu (télétravail)" :
+                    selected.type === "school" ? "Lieu" : "Lieu de poste"
+                  }>{selected.location}</Detail>
+                )}
+                {selected.manager && <Detail icon={User} label="Manager référent">{selected.manager}</Detail>}
+                {selected.service && <Detail icon={MapPin} label="Service">{selected.service}</Detail>}
               </div>
             ) : (
               <p className="mt-4 text-sm text-[#475569]">{selected.note || "—"}</p>

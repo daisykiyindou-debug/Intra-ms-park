@@ -582,7 +582,7 @@ const STATUS_STYLE = {
   "récup": "bg-[#F59E0B]/15 text-[#B45309]",
 };
 
-const OFF_LIKE = new Set(["off", "rest", "conges", "rtt", "recup"]);
+const OFF_LIKE = new Set(["off", "rest", "conges", "rtt", "recup", "school"]);
 
 function PunchHistorySection() {
   const [rows, setRows] = useState([]);
@@ -694,6 +694,7 @@ function PunchHistorySection() {
               const offLabel = {
                 off: "Jour de repos", rest: "Jour de repos",
                 conges: "Congés validés", rtt: "RTT validée", recup: "Récupération",
+                school: "🎓 Journée d'école",
               }[r.shift_type];
               return (
                 <tr key={r.day} className={`border-t border-[#071B34]/5 ${isOff ? "bg-[#F4F7FA]/60" : ""}`} data-testid={`punch-history-row-${r.day}`}>
