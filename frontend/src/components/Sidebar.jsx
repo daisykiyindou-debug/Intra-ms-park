@@ -80,6 +80,7 @@ const adminNav = [
   { to: "/management/fiches-de-paie", label: "Fiches de paie", icon: FileText, key: "mgmt-payslips", perm: ["view_payslips"] },
   { to: "/management/formations", label: "Formations", icon: GraduationCap, key: "mgmt-formations" },
   { to: "/management/formulaires", label: "Formulaires", icon: ListChecks, key: "mgmt-forms", perm: ["create_forms"] },
+  { to: "/management/pointages", label: "Gestion des pointages", icon: Clock, key: "mgmt-pointages", perm: ["manage_badging", "manage_users"] },
   { to: "/management/heures-supp", label: "Heures supp. & récup.", icon: Clock, key: "mgmt-overtime", perm: ["approve_recovery"] },
   { to: "/newsletters", label: "Newsletters", icon: Mail, key: "mgmt-newsletters", perm: ["manage_newsletter"] },
   { to: "/management/notes-de-frais", label: "Notes de frais", icon: Receipt, key: "mgmt-expenses", perm: ["view_expenses", "approve_expenses"] },
@@ -139,7 +140,8 @@ export default function Sidebar({ open, onClose }) {
     ["publish_news", "edit_news", "manage_carousel", "manage_newsletter", "create_events",
       "edit_events", "manage_documents", "publish_documents", "view_payslips", "create_forms",
       "view_tickets", "reply_tickets", "manage_users", "approve_leaves", "approve_recovery",
-      "view_expenses", "approve_expenses", "export_data", "view_stats", "full_admin", "add_gallery"].includes(p)
+      "view_expenses", "approve_expenses", "export_data", "view_stats", "full_admin", "add_gallery",
+      "manage_badging"].includes(p)
   );
 
   const tagSection = (arr, section) => arr.map((it) => it.divider ? it : ({ ...it, section }));
