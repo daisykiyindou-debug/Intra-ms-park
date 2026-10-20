@@ -214,12 +214,25 @@ async def upload_file(file: UploadFile = File(...)):
     name = f"{uuid.uuid4().hex}{ext}"
     storage_path = f"{APP_NAME}/uploads/{name}"
     content_type = file.content_type or "application/octet-stream"
-    result = _storage_put(storage_path, contents, content_type)
-    # On garde la même URL publique — un GET /api/uploads/{name} rejoue depuis Object Storage
+    # Try Emergent Object Storage first; if the universal key is out of credit
+    # (402), the proxy is unavailable, or any other error, fall back to the
+    # local legacy disk so uploads never break the UX.
+    stored_path: Optional[str] = None
+    try:
+        result = _storage_put(storage_path, contents, content_type)
+        stored_path = result.get("path") or storage_path
+    except Exception as e:
+        log.warning("Object Storage unavailable, falling back to local disk: %s", e)
+        legacy_dir = Path("/app/backend/uploads")
+        legacy_dir.mkdir(parents=True, exist_ok=True)
+        (legacy_dir / name).write_bytes(contents)
+        stored_path = None  # GET route falls through to disk when no storage_path
+    # On garde la même URL publique — un GET /api/uploads/{name} rejoue depuis Object Storage ou disque
     await db.uploads.insert_one({
-        "id": _id() if "_id" not in globals() else str(uuid.uuid4()),
+        "id": str(uuid.uuid4()),
         "name": name,
-        "storage_path": result.get("path") or storage_path,
+        "storage_path": stored_path,
+        "local_disk": stored_path is None,
         "original_filename": file.filename,
         "content_type": content_type,
         "size": len(contents),
@@ -238,16 +251,21 @@ async def get_upload(name: str):
     """Serve a file previously uploaded via POST /uploads.
     Fast path : legacy disk local (les uploads pré-migration = 230+ fichiers).
     Object Storage utilisé uniquement pour les nouveaux uploads référencés en base."""
-    # 1) Cherche en base : si présent → forcément un upload post-migration → Object Storage
+    # 1) Cherche en base : si présent → forcément un upload post-migration → Object Storage (ou disque local en fallback)
     doc = await db.uploads.find_one({"name": name}, {"_id": 0})
     if doc:
-        try:
-            data, ct = _storage_get(doc.get("storage_path") or f"{APP_NAME}/uploads/{name}")
-            return Response(content=data, media_type=doc.get("content_type") or ct)
-        except HTTPException as e:
-            if e.status_code != 404:
-                raise
-            # Fallthrough vers disque
+        sp = doc.get("storage_path")
+        if sp:
+            try:
+                data, ct = _storage_get(sp)
+                return Response(content=data, media_type=doc.get("content_type") or ct)
+            except HTTPException as e:
+                if e.status_code != 404:
+                    raise
+                # Fallthrough vers disque
+            except Exception as e:
+                log.warning("Object Storage GET failed, trying disk: %s", e)
+        # Pas de storage_path (fallback disque lors de l'upload) → disque local
     # 2) Fast path disque (legacy) — pas d'appel réseau
     legacy = Path("/app/backend/uploads") / name
     if legacy.is_file():

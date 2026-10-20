@@ -308,7 +308,8 @@ function EditPunchModal({ employee, row, onClose, onSaved }) {
 
   return (
     <PortalModal onClose={onClose}>
-      <div className="w-full max-w-md bg-white rounded-2xl p-5 shadow-2xl" data-testid="edit-punch-modal">
+      <div onClick={onClose} className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
+        <div onClick={(e) => e.stopPropagation()} className="w-full max-w-md bg-white rounded-2xl p-5 shadow-2xl" data-testid="edit-punch-modal">
         <div className="flex items-start justify-between mb-4">
           <div>
             <div className="text-lg font-bold text-[#071B34]">Modifier le pointage</div>
@@ -379,6 +380,7 @@ function EditPunchModal({ employee, row, onClose, onSaved }) {
             <Save className="h-4 w-4" /> Enregistrer
           </button>
         </div>
+      </div>
       </div>
     </PortalModal>
   );
